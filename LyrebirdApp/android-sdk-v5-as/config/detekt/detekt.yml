@@ -1,0 +1,17 @@
+complexity:
+  active: true
+
+style:
+  active: true
+  MagicNumber:
+    active: false
+  ReturnCount:
+    active: true
+    # Guard clauses (`?: return x`, early-exit `if (...) return`) are idiomatic Kotlin and are
+    # used throughout the control loops and SDK callbacks. Counting them pushes the code toward
+    # nested conditionals and mutable accumulators, which reads worse. Detekt ships this option
+    # for exactly that reason; the limit still applies to genuine mid-function returns.
+    excludeGuardClauses: true
+
+build:
+  maxIssues: 0

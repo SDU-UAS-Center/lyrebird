@@ -1,0 +1,184 @@
+package com.lyrebird.rc.models
+
+import androidx.lifecycle.MutableLiveData
+import com.lyrebird.rc.controller.DroneController
+import dji.sdk.keyvalue.key.RemoteControllerKey
+import dji.sdk.keyvalue.value.flightcontroller.*
+import dji.v5.common.callback.CommonCallbacks
+import dji.v5.et.create
+import dji.v5.et.listen
+import dji.v5.manager.KeyManager
+import dji.v5.manager.aircraft.virtualstick.VirtualStickManager
+import dji.v5.manager.aircraft.virtualstick.VirtualStickState
+import dji.v5.manager.aircraft.virtualstick.VirtualStickStateListener
+
+/**
+ * Class Description
+ *
+ * @author Hoker
+ * @date 2021/6/18
+ *
+ * Copyright (c) 2021, DJI All Rights Reserved.
+ */
+class VirtualStickVM : DJIViewModel() {
+
+    val currentSpeedLevel = MutableLiveData(0.0)
+    var useRcStick = MutableLiveData(false)
+    val currentVirtualStickStateInfo = MutableLiveData(VirtualStickStateInfo())
+
+    val virtualStickAdvancedParam = MutableLiveData(VirtualStickFlightControlParam()).apply {
+        value?.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
+        value?.verticalControlMode = VerticalControlMode.VELOCITY
+        value?.yawControlMode = YawControlMode.ANGULAR_VELOCITY
+        value?.rollPitchControlMode = RollPitchControlMode.ANGLE
+    }
+
+    // RC Stick Value
+    var stickValue = MutableLiveData(RCStickValue(0, 0, 0, 0))
+
+    init {
+        currentSpeedLevel.value = VirtualStickManager.getInstance().speedLevel
+        VirtualStickManager.getInstance().setVirtualStickStateListener(object :
+            VirtualStickStateListener {
+            override fun onVirtualStickStateUpdate(stickState: VirtualStickState) {
+                currentVirtualStickStateInfo.postValue(currentVirtualStickStateInfo.value?.apply {
+                    this.state = stickState
+                })
+            }
+
+            override fun onChangeReasonUpdate(reason: FlightControlAuthorityChangeReason) {
+                currentVirtualStickStateInfo.postValue(currentVirtualStickStateInfo.value?.apply {
+                    this.reason = reason
+                })
+            }
+        })
+    }
+
+    fun enableVirtualStick(callback: CommonCallbacks.CompletionCallback) {
+        VirtualStickManager.getInstance().enableVirtualStick(callback)
+    }
+
+    fun disableVirtualStick(callback: CommonCallbacks.CompletionCallback) {
+        VirtualStickManager.getInstance().disableVirtualStick(callback)
+    }
+
+    fun setSpeedLevel(speedLevel: Double) {
+        VirtualStickManager.getInstance().speedLevel = speedLevel
+        currentSpeedLevel.value = speedLevel
+    }
+
+    fun setLeftPosition(horizontal: Int, vertical: Int) {
+        VirtualStickManager.getInstance().leftStick.horizontalPosition = horizontal
+        VirtualStickManager.getInstance().leftStick.verticalPosition = vertical
+    }
+
+    fun setRightPosition(horizontal: Int, vertical: Int) {
+        VirtualStickManager.getInstance().rightStick.horizontalPosition = horizontal
+        VirtualStickManager.getInstance().rightStick.verticalPosition = vertical
+    }
+
+    fun sendVirtualStickAdvancedParam(param: VirtualStickFlightControlParam) {
+        VirtualStickManager.getInstance().sendVirtualStickAdvancedParam(param)
+    }
+
+    fun disableVirtualStickAdvancedMode() {
+        VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(false)
+    }
+
+    fun enableVirtualStickAdvancedMode() {
+        VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
+    }
+
+    fun listenRCStick() {
+        RemoteControllerKey.KeyStickLeftHorizontal.create().listen(this) {
+            it?.let {
+                stickValue.value?.leftHorizontal = it
+            }
+            tryUpdateVirtualStickByRc()
+        }
+        RemoteControllerKey.KeyStickLeftVertical.create().listen(this) {
+            it?.let {
+                stickValue.value?.leftVertical = it
+            }
+            tryUpdateVirtualStickByRc()
+        }
+        RemoteControllerKey.KeyStickRightHorizontal.create().listen(this) {
+            it?.let {
+                stickValue.value?.rightHorizontal = it
+            }
+            tryUpdateVirtualStickByRc()
+        }
+        RemoteControllerKey.KeyStickRightVertical.create().listen(this) {
+            it?.let {
+                stickValue.value?.rightVertical = it
+            }
+            tryUpdateVirtualStickByRc()
+        }
+    }
+
+    private fun tryUpdateVirtualStickByRc() {
+        stickValue.postValue(stickValue.value)
+
+        // Check if RC stick input exceeds the deadzone — if so, the pilot is taking manual control.
+        // This triggers the manual override latch in DroneController, which:
+        //   - Kills any running PID/control loops
+        //   - Blocks subsequent autonomous HTTP commands
+        //   - Only clears when the user explicitly deactivates it
+        //
+        // IMPORTANT: Only fire when an autonomous control loop is actually active.
+        // Without this guard, any RC stick noise, calibration drift, or spurious SDK callbacks
+        // (e.g. the SDK emitting current stick positions at subscription time, or when the FC
+        // transitions state during takeoff) would latch manual override even while the drone
+        // is on the ground in idle — which is the bug: drones entering manual mode right after
+        // a ground-station takeoff command without the pilot touching anything.
+        //
+        // A DJI-native wayline mission (DroneStatus.MISSION) is excluded from the isAirborne
+        // branch for the same reason: DJI's own wayline engine flies it, not this app's virtual
+        // stick, so raw RC stick telemetry is not a reliable "pilot took over" signal there — it
+        // was latching override from ordinary stick drift while the mission kept flying fine.
+        // A real pilot override during a wayline mission is DJI's own firmware handing control
+        // back, independent of this flag.
+        stickValue.value?.let { sv ->
+            val maxDeflection = maxOf(
+                Math.abs(sv.leftHorizontal),
+                Math.abs(sv.leftVertical),
+                Math.abs(sv.rightHorizontal),
+                Math.abs(sv.rightVertical)
+            )
+            val duringWaylineMission = DroneController.droneStatus == DroneController.DroneStatus.MISSION
+            if (maxDeflection > DroneController.RC_STICK_DEADZONE &&
+                !duringWaylineMission &&
+                (DroneController.isAirborne || DroneController.isAutonomousFlightActive)
+            ) {
+                DroneController.activateManualOverride()
+            }
+        }
+
+        if (useRcStick.value == true) {
+            stickValue.value?.apply {
+                setLeftPosition(leftHorizontal, leftVertical)
+                setRightPosition(rightHorizontal, rightVertical)
+            }
+        }
+    }
+
+    override fun onCleared() {
+        KeyManager.getInstance().cancelListen(this)
+        VirtualStickManager.getInstance().clearAllVirtualStickStateListener()
+    }
+
+    data class VirtualStickStateInfo(
+        var state: VirtualStickState = VirtualStickState(false, FlightControlAuthority.UNKNOWN, false),
+        var reason: FlightControlAuthorityChangeReason = FlightControlAuthorityChangeReason.UNKNOWN
+    )
+
+    data class RCStickValue(
+        var leftHorizontal: Int, var leftVertical:
+        Int, var rightHorizontal: Int, var rightVertical: Int
+    ) {
+        override fun toString(): String {
+            return "leftHorizontal=$leftHorizontal,leftVertical=$leftVertical,\n" +
+                    "rightHorizontal=$rightHorizontal,rightVertical=$rightVertical"
+        }
+    }
+}

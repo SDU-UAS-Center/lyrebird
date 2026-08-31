@@ -1,0 +1,182 @@
+<?xml version="1.0"?>
+<!--
+  Lyrebird's own MAVLink dialect.
+
+  Deliberately one message. Everything Lyrebird does that MAVLink already describes is sent as
+  the standard message or command, and this dialect carries only what genuinely has no portable
+  equivalent: DJI's smart-return budgets, the payload focal lengths, the laser rangefinder's
+  geo-referenced target, and Lyrebird's own authority latch. Keeping the residue in a single
+  streamed message rather than scattering it across the MAV_CMD user range means a ground station
+  that does not know Lyrebird ignores exactly one message id and loses nothing it understood.
+-->
+<mavlink>
+  <include>common.xml</include>
+  <enums>
+    <enum name="LYREBIRD_STATUS_FLAGS" bitmask="true">
+      <description>Boolean state reported in LYREBIRD_STATUS.</description>
+      <entry value="1" name="LYREBIRD_STATUS_FLAG_MANUAL_OVERRIDE">
+        <description>
+          The pilot has taken the sticks and autonomous commands are being refused. Distinct from
+          simply not being in a guided mode: it means a command was interrupted, which the
+          heartbeat's mode flags cannot express.
+        </description>
+      </entry>
+      <entry value="2" name="LYREBIRD_STATUS_FLAG_READY_TO_TAKEOFF">
+        <description>Pre-flight checks pass and a takeoff command would be accepted.</description>
+      </entry>
+      <entry value="4" name="LYREBIRD_STATUS_FLAG_HOME_SET">
+        <description>The aircraft has recorded a home point.</description>
+      </entry>
+      <entry value="8" name="LYREBIRD_STATUS_FLAG_LRF_TARGET_VALID">
+        <description>The rangefinder target fields hold a real geo-referenced point.</description>
+      </entry>
+      <entry value="16" name="LYREBIRD_STATUS_FLAG_WAYPOINT_REACHED">
+        <description>
+          The aircraft is at the waypoint identified by waypoint_seq. Reported as state rather
+          than only as a command acknowledgement, so a ground station that missed the ack can
+          still see where things stand.
+        </description>
+      </entry>
+      <entry value="32" name="LYREBIRD_STATUS_FLAG_YAW_REACHED">
+        <description>The aircraft is on the heading identified by yaw_seq.</description>
+      </entry>
+      <entry value="64" name="LYREBIRD_STATUS_FLAG_ALTITUDE_REACHED">
+        <description>The aircraft is at the altitude identified by altitude_seq.</description>
+      </entry>
+    </enum>
+    <enum name="LYREBIRD_USER_1_SELECTOR">
+      <description>
+        param1 selector on MAV_CMD_USER_1 (31010). Lyrebird uses the standard user-command
+        range for payload operations that have no named MAV_CMD, keeping this dialect's own
+        command ids free; the selector tells the aircraft which operation is meant. A ground
+        station that does not know Lyrebird still sees a well-formed user command.
+      </description>
+      <entry value="1" name="LYREBIRD_USER_1_GIMBAL_RELATIVE">
+        <description>Nudge the gimbal by a delta: param2 pitch, param3 yaw (degrees).</description>
+      </entry>
+      <entry value="2" name="LYREBIRD_USER_1_RELEASE_MANUAL_OVERRIDE">
+        <description>Release the RC manual-override latch and resume autonomous control.</description>
+      </entry>
+      <entry value="3" name="LYREBIRD_USER_1_RELEASE_SAFETY">
+        <description>
+          Return command authority to the Pilot. Only a frame signed with the Safety Computer's
+          key is honoured; the Pilot cannot release safety. MAVLink counterpart of HTTP
+          /releaseSafetyControl.
+        </description>
+      </entry>
+    </enum>
+    <enum name="LYREBIRD_USER_2_SELECTOR">
+      <description>
+        param1 selector on MAV_CMD_USER_2 (31011). Payload sensing operations, for the same
+        reason as LYREBIRD_USER_1_SELECTOR.
+      </description>
+      <entry value="1" name="LYREBIRD_USER_2_LRF_MEASURE">
+        <description>Fire the laser rangefinder once; the reading surfaces on the telemetry stream.</description>
+      </entry>
+      <entry value="2" name="LYREBIRD_USER_2_CAPTURE_TEMPERATURE">
+        <description>Read the thermal spot temperature; result_param2 carries hundredths of a degree.</description>
+      </entry>
+      <entry value="3" name="LYREBIRD_USER_2_CAPTURE_THERMAL_IMAGE">
+        <description>Trip one shutter on the thermal payload, storing thermal R-JPEG plus wide/zoom when enabled.</description>
+      </entry>
+    </enum>
+    <enum name="LYREBIRD_CONFIG_FLAGS" bitmask="true">
+      <description>Airframe capabilities reported in LYREBIRD_CONFIG.</description>
+      <entry value="1" name="LYREBIRD_CONFIG_FLAG_HAS_THERMAL">
+        <description>A thermal payload is fitted.</description>
+      </entry>
+    </enum>
+  </enums>
+  <messages>
+    <message id="42100" name="LYREBIRD_STATUS">
+      <description>
+        Lyrebird-specific aircraft state with no standard MAVLink equivalent. Streamed at a low
+        rate alongside the standard telemetry.
+      </description>
+      <field type="uint32_t" name="time_boot_ms" units="ms">Timestamp since system boot.</field>
+      <field type="int32_t" name="lrf_target_lat" units="degE7">Rangefinder target latitude. Valid only with LRF_TARGET_VALID.</field>
+      <field type="int32_t" name="lrf_target_lon" units="degE7">Rangefinder target longitude. Valid only with LRF_TARGET_VALID.</field>
+      <field type="float" name="lrf_target_alt" units="m">Rangefinder target altitude. Valid only with LRF_TARGET_VALID.</field>
+      <field type="float" name="max_radius_can_fly_and_go_home" units="m">Furthest the aircraft may fly and still return on the remaining charge.</field>
+      <field type="uint16_t" name="time_needed_to_go_home" units="s">DJI's estimate of the time a return would take.</field>
+      <field type="uint16_t" name="time_needed_to_land" units="s">DJI's estimate of the time a landing would take.</field>
+      <field type="uint16_t" name="total_flight_time" units="s">Flight time on this battery.</field>
+      <field type="int16_t" name="gimbal_joint_pitch" units="cdeg">
+        Gimbal pitch relative to the aircraft, as DJI reports it. Carried rather than derived:
+        composing the two attitudes MAVLink already sends recovers the right sign and slope but
+        lands about 1.5 degrees out, because DJI's joint angles include a mounting offset that no
+        amount of algebra can recover from the world attitude. Measured over 48 samples of a
+        hand-tilted aircraft.
+      </field>
+      <field type="int16_t" name="gimbal_joint_roll" units="cdeg">Gimbal roll relative to the aircraft.</field>
+      <field type="uint16_t" name="zoom_focal_length" units="mm">Digital-zoom focal length, or 0 when unknown.</field>
+      <field type="uint16_t" name="optical_focal_length" units="mm">Optical focal length, or 0 when unknown.</field>
+      <field type="uint16_t" name="hybrid_focal_length" units="mm">Hybrid-zoom focal length, or 0 when unknown.</field>
+      <field type="uint8_t" name="battery_needed_to_go_home" units="%">Charge a return is predicted to consume.</field>
+      <field type="uint8_t" name="battery_needed_to_land" units="%">Charge a landing is predicted to consume.</field>
+      <field type="uint32_t" name="waypoint_seq">Identifies the movement the waypoint-reached flag refers to.</field>
+      <field type="uint32_t" name="yaw_seq">Identifies the movement the yaw-reached flag refers to.</field>
+      <field type="uint32_t" name="altitude_seq">Identifies the movement the altitude-reached flag refers to.</field>
+      <field type="uint8_t" name="flags" enum="LYREBIRD_STATUS_FLAGS">Boolean state.</field>
+      <field type="char[24]" name="takeoff_block_reason">Why a takeoff would be refused, or empty when it would not.</field>
+    </message>
+    <message id="42101" name="LYREBIRD_CONFIG">
+      <description>
+        The aircraft's identity and how to reach its other services. Everything here is static for
+        the life of a session, so it is streamed slowly and in its own message rather than
+        weighing down LYREBIRD_STATUS, which carries state that changes.
+
+        It exists so a ground station learns what GET /config would have told it without needing
+        the HTTP surface at all. MAVLink streams state rather than answering polls, so the answer
+        to a read arrives on its own rather than on request.
+      </description>
+      <field type="uint16_t" name="http_port">Port the HTTP command surface listens on.</field>
+      <field type="uint16_t" name="telemetry_port">Port the JSON telemetry stream listens on.</field>
+      <field type="uint8_t" name="flags" enum="LYREBIRD_CONFIG_FLAGS">Capabilities of this airframe.</field>
+      <field type="char[20]" name="drone_name">Name this aircraft answers to, as configured in the app.</field>
+      <field type="char[16]" name="ip_address">Address the aircraft is reachable on.</field>
+      <field type="char[12]" name="video_mode">Streaming mode currently configured, such as "whip".</field>
+    </message>
+    <message id="42102" name="AUTOSENSING_STATUS">
+      <description>
+        Whether on-device detection is running, and how many targets it currently holds. Streamed
+        at a low rate so a ground station that joins mid-flight learns the state without asking,
+        and so a viewer can tell "detection is off" from "detection is on and sees nothing".
+      </description>
+      <field type="uint32_t" name="time_boot_ms" units="ms">Timestamp since system boot.</field>
+      <field type="uint32_t" name="frame_id">Detection cycle the target count belongs to.</field>
+      <field type="float" name="confidence_threshold">Confidence below which a detection is discarded.</field>
+      <field type="uint8_t" name="active">Non-zero while detection is running.</field>
+      <field type="uint8_t" name="target_count">Targets in the cycle named by frame_id.</field>
+      <field type="char[16]" name="source">Which detector is selected, such as "edge" or "none".</field>
+    </message>
+    <message id="42103" name="AUTOSENSING_TARGET">
+      <description>
+        One detected object, emitted once per target per detection cycle rather than as a list.
+
+        MAVLink messages are fixed-size, so a list would either cap the number of targets or
+        truncate them. Emitting one message each borrows the pattern ADSB_VEHICLE uses for
+        traffic: no cap, and a dropped packet costs one target rather than the whole frame.
+
+        target_index and target_count delimit a cycle, so a receiver knows when it has the whole
+        set and can drop anything left over from the previous one. A cycle with nothing in it is
+        reported by AUTOSENSING_STATUS with target_count zero, which is what clears a stale
+        overlay.
+
+        The bounding box is normalised to the frame, in the left/top/right/bottom form the
+        detector produces; converting to centre and extent here would only invite the receiver to
+        convert it back.
+      </description>
+      <field type="uint32_t" name="time_boot_ms" units="ms">Timestamp since system boot.</field>
+      <field type="uint32_t" name="frame_id">Detection cycle this target belongs to.</field>
+      <field type="float" name="left">Left edge of the bounding box, 0 to 1.</field>
+      <field type="float" name="top">Top edge of the bounding box, 0 to 1.</field>
+      <field type="float" name="right">Right edge of the bounding box, 0 to 1.</field>
+      <field type="float" name="bottom">Bottom edge of the bounding box, 0 to 1.</field>
+      <field type="float" name="confidence">Detector confidence, 0 to 1, or NaN when not reported.</field>
+      <field type="uint8_t" name="target_index">Index of this target within its cycle.</field>
+      <field type="uint8_t" name="target_count">Total targets in this cycle.</field>
+      <field type="char[16]" name="type">Class the detector assigned, such as "PERSON".</field>
+    </message>
+  </messages>
+</mavlink>

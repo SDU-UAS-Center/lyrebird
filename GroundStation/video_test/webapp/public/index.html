@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lyrebird Video and Connection Testing Tool</title>
+  <link rel="icon" type="image/png" href="/assets/lyrebird-icon.png">
+  <link rel="apple-touch-icon" href="/assets/lyrebird-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=23">
+  <script>
+    try {
+      var wbTheme = localStorage.getItem('wb-theme') || 'system';
+      var wbLight = wbTheme === 'light' || (wbTheme !== 'dark' && window.matchMedia('(prefers-color-scheme: light)').matches);
+      if (wbLight) document.documentElement.classList.add('light');
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="appShell">
+  <header class="topbar">
+    <div class="brand" aria-label="Lyrebird">
+      <img src="/assets/lyrebird-icon.png" alt="Lyrebird logo">
+      <div class="brandCopy">
+        <h1>Lyrebird</h1>
+        <p id="subtitle">Video + connection lab</p>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="guideBtn" type="button" class="iconButton" title="Guide" aria-label="Guide">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Guide</span>
+      </button>
+      <a class="iconButton" href="https://github.com/SDU-UAS-Center/lyrebird" target="_blank" rel="noopener noreferrer" title="Source on GitHub" aria-label="Source on GitHub">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.4-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.7.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6a11.5 11.5 0 0 0 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <div class="themeToggle" id="themeToggle" role="group" aria-label="Theme" title="Theme">
+        <button type="button" class="iconButton" data-theme="system" title="System" aria-label="System theme">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </button>
+        <button type="button" class="iconButton" data-theme="light" title="Light" aria-label="Light theme">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/></svg>
+        </button>
+        <button type="button" class="iconButton" data-theme="dark" title="Dark" aria-label="Dark theme">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+      <button id="discoverBtn" type="button">Discover</button>
+      <button id="reconnectBtn" type="button">Reconnect Video</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary" class="summary"></section>
+    <nav class="tabs" aria-label="Testing views">
+      <button class="tabButton active" type="button" data-tab="video">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 10.5 22 7v10l-6-3.5z"/></svg>
+        <span>Video</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="health">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>
+        <span>Health</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="videoCharts">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 16v-4"/><path d="M12 16V8"/><path d="M17 16v-7"/></svg>
+        <span>Video Charts</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="telemetry">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <span>Telemetry</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="telemetryCharts">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-4 4"/></svg>
+        <span>Telemetry Charts</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Settings</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="publish">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10"/><path d="m11 4 3 3-3 3"/><path d="M20 17H10"/><path d="m13 14-3 3 3 3"/></svg>
+        <span>HTTP</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="mavlink">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h4l2-7 4 14 2-7h4"/></svg>
+        <span>MAVLink</span>
+      </button>
+      <button class="tabButton" type="button" data-tab="ros">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5.5 6M12 11l5.5 6"/></svg>
+        <span>ROS</span>
+      </button>
+    </nav>
+    <section id="videoPanel" class="tabPanel active" data-panel="video">
+      <section class="videoShell">
+        <div class="videoIntro panelBand">
+          <div>
+            <h2>Video Wall</h2>
+            <p>Live low-latency WHIP/WHEP preview for every discovered phone. Click a tile for full connection diagnostics.</p>
+          </div>
+        </div>
+        <section id="grid" class="grid"></section>
+        <section id="emptyState" class="emptyState">No Lyrebird phones detected yet. Start the app on a phone, keep it on the same network, then press Discover.</section>
+      </section>
+    </section>
+    <section id="healthPanel" class="tabPanel" data-panel="health">
+      <section class="healthShell">
+        <div class="healthIntro panelBand">
+          <div>
+            <h2>Fleet Health</h2>
+            <p>Correlated phone, sender, MediaMTX, browser, and recovery indicators for each active stream.</p>
+          </div>
+        </div>
+        <div id="healthGrid" class="healthGrid"></div>
+      </section>
+    </section>
+    <section id="telemetryPanel" class="tabPanel" data-panel="telemetry">
+      <section class="telemetryShell">
+        <div class="telemetryIntro panelBand">
+          <div>
+            <h2>Fleet Telemetry</h2>
+            <p>Live nested state for each drone, including phone telemetry, sender metrics, MediaMTX state, and browser diagnostics.</p>
+          </div>
+        </div>
+        <div id="telemetryGrid" class="telemetryGrid"></div>
+      </section>
+    </section>
+    <section id="videoChartsPanel" class="tabPanel" data-panel="videoCharts">
+      <section class="chartsShell">
+        <div class="chartsIntro panelBand">
+          <div>
+            <h2>Video Charts</h2>
+            <p>Receiver-side WebRTC charts for decoded FPS, packet loss, jitter, freezes, and jitter-buffer behavior. Ignored drones stay visible in discovery but are hidden from active charts and video playback.</p>
+          </div>
+          <label class="chartRangeControl" for="videoChartRange">Window
+            <select id="videoChartRange" data-chart-range aria-label="Video chart time window">
+              <option value="300">5 min</option>
+              <option value="900">15 min</option>
+              <option value="1800">30 min</option>
+              <option value="3600">1 hour</option>
+            </select>
+          </label>
+        </div>
+        <div id="videoChartsGrid" class="chartsGrid"></div>
+      </section>
+    </section>
+    <section id="telemetryChartsPanel" class="tabPanel" data-panel="telemetryCharts">
+      <section class="chartsShell">
+        <div class="chartsIntro panelBand">
+          <div>
+            <h2>Telemetry Charts</h2>
+            <p>Telemetry-derived charts for flight state, phone health, Wi-Fi signal, and navigation values. Ignored drones stay visible in discovery but are hidden from active charts.</p>
+          </div>
+          <label class="chartRangeControl" for="telemetryChartRange">Window
+            <select id="telemetryChartRange" data-chart-range aria-label="Telemetry chart time window">
+              <option value="300">5 min</option>
+              <option value="900">15 min</option>
+              <option value="1800">30 min</option>
+              <option value="3600">1 hour</option>
+            </select>
+          </label>
+        </div>
+        <div id="telemetryChartsGrid" class="chartsGrid"></div>
+      </section>
+    </section>
+    <section id="publishPanel" class="tabPanel" data-panel="publish">
+      <section class="publishShell">
+        <div class="publishIntro panelBand">
+          <div>
+            <h2>HTTP Control Surface</h2>
+            <p>Every <code>/send/</code> endpoint the phone serves on port 8080, with its method, body and effect.</p>
+          </div>
+          <div class="publishControls">
+            <input type="search" id="publishFilter" placeholder="Search…" aria-label="Search endpoints">
+            <label class="publishToggle"><input type="checkbox" id="publishHttpOnly"> Without a MAVLink form</label>
+          </div>
+        </div>
+        <div id="coverageStripHttp" class="coverageStrip"></div>
+        <div id="publishTargets" class="publishTargets"></div>
+        <div id="publishGrid" class="publishGrid"></div>
+      </section>
+    </section>
+    <section id="settingsPanel" class="tabPanel" data-panel="settings">
+      <section class="settingsShell">
+        <div class="settingsIntro panelBand">
+          <div>
+            <h2>Remote Settings</h2>
+            <p>Read and change each drone's DJI settings (RTH altitude, max height/distance, RC stick mode, RC pairing) and app settings over HTTP.</p>
+          </div>
+        </div>
+        <div id="settingsGrid" class="settingsGrid"></div>
+      </section>
+    </section>
+    <section id="mavlinkPanel" class="tabPanel" data-panel="mavlink">
+      <section class="mavlinkShell">
+        <div class="mavlinkIntro panelBand">
+          <div>
+            <h2>MAVLink Interface</h2>
+            <p>Each aircraft presented as a MAVLink&nbsp;2 vehicle, so QGroundControl, MAVSDK and <code>pymavlink</code> fly it unmodified.</p>
+          </div>
+          <div class="mavlinkControls">
+            <select id="mavlinkTarget" aria-label="Drone"></select>
+            <label class="mavlinkToggle"><input type="checkbox" id="mavlinkDiffOnly"> Compare with HTTP</label>
+            <button class="ghostButton" type="button" id="mavlinkRefresh">Refresh</button>
+          </div>
+        </div>
+        <div id="coverageStripMavlink" class="coverageStrip"></div>
+        <dl class="protocolList">
+          <div><dt>Telemetry</dt><dd>Heartbeat, attitude, position, GPS, battery, HUD, home, mode, mission progress, gimbal, rangefinder</dd></div>
+          <div><dt>Commands</dt><dd>Take-off, land, return, reposition, yaw, altitude, sticks, camera, gimbal, payload release</dd></div>
+          <div><dt>Missions</dt><dd>Upload and download, with per-waypoint hold time, acceptance radius and pass-through</dd></div>
+          <div><dt>Parameters</dt><dd><code>PARAM_SET</code> for numbers, <code>PARAM_EXT_SET</code> for text</dd></div>
+          <div><dt>Files</dt><dd>Read-only MAVLink FTP over the same link</dd></div>
+          <div><dt>Authority</dt><dd>Packet signing identifies the Safety Computer; invalid signatures and replays are refused</dd></div>
+        </dl>
+        <div id="mavlinkCompare" class="mavlinkCompare"><p class="emptyState">Select a drone to see what it reports.</p></div>
+      </section>
+    </section>
+    <section id="rosPanel" class="tabPanel" data-panel="ros">
+      <section class="rosShell">
+        <div class="rosIntro panelBand">
+          <div>
+            <h2>ROS 2 Bridge Status</h2>
+            <p>Topic liveness and metrics reported by the <code>ros-monitor</code> container: which DjiNode topics are publishing, their rates, last values, and whether the phone HTTP surface is reachable.</p>
+          </div>
+        </div>
+        <div id="rosStatus" class="rosStatus"><p class="emptyState">No ROS monitor report yet. Start the <code>ros-monitor</code> container and the phone app, then wait a few seconds.</p></div>
+      </section>
+    </section>
+  </main>
+  </div>
+
+  <template id="tileTemplate">
+    <article class="tile">
+      <div class="videoWrap">
+        <video autoplay muted playsinline></video>
+        <div class="badge statusBadge">starting</div>
+      </div>
+      <div class="tileBody">
+        <div class="tileTitle">
+          <h2></h2>
+          <span class="ip"></span>
+          <button class="ignoreBtn" type="button">Ignore</button>
+        </div>
+        <dl class="quickStats" aria-label="Video summary">
+          <div><dt>FPS</dt><dd data-stat="fps">-</dd></div>
+          <div><dt>Size</dt><dd data-stat="size">-</dd></div>
+          <div><dt>Lost</dt><dd data-stat="packetsLost">-</dd></div>
+          <div><dt>Drop</dt><dd data-stat="framesDropped">-</dd></div>
+          <div><dt>JBuf</dt><dd data-stat="jitterBufferTarget">-</dd></div>
+          <div><dt>Tel</dt><dd data-stat="telemetry">-</dd></div>
+          <div><dt>MTX</dt><dd data-stat="mediaMtx">-</dd></div>
+        </dl>
+        <div class="events" aria-label="Recent video event"></div>
+      </div>
+    </article>
+  </template>
+
+  <dialog id="droneModal" class="droneModal">
+    <div class="modalHeader">
+      <div>
+        <h2 id="modalTitle">Drone</h2>
+        <p id="modalSubtitle">Connection details</p>
+      </div>
+      <button id="modalCloseBtn" type="button" aria-label="Close detail view">Close</button>
+    </div>
+    <div class="modalContent">
+      <section class="modalMainColumn">
+        <div id="modalVideoHost" class="modalVideoHost"></div>
+        <details class="modalDetails modalStatsDetails" open>
+          <summary>Video And Connection Stats</summary>
+          <dl id="modalStats" class="detailList"></dl>
+        </details>
+        <details class="modalDetails modalStreamingDetails" open>
+          <summary>Streaming Protocol Switcher</summary>
+          <div class="streamingPanel">
+            <div class="streamingRow">
+              <span class="streamingLabel">Remote protocol</span>
+              <select id="modalStreamingSelect" class="streamingSelect">
+                <option value="webrtc">WebRTC (WHIP/WHEP)</option>
+                <option value="rtsp">RTSP Pull Client</option>
+                <option value="rtmp">RTMP Push Publisher</option>
+              </select>
+            </div>
+            <div class="streamingPathBox">
+              <div class="streamingPathLabel">Consumption path</div>
+              <code id="modalStreamingPath" class="streamingPath">-</code>
+            </div>
+            <p class="streamingNote">Changing modes dynamically restarts the phone stream. WebRTC, RTSP, and RTMP streams are all automatically bridged to low-latency WebRTC for live viewing above.</p>
+          </div>
+        </details>
+      </section>
+      <section class="modalSideColumn">
+        <details class="modalDetails" open>
+          <summary>Telemetry</summary>
+          <dl id="modalTelemetry" class="detailList"></dl>
+        </details>
+        <details class="modalDetails" open>
+          <summary>Recovery</summary>
+          <dl id="modalRecovery" class="detailList"></dl>
+        </details>
+        <details class="modalDetails modalEventDetails" open>
+          <summary>Recent Event</summary>
+          <pre id="modalEvent">-</pre>
+        </details>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="guideModal" class="guideModal">
+    <div class="modalHeader">
+      <div>
+        <h2>Lyrebird Video &amp; Connection Testing Tool</h2>
+        <p>What this dashboard does, how to set it up, and what each tab shows</p>
+      </div>
+      <button id="guideCloseBtn" type="button" aria-label="Close guide">Close</button>
+    </div>
+    <div class="guideContent">
+      <section class="guideSection">
+        <h3>About Lyrebird</h3>
+        <p>Lyrebird is an open-source Android app (Kotlin, DJI Mobile SDK V5) that runs on a DJI Remote Controller, or a phone tethered to one, and exposes drone telemetry, HTTP control, and WebRTC video over the local Wi-Fi network &mdash; no DJI SDK integration required on the ground station side. Multiple Lyrebird instances can run on the same LAN for multi-drone setups.</p>
+        <p>This page is the video-and-connection testing tool for the GroundStation stack: it discovers Lyrebird phones on the network, watches their telemetry socket, tracks MediaMTX video-path readiness, and plays back each drone's live stream over WHIP/WHEP &mdash; so video and connection health can be validated with or without an actual drone attached.</p>
+      </section>
+      <section class="guideSection">
+        <h3>Setup</h3>
+        <ol>
+          <li>Connect the host and phones to the same Lyrebird Wi-Fi network.</li>
+          <li>On each phone, enable wireless ADB if needed, then run <code>adb connect PHONE_IP:5555</code> from the host.</li>
+          <li>Launch the Lyrebird app and set a unique drone name such as <code>mini1</code>, <code>mini2</code>, or the aircraft label you want to test.</li>
+          <li>Start this stack with <code>docker compose -f GroundStation/video_test/compose.yaml up -d --build</code> and open this page.</li>
+          <li>Use <strong>Discover</strong> to re-scan. A tile appears for each detected phone; telemetry should turn green before the video path becomes ready.</li>
+          <li>For drone-free video testing, enable mock video in the Lyrebird Default Layout on each phone &mdash; it publishes a bundled clip through the normal WHIP path.</li>
+        </ol>
+      </section>
+      <section class="guideSection">
+        <h3>Tabs</h3>
+        <dl class="guideTabList">
+          <div><dt>Video</dt><dd>Live tile wall of every discovered phone with quick FPS/loss/telemetry stats. Click a tile for full diagnostics.</dd></div>
+          <div><dt>Health</dt><dd>Correlated phone, sender, MediaMTX, browser, and recovery indicators per drone, with the worst active symptom surfaced first.</dd></div>
+          <div><dt>Video Charts</dt><dd>Receiver-side WebRTC time series: decoded FPS, bitrate, packet loss, jitter, freezes, jitter-buffer behavior.</dd></div>
+          <div><dt>Telemetry</dt><dd>The full nested JSON telemetry tree per drone &mdash; flight state, phone health, streaming config.</dd></div>
+          <div><dt>Telemetry Charts</dt><dd>Telemetry-derived time series: battery, satellites, altitude, distance to home, speed, Wi-Fi RSSI.</dd></div>
+          <div><dt>Settings</dt><dd>Read and change each drone's DJI and app settings (RTH altitude, max height/distance, RC pairing, video source) over HTTP.</dd></div>
+          <div><dt>HTTP</dt><dd>The full catalog of phone <code>/send/</code> endpoints (flight control, virtual stick, camera/gimbal, waypoints, sensing) for manual testing.</dd></div>
+          <div><dt>MAVLink</dt><dd>The same drone read over MAVLink and over HTTP at once, field by field, so a value that disagrees between the two wires is visible rather than inferred.</dd></div>
+          <div><dt>ROS</dt><dd>Liveness and rates for every topic the <code>ros-monitor</code> container sees from <code>DjiNode</code>, plus phone HTTP reachability.</dd></div>
+        </dl>
+      </section>
+      <section class="guideSection">
+        <h3>Logs &amp; troubleshooting</h3>
+        <p>Diagnostics are written on the host under <code>GroundStation/video_test/logs/</code>. Cross-reference those with Android logcat and MediaMTX logs when investigating FPS drops or decode errors.</p>
+      </section>
+      <section class="guideSection">
+        <h3>Source</h3>
+        <p>Full documentation, supported hardware, and the Android/ROS 2 source live in the <a href="https://github.com/SDU-UAS-Center/lyrebird" target="_blank" rel="noopener noreferrer">Lyrebird repository on GitHub</a>.</p>
+      </section>
+    </div>
+  </dialog>
+
+  <script async src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="/app.js?v=22"></script>
+</body>
+</html>

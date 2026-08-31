@@ -1,0 +1,230 @@
+apply plugin: 'com.android.application'
+
+kotlin {
+    compilerOptions {
+        // jvmTarget defaults to android.compileOptions.targetCompatibility (1.8).
+        freeCompilerArgs.add("-jvm-default=no-compatibility")
+    }
+}
+
+android {
+    def lyrebirdRepoRoot = rootProject.projectDir.parentFile.parentFile
+    def commandOutput = { List<String> args ->
+        try {
+            def stdout = new ByteArrayOutputStream()
+            exec {
+                commandLine args
+                standardOutput = stdout
+                ignoreExitValue = true
+            }
+            return stdout.toString().trim()
+        } catch (ignored) {
+            return ""
+        }
+    }
+    def lyrebirdGitSha = commandOutput(['git', '-C', lyrebirdRepoRoot.absolutePath, 'rev-parse', '--short=12', 'HEAD']) ?: 'unknown'
+    def lyrebirdGitDirty = commandOutput(['git', '-C', lyrebirdRepoRoot.absolutePath, 'status', '--short']) ? 'dirty' : 'clean'
+    def lyrebirdBuildTime = new Date().format("yyyy-MM-dd HH:mm:ss 'UTC'", TimeZone.getTimeZone('UTC'))
+    def lyrebirdFeatures = 'WHIP video, sender metrics telemetry, hidden mock video when aircraft connected, discovery, flight logs'
+
+    // Load secrets from local.properties or environment variables.
+    def localProps = new Properties()
+    def lpFile = rootProject.file("local.properties")
+    if (lpFile.exists()) {
+        lpFile.withInputStream { localProps.load(it) }
+    }
+    def resolveSecret = { key ->
+        def envValue = System.getenv(key)
+        if (envValue != null && envValue.trim()) {
+            return envValue.trim()
+        }
+        def localValue = localProps.getProperty(key)
+        if (localValue != null && localValue.trim()) {
+            return localValue.trim()
+        }
+        return project.findProperty(key)?.toString()?.trim() ?: ""
+    }
+    def aircraftApiKey = resolveSecret("AIRCRAFT_API_KEY")
+    def demoBiomassAircraftApiKey = resolveSecret("AIRCRAFT_API_KEY_DEMO_BIOMASS") ?: aircraftApiKey
+    def gmapApiKey = resolveSecret("GMAP_API_KEY")
+    def maplibreToken = resolveSecret("MAPLIBRE_TOKEN")
+
+    namespace = 'com.lyrebird.rc'
+    compileSdk = Integer.parseInt(project.ANDROID_COMPILE_SDK_VERSION)
+
+    defaultConfig {
+        applicationId = "com.lyrebird.rc"
+        minSdk = Integer.parseInt(project.ANDROID_MIN_SDK_VERSION)
+        targetSdk = Integer.parseInt(project.ANDROID_TARGET_SDK_VERSION)
+        versionCode = 1
+        versionName = "1.0"
+        buildConfigField 'String', 'LYREBIRD_BUILD_TIME', "\"${lyrebirdBuildTime}\""
+        buildConfigField 'String', 'LYREBIRD_GIT_SHA', "\"${lyrebirdGitSha}\""
+        buildConfigField 'String', 'LYREBIRD_GIT_STATE', "\"${lyrebirdGitDirty}\""
+        buildConfigField 'String', 'LYREBIRD_FEATURES', "\"${lyrebirdFeatures}\""
+        manifestPlaceholders["API_KEY"] = aircraftApiKey
+        manifestPlaceholders["GMAP_API_KEY"] = gmapApiKey
+        manifestPlaceholders["MAPLIBRE_TOKEN"] = maplibreToken
+        manifestPlaceholders["APP_ICON"] = "@mipmap/ic_main"
+        ndk {
+            //noinspection ChromeOsAbiSupport
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    flavorDimensions "appVariant"
+    productFlavors {
+        current {
+            dimension "appVariant"
+        }
+        demoBiomass {
+            dimension "appVariant"
+            applicationIdSuffix ".demo_biomass"
+            versionNameSuffix "-demo_biomass"
+            manifestPlaceholders["API_KEY"] = demoBiomassAircraftApiKey
+            manifestPlaceholders["APP_ICON"] = "@mipmap/ic_main"
+        }
+    }
+
+    // Configure signing config
+    signingConfigs {
+        release {
+            storeFile file(project.STORE_FILE)
+            storePassword project.STORE_PASSWORD
+            keyAlias project.KEY_ALIAS
+            keyPassword project.KEY_PASSWORD
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = true
+            shrinkResources = false
+            //signingConfig signingConfigs.release
+        }
+        debug {
+            minifyEnabled = false
+            shrinkResources = false
+            //signingConfig signingConfigs.release
+        }
+    }
+
+    androidComponents {
+        onVariants(selector().all()) { variant ->
+            variant.outputs.forEach { output ->
+                // Flavor already separates output directories, so the file name only needs the
+                // build type: Lyrebird-debug.apk, Lyrebird-release.apk.
+                output.outputFileName.set("Lyrebird-${variant.buildType}.apk")
+            }
+        }
+    }
+
+    packagingOptions {
+        // The mrtc library uses the NDK c++_shared flag internally,
+        // which conflicts with other libraries — keep only one copy
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+        // DJI SDK ships uncompressed .so files; AGP 9 requires this via packagingOptions
+        // instead of android:extractNativeLibs in the manifest.
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    // Disable lint
+    lintOptions {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    testOptions {
+        unitTests {
+            // Plain JVM unit tests hit real Android framework stubs (e.g. android.util.Log),
+            // which throw by default -- return defaults instead so a test can exercise
+            // production code paths that log without needing Robolectric or a Log mock.
+            returnDefaultValues = true
+        }
+    }
+
+    packagingOptions {
+        doNotStrip "*/*/libconstants.so"
+        doNotStrip "*/*/libdji_innertools.so"
+        doNotStrip "*/*/libdjibase.so"
+        doNotStrip "*/*/libDJICSDKCommon.so"
+        doNotStrip "*/*/libDJIFlySafeCore-CSDK.so"
+        doNotStrip "*/*/libdjifs_jni-CSDK.so"
+        doNotStrip "*/*/libDJIRegister.so"
+        doNotStrip "*/*/libdjisdk_jni.so"
+        doNotStrip "*/*/libDJIUpgradeCore.so"
+        doNotStrip "*/*/libDJIUpgradeJNI.so"
+        doNotStrip "*/*/libDJIWaypointV2Core-CSDK.so"
+        doNotStrip "*/*/libdjiwpv2-CSDK.so"
+        doNotStrip "*/*/libFlightRecordEngine.so"
+        doNotStrip "*/*/libvideo-framing.so"
+        doNotStrip "*/*/libwaes.so"
+        doNotStrip "*/*/libagora-rtsa-sdk.so"
+        doNotStrip "*/*/libc++.so"
+        doNotStrip "*/*/libc++_shared.so"
+        doNotStrip "*/*/libmrtc_28181.so"
+        doNotStrip "*/*/libmrtc_agora.so"
+        doNotStrip "*/*/libmrtc_core.so"
+        doNotStrip "*/*/libmrtc_core_jni.so"
+        doNotStrip "*/*/libmrtc_data.so"
+        doNotStrip "*/*/libmrtc_log.so"
+        doNotStrip "*/*/libmrtc_onvif.so"
+        doNotStrip "*/*/libmrtc_rtmp.so"
+        doNotStrip "*/*/libmrtc_rtsp.so"
+    }
+
+    buildFeatures {
+        buildConfig true
+        viewBinding true
+    }
+}
+
+dependencies {
+    /** <----------------- MSDK dependencies ------------------> **/
+    compileOnly deps.aircraftProvided
+    implementation deps.aircraft
+
+    /** <----------------- Sample dependencies ------------------> **/
+    implementation project(':uxsdk')
+    implementation deps.appcompat
+    implementation deps.constraintLayout
+    implementation deps.aacCommon
+    implementation deps.aacRuntime
+    implementation deps.kotlinLib
+    implementation deps.ktxCore
+    implementation deps.ktxFrag
+    implementation deps.ktxNavigation
+    implementation deps.ktxNavigationUi
+    implementation deps.recyclerview
+    implementation deps.legacySupport
+    implementation deps.lifecycleViewModel
+    implementation deps.lifecycleLiveData
+    implementation deps.leakcanary
+    implementation deps.glide
+    implementation deps.dynamicanimation
+    implementation deps.expandedit
+    implementation deps.rx3Kt
+    implementation deps.dom
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+    implementation deps.lynx
+
+    // WebSocket library for formation control
+    implementation 'org.java-websocket:Java-WebSocket:1.5.3'
+
+    // WebRTC for drone video streaming (Stream's maintained fork)
+    implementation 'io.getstream:stream-webrtc-android:1.1.1'
+
+    // On-device edge inference for exported YOLO/TFLite models
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
+
+    testImplementation deps.junit4
+    testImplementation deps.json
+}

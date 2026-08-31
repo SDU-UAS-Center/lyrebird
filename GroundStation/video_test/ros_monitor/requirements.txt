@@ -1,0 +1,4 @@
+# Runtime deps for the lyrebird_controller node + monitor (ROS packages come
+# from the base image). requests comes from the shared lyrebird-groundstation
+# package, which this image also installs.
+numpy>=1.21

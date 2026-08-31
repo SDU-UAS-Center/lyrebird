@@ -1,0 +1,50 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: "v0.15.14"
+    hooks:
+      - id: ruff
+        name: ruff lint - GroundStation Python
+        args: [--fix]
+        files: ^GroundStation/.*\.py$
+      - id: ruff-format
+        name: ruff format - GroundStation Python
+        files: ^GroundStation/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: radon-complexity
+        name: radon complexity - require B-or-better GroundStation blocks
+        entry: python scripts/check_radon_complexity.py
+        language: python
+        additional_dependencies: [radon==6.0.1]
+        pass_filenames: false
+        files: ^GroundStation/.*\.py$
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "v2.1.0"
+    hooks:
+      - id: mypy
+        name: mypy - GroundStation gradual typing
+        additional_dependencies:
+          - types-requests
+        pass_filenames: false
+        files: ^GroundStation/.*\.py$
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.9.4"
+    hooks:
+      - id: bandit
+        name: bandit - GroundStation security scan
+        args: [-r, GroundStation, -ll, --skip, B101]
+        pass_filenames: false
+        files: ^GroundStation/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: groundstation-tests
+        name: GroundStation Python tests
+        entry: python -m pytest GroundStation/tests -q
+        language: system
+        pass_filenames: false
+        stages: [manual]
+        files: ^GroundStation/.*\.py$

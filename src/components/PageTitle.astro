@@ -1,0 +1,61 @@
+---
+// Breadcrumb above the page title, e.g.:
+//   Lyrebird Docs / Interfaces / HTTP API
+// The frontmatter `breadcrumb` field holds the parent group path; the current
+// page title is appended automatically.
+const { entry } = Astro.locals.starlightRoute;
+const title = entry.data.title;
+const parts = (entry.data.breadcrumb ?? '')
+	.split('/')
+	.map((part) => part.trim())
+	.filter(Boolean);
+---
+
+<nav class="wb-breadcrumb" aria-label="Breadcrumb">
+		<a href={import.meta.env.BASE_URL}>Lyrebird Docs</a>
+		{parts.map((part) => (
+			<Fragment>
+				<span class="sep">/</span>
+				<span>{part}</span>
+			</Fragment>
+		))}
+		<span class="sep">/</span>
+		<span class="current">{title}</span>
+	</nav>
+<h1 id="_top">{title}</h1>
+
+<style>
+	@layer starlight.core {
+		.wb-breadcrumb {
+			margin-top: 1.5rem;
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.375rem;
+			font-size: var(--sl-text-xs);
+			line-height: 1.4;
+			color: var(--sl-color-gray-2);
+		}
+		.wb-breadcrumb a {
+			color: var(--sl-color-gray-2);
+			text-decoration: none;
+		}
+		.wb-breadcrumb a:hover {
+			color: var(--sl-color-white);
+			text-decoration: underline;
+		}
+		.wb-breadcrumb .sep {
+			color: var(--sl-color-gray-4);
+		}
+		.wb-breadcrumb .current {
+			color: var(--sl-color-white);
+		}
+		h1 {
+			margin-top: 0.5rem;
+			font-size: var(--sl-text-h1);
+			line-height: var(--sl-line-height-headings);
+			font-weight: 600;
+			color: var(--sl-color-white);
+		}
+	}
+</style>

@@ -1,0 +1,83 @@
+/*
+ * Lyrebird docs site typography:
+ *   DM Sans       — body text, UI labels
+ *   Space Grotesk — headings, tab/panel headers
+ *   Pixelify Sans — the wordmark next to the logo
+ */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400..700&family=Space+Grotesk:wght@400..700&family=Pixelify+Sans:wght@400..700&display=swap');
+
+:root {
+	--sl-font: 'DM Sans', 'Space Grotesk', sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.table-wrapper th {
+	font-family: 'Space Grotesk', 'DM Sans', sans-serif;
+}
+
+/* Navbar wordmark: dark (near-black) text instead of the accent color,
+   same height as the logo, bottom-aligned with it. The font size mirrors the
+   logo's own height expression so they always match. */
+.site-title {
+	align-items: flex-end;
+	gap: 0.4rem;
+	font-family: 'Pixelify Sans', 'Space Grotesk', sans-serif;
+	font-size: calc(var(--sl-nav-height) - 2 * var(--sl-nav-pad-y));
+	line-height: 1;
+	color: var(--sl-color-white);
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+/* Keep the 'g' descender visible despite the tight line-height. */
+.site-title span {
+	overflow: visible;
+}
+
+.site-title:hover {
+	color: var(--sl-color-white);
+}
+
+/* Splash-page hero title ("Lyrebird" on the homepage) — same wordmark treatment as the navbar. */
+[data-page-title] {
+	font-family: 'Pixelify Sans', 'Space Grotesk', sans-serif;
+	text-transform: uppercase;
+}
+
+/* HTTP method chips used in the HTTP API endpoint tables. */
+.http-method {
+	display: inline-block;
+	min-width: 2.7em;
+	margin-right: 0.45em;
+	padding: 0.12em 0.5em;
+	border-radius: 0.375rem;
+	text-align: center;
+	font-family: 'Space Grotesk', 'DM Sans', sans-serif;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: #fff;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+.http-method.get {
+	background-color: #2e7d32;
+}
+
+.http-method.post {
+	background-color: #b26a00;
+}
+
+.http-method.put {
+	background-color: #1565c0;
+}
+
+.http-method.delete {
+	background-color: #c62828;
+}

@@ -1,0 +1,89 @@
+services:
+  mediamtx:
+    # Stock image is scratch-based (no shell or wget), so a healthcheck would force a custom
+    # busybox image. Not needed: the webapp polls the MediaMTX API in a daemon thread and
+    # retries, so a plain start-order dependency is enough.
+    image: bluenviron/mediamtx:latest
+    container_name: lyrebird_mediamtx
+    network_mode: host
+    environment:
+      - MTX_WEBRTCLOCALUDPADDRESS=${MEDIAMTX_WEBRTC_UDP_ADDRESS:-:8189}
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  video-grid:
+    image: lyrebird-video-grid:latest
+    build:
+      # Rooted at GroundStation (one level up from this file) so the image can also carry the
+      # shared Python client the MAVLink comparison panel reads both wires through.
+      context: ..
+      dockerfile: video_test/webapp/Dockerfile
+    container_name: lyrebird_video_grid
+    network_mode: host
+    depends_on:
+      mediamtx:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,os; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8090')+'/api/drones', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      - PORT=${VIDEO_GRID_PORT:-8090}
+      - MEDIAMTX_API_URL=${MEDIAMTX_API_URL:-http://127.0.0.1:9997}
+      - MEDIAMTX_WEBRTC_URL=${MEDIAMTX_WEBRTC_URL:-http://127.0.0.1:8889}
+      - DRONE_NAMES=${DRONE_NAMES:-}
+      - DRONE_FALLBACKS=${DRONE_FALLBACKS:-}
+      - DISCOVERY_INTERVAL_MS=${DISCOVERY_INTERVAL_MS:-5000}
+      - TELEMETRY_PORT=${TELEMETRY_PORT:-8081}
+      - LOG_DIR=/logs
+      - PYTHONUNBUFFERED=1
+      # UDP port the MAVLink panel listens on. Deliberately not 14550 or 14551: a datagram goes
+      # to exactly one socket, so sharing a port with QGroundControl or the ROS drone nodes would
+      # make them compete and each see part of the stream.
+      - LB_WEBAPP_MAVLINK_PORT=${LB_WEBAPP_MAVLINK_PORT:-14552}
+      - LB_MAVLINK_PEER_PORT=${LB_MAVLINK_PEER_PORT:-14550}
+      # This image is ROS-based and runs on the host network, but the dashboard starts no ROS
+      # node. These keep it that way by construction: an isolated domain and discovery confined
+      # to loopback, so nothing here can ever join the fleet's DDS graph (domain 0, discovery
+      # across the subnet) and show up as a phantom participant.
+      - ROS_DOMAIN_ID=${VIDEO_GRID_ROS_DOMAIN_ID:-89}
+      - ROS_LOCALHOST_ONLY=1
+      - ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+    volumes:
+      - ./logs:/logs
+      - /etc/localtime:/etc/localtime:ro
+
+  ros-monitor:
+    image: lyrebird-ros-monitor:latest
+    build:
+      # Rooted at the repository root (two levels up from this file): the ros-monitor image
+      # reuses the bringup launch file for auto-discovery.
+      context: ../..
+      dockerfile: GroundStation/video_test/ros_monitor/Dockerfile
+    container_name: lyrebird_ros_monitor
+    network_mode: host
+    depends_on:
+      video-grid:
+        condition: service_healthy
+    healthcheck:
+      # Healthy when the monitor is alive AND the webapp holds a fresh
+      # per-drone report from it (monitor posts every 3 s; allow up to 25 s of
+      # staleness, and require the monitor's report shape, not a foreign one).
+      test: ["CMD", "python3", "-c", "import urllib.request,json,time; from datetime import datetime; d=json.load(urllib.request.urlopen('http://127.0.0.1:8090/api/ros-status', timeout=5)); assert 'drones' in d and d.get('generatedAt'); t=datetime.fromisoformat(d['generatedAt'].strip().replace('Z', '+00:00')); assert time.time()-t.timestamp() < 25"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - WEBAPP_URL=${WEBAPP_URL:-http://127.0.0.1:8090}
+      - ROS_RUN_CONTROLLER=${ROS_RUN_CONTROLLER:-1}
+      - ROS_DISCOVERY_PERIOD=${ROS_DISCOVERY_PERIOD:-15}
+      - ROS_REPORT_INTERVAL=${ROS_REPORT_INTERVAL:-3}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro

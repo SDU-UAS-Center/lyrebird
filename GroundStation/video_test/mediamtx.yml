@@ -1,0 +1,51 @@
+# Lyrebird six-drone WebRTC relay.
+# Phones publish via WHIP: http://<host>:8889/<drone_name>/whip
+# Browsers consume via WHEP: http://<host>:8889/<drone_name>/whep
+
+logLevel: info
+logDestinations: [stdout]
+
+api: yes
+apiAddress: :9997
+apiAllowOrigins: ['*']
+
+# MediaMTX's own default only grants the `api` action to loopback (127.0.0.1/::1); publish/read/
+# playback are open to any IP. MediaMtxConsumerWatcher (the app's phone-side poller for the
+# frame-drop investigation's Phase 3) calls this API from the phone itself, which is never
+# loopback relative to this container -- so the default silently 401s every poll. This is a
+# local test/dev stack already open to the whole LAN for the other actions, so widen `api` to
+# match instead of restricting the watcher to running only where MediaMTX itself does.
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+# This host also has ZeroTier and Docker interfaces. Advertising every interface lets ICE choose
+# 10.142.x or 172.17.x for a phone on the Wi-Fi LAN; the session can appear connected while RTP
+# takes a lossy or unreachable route. Keep the listener on all addresses, but advertise only the
+# active Wi-Fi interface. Its address may change between test networks, so select the interface
+# rather than hard-coding a subnet-specific host IP.
+webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfacesList: [wlp130s0f0]
+webrtcAdditionalHosts: []
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+
+rtsp: yes
+rtspAddress: :8554
+
+hls: no
+rtmp: yes
+rtmpAddress: :1935
+srt: no
+
+paths:
+  all_others:

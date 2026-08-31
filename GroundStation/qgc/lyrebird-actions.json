@@ -1,0 +1,45 @@
+{
+    "fileType": "MavlinkActions",
+    "version": 1,
+    "actions": [
+        {
+            "label": "Takeoff",
+            "description": "Take off and climb to 5 m",
+            "mavCmd": 22,
+            "compId": 1,
+            "param1": 0,
+            "param2": 0,
+            "param3": 0,
+            "param4": 0,
+            "param5": 0,
+            "param6": 0,
+            "param7": 5
+        },
+        {
+            "label": "Land",
+            "description": "Land at the current position",
+            "mavCmd": 21,
+            "compId": 1,
+            "param1": 0,
+            "param2": 0,
+            "param3": 0,
+            "param4": 0,
+            "param5": 0,
+            "param6": 0,
+            "param7": 0
+        },
+        {
+            "label": "Return to Launch",
+            "description": "Return to the takeoff point and land",
+            "mavCmd": 20,
+            "compId": 1,
+            "param1": 0,
+            "param2": 0,
+            "param3": 0,
+            "param4": 0,
+            "param5": 0,
+            "param6": 0,
+            "param7": 0
+        }
+    ]
+}

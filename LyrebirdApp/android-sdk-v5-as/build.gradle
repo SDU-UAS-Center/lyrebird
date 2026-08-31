@@ -1,0 +1,133 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+apply from: rootProject.file('dependencies.gradle')
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = 'https://maven.fabric.io/public' }
+        maven { url = 'https://plugins.gradle.org/m2/' }
+        maven { url = 'https://dl.bintray.com/kotlin/kotlin-eap' }
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:9.3.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$KOTLIN_VERSION"
+        classpath 'com.diffplug.spotless:spotless-plugin-gradle:8.10.0'
+        classpath 'io.gitlab.arturbosch.detekt:detekt-gradle-plugin:1.23.8'
+    }
+}
+
+apply plugin: 'io.gitlab.arturbosch.detekt'
+
+
+allprojects {
+    repositories {
+        maven {
+            url = REPO_MAVEN2
+        }
+        google()
+        mavenCentral()
+        maven {
+            url = KOTLIN_MAVEN
+        }
+        maven { url = JITPACK_MAVEN_URL }
+        repositories {
+            flatDir {
+                dirs new File(rootProject.projectDir.getAbsolutePath() + '/libs')
+            }
+        }
+    }
+
+}
+
+def sampleJavaSource = file('../lyrebird-app/src/main/java')
+def uxsdkJavaSource = file('../android-sdk-v5-uxsdk/src/main/java')
+def detektTaskClass = buildscript.classLoader.loadClass('io.gitlab.arturbosch.detekt.Detekt')
+
+def lyrebirdSourceIncludes = [
+        'com/lyrebird/rc/controller/**/*.kt',
+        'com/lyrebird/rc/edge/**/*.kt',
+        'com/lyrebird/rc/formation/**/*.kt',
+        'com/lyrebird/rc/logger/**/*.kt',
+        'com/lyrebird/rc/server/**/*.kt',
+        'com/lyrebird/rc/webrtc/**/*.kt',
+        'com/lyrebird/rc/DroneControlProfiles.kt',
+        'com/lyrebird/rc/TestToolsVM.kt',
+        'com/lyrebird/rc/FlightDeckActivity.kt',
+]
+
+project(':app') {
+    apply plugin: 'com.diffplug.spotless'
+
+    spotless {
+        kotlin {
+            target lyrebirdSourceIncludes
+            ktlint('1.5.0')
+        }
+    }
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    ignoreFailures = true
+    config.setFrom(files('config/detekt/detekt.yml'))
+}
+
+tasks.withType(detektTaskClass).configureEach {
+    parallel = true
+    reports {
+        html.required.set(true)
+        xml.required.set(true)
+        txt.required.set(true)
+        sarif.required.set(true)
+    }
+}
+
+tasks.register('detektLyrebird', detektTaskClass) {
+    group = 'verification'
+    description = 'Run Detekt on Lyrebird-owned Kotlin code only.'
+    buildUponDefaultConfig = true
+    allRules = false
+    ignoreFailures = true
+    config.setFrom(files('config/detekt/detekt.yml'))
+    setSource(files(sampleJavaSource))
+    include lyrebirdSourceIncludes
+    reports {
+        html.outputLocation.set(new File("$buildDir/reports/detekt/lyrebird.html"))
+        xml.outputLocation.set(new File("$buildDir/reports/detekt/lyrebird.xml"))
+        txt.outputLocation.set(new File("$buildDir/reports/detekt/lyrebird.txt"))
+        sarif.outputLocation.set(new File("$buildDir/reports/detekt/lyrebird.sarif"))
+    }
+}
+
+tasks.register('detektDji', detektTaskClass) {
+    group = 'verification'
+    description = 'Run Detekt on DJI sample and UXSDK Kotlin code, excluding Lyrebird-owned packages.'
+    buildUponDefaultConfig = true
+    allRules = false
+    ignoreFailures = true
+    config.setFrom(files('config/detekt/detekt.yml'))
+    setSource(files(sampleJavaSource, uxsdkJavaSource))
+    include '**/*.kt'
+    exclude lyrebirdSourceIncludes
+    reports {
+        html.outputLocation.set(new File("$buildDir/reports/detekt/dji.html"))
+        xml.outputLocation.set(new File("$buildDir/reports/detekt/dji.xml"))
+        txt.outputLocation.set(new File("$buildDir/reports/detekt/dji.txt"))
+        sarif.outputLocation.set(new File("$buildDir/reports/detekt/dji.sarif"))
+    }
+}
+
+tasks.register('qualityLyrebird') {
+    group = 'verification'
+    description = 'Run ktlint formatting checks, Detekt, and Android Lint for Lyrebird app code.'
+    dependsOn ':app:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentDebug'
+}
+
+tasks.register('qualityDji') {
+    group = 'verification'
+    description = 'Run Detekt and Android Lint for DJI/vendor code separately from Lyrebird-owned code.'
+    dependsOn 'detektDji', ':uxsdk:lintDebug'
+}

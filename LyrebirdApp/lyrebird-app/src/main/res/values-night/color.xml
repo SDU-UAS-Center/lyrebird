@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lyrebird_background">#FF0A0E15</color>
+    <color name="lyrebird_surface">#FF131A24</color>
+    <color name="lyrebird_surface_alt">#FF1A2230</color>
+    <color name="lyrebird_text">#FFEEF2F7</color>
+    <color name="lyrebird_muted">#FF8B98A8</color>
+    <color name="lyrebird_teal">#FF47C4BC</color>
+    <color name="lyrebird_orange">#FFF28C28</color>
+    <color name="lyrebird_blue">#FF60A5FA</color>
+    <color name="lyrebird_border">#FF2A3544</color>
+    <color name="lyrebird_danger">#FFF87171</color>
+</resources>

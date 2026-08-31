@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="full_screen_theme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
+    <style name="translucent_theme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowBackground">@color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:windowIsTranslucent">true</item>
+    </style>
+
+    <style name="activity_theme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+
+    <style name="LyrebirdSettingsDialog" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowBackground">@color/transparent</item>
+        <item name="android:colorAccent">@color/lyrebird_teal</item>
+        <item name="android:fontFamily">@font/dm_sans</item>
+    </style>
+
+    <style name="LyrebirdHomeTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowBackground">@color/lyrebird_background</item>
+        <item name="android:colorAccent">@color/lyrebird_teal</item>
+        <item name="android:fontFamily">@font/dm_sans</item>
+    </style>
+
+    <style name="LyrebirdCockpitTile">
+        <item name="android:background">@drawable/lyrebird_settings_row</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:paddingStart">18dp</item>
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingEnd">18dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:layout_weight">1</item>
+    </style>
+
+    <style name="LyrebirdCockpitIcon">
+        <item name="android:layout_width">30dp</item>
+        <item name="android:layout_height">30dp</item>
+        <item name="android:scaleType">centerInside</item>
+    </style>
+
+    <style name="LyrebirdCockpitTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">9dp</item>
+        <item name="android:fontFamily">@font/space_grotesk</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">@color/lyrebird_text</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="LyrebirdCockpitDetail">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:fontFamily">@font/dm_sans</item>
+        <item name="android:textColor">@color/lyrebird_muted</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="LyrebirdWordmark">
+        <item name="android:fontFamily">@font/pixelify_sans</item>
+        <item name="android:textColor">@color/lyrebird_teal</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="LyrebirdHeading">
+        <item name="android:fontFamily">@font/space_grotesk</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="LyrebirdBody">
+        <item name="android:fontFamily">@font/dm_sans</item>
+    </style>
+
+    <!-- autoSize text attributes are API 26+; on API 24-25 they are silently ignored (no crash). -->
+    <style name="main_fragment_btn" tools:targetApi="26">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_marginStart">3dp</item>
+        <item name="android:layout_marginEnd">3dp</item>
+        <item name="android:layout_marginTop">0dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:color">@color/white</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:autoSizeMaxTextSize">14dp</item>
+        <item name="android:autoSizeMinTextSize">9dp</item>
+        <item name="android:autoSizeTextType">uniform</item>
+    </style>
+
+    <style name="main_fragment_text">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:gravity">center</item>
+        <item name="android:padding">8dp</item>
+        <item name="android:layout_marginLeft">8dp</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:layout_marginRight">8dp</item>
+        <item name="android:enabled">true</item>
+        <item name="android:textColor">@color/selector_enable_button</item>
+        <item name="android:background">@color/white</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="MSDKDialog" parent="@android:style/Theme.Dialog">
+        <item name="android:windowFrame">@null</item>
+        <item name="android:windowBackground">@color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+
+    <style name="left_button_list_button">
+        <item name="android:minHeight">@dimen/left_button_list_button_height</item>
+        <item name="android:layout_width">@dimen/left_button_list_button_width</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingLeft">@dimen/left_button_list_button_padding_left</item>
+        <item name="android:paddingRight">@dimen/left_button_list_button_padding_right</item>
+        <item name="android:layout_marginLeft">@dimen/left_button_list_button_margin_left</item>
+        <item name="android:layout_marginTop">@dimen/left_button_list_button_margin_top</item>
+        <item name="android:background">@color/button_normal</item>
+        <item name="android:textSize">@dimen/left_button_list_button_text_size</item>
+        <item name="android:textColor">@color/black</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="SwitchTextAppearance" parent="@android:style/TextAppearance.Holo.Small">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">@dimen/left_button_list_button_text_size</item>
+    </style>
+</resources>

@@ -1,0 +1,4 @@
+# requests comes from the shared lyrebird-groundstation package
+# (pip install -e GroundStation/Python); only ROS-specific deps live here.
+numpy
+opencv-python

@@ -1,0 +1,84 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "LyrebirdApp",
+    "tmp",
+    "GroundStation/video_test/logs",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "N", "C4", "SIM", "C90", "RUF"]
+ignore = [
+    "E501",
+    "B008",
+    "SIM108",
+    "N812",
+    "N806",
+    "UP007",
+    "UP017",
+    "UP042",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"GroundStation/ROS/**/test/**" = ["B", "N", "E402"]
+"GroundStation/ROS/**/launch/**" = ["E402"]
+# DJIInterface and its subclasses expose a camelCase API that mirrors the DJI SDK's own naming.
+# Renaming would break every caller and, for safety.py, the override contract with the
+# parent class it extends.
+"GroundStation/Python/lyrebird_groundstation/safety.py" = ["N802", "N803"]
+"GroundStation/Python/lyrebird_groundstation/dji_client.py" = ["N802", "N803"]
+"GroundStation/ROS/lyrebird_controller/lyrebird_controller/dji_interface.py" = ["N802", "N803"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+pythonpath = ["GroundStation/Python", "GroundStation/video_test/webapp"]
+testpaths = ["GroundStation/tests"]
+
+[tool.mypy]
+python_version = "3.10"
+explicit_package_bases = true
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = false
+warn_redundant_casts = false
+warn_unused_ignores = false
+warn_no_return = false
+check_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+no_implicit_optional = false
+exclude = [
+    ".venv",
+    "LyrebirdApp",
+    "tmp",
+    "GroundStation/video_test/logs",
+]
+files = [
+    "GroundStation/Python/lyrebird_groundstation",
+    "GroundStation/Python/lyrebird_dji_helpers.py",
+]
+
+[tool.bandit]
+exclude_dirs = [
+    ".venv",
+    "LyrebirdApp",
+    "tmp",
+    "GroundStation/video_test/logs",
+]
+skips = ["B101"]
+severity = "MEDIUM"
