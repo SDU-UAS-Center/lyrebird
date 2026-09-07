@@ -76,11 +76,28 @@ For the Android app, open `LyrebirdApp/android-sdk-v5-as` in Android Studio, cop
 
 ## Funding
 
-*To be filled in.*
+This work was supported by Innovation Fund Denmark (DIREC U07 –PERSIST), the Independent Research Fund Denmark (Grant 10.46540/4264-00105B – NAMUR), and the EU Horizon Europe WildDrone Project (MarieSkłodowska-Curie Grant No. 101071224). 
+(PDF) Swarm-Steward: Scalable and Reliable Natural-Language Coordination of Autonomous Aerial and Ground Robots.
 
 ## Citation
 
-*To be filled in.*
+```bash
+@inproceedings{JaraboPenas2026SwarmSteward,
+  author    = {Alejandro Jarabo-Pe{\~n}as and Juan Bravo-Arrabal and
+               Edouard G.A. Rolland and Anders L. Christensen},
+  title     = {{Swarm-Steward}: Scalable and Reliable Natural-Language
+               Coordination of Autonomous Aerial and Ground Robots},
+  booktitle = {Proceedings of the 2026 International Conference on
+               Unmanned Aircraft Systems (ICUAS)},
+  year      = {2026},
+  month     = {June},
+  pages     = {796--804},
+  publisher = {IEEE},
+  address   = {Corfu, Greece},
+  doi       = {10.1109/ICUAS69441.2026.11598684},
+  url       = {https://doi.org/10.1109/ICUAS69441.2026.11598684},
+}
+```
 
 ## Contributors
 
