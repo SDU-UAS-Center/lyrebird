@@ -13,15 +13,15 @@ class MavlinkSystemIdTest {
         val second = MavlinkSystemId.fromKey("biomass-1")
 
         assertEquals(first, second)
-        assertTrue(first in MavlinkSystemId.MIN..MavlinkSystemId.MAX)
+        assertTrue(first in MavlinkSystemId.AUTO_MIN..MavlinkSystemId.AUTO_MAX)
     }
 
     @Test
     fun fromKeyNeverReturnsReservedIds() {
-        // Exercise several keys; 0 and 255 are reserved and must never be produced.
+        // Exercise several keys; automatic IDs must stay outside the explicit fleet range.
         listOf("drone_1", "UNKNOWN", "", "alpha", "z").forEach { key ->
             val id = MavlinkSystemId.fromKey(key)
-            assertTrue(id in MavlinkSystemId.MIN..MavlinkSystemId.MAX)
+            assertTrue(id in MavlinkSystemId.AUTO_MIN..MavlinkSystemId.AUTO_MAX)
         }
     }
 
@@ -38,8 +38,14 @@ class MavlinkSystemIdTest {
     @Test
     fun resolveHonoursExplicitOverride() {
         assertEquals(7, MavlinkSystemId.resolve(7, "anything"))
-        assertEquals(MavlinkSystemId.MIN, MavlinkSystemId.resolve(-1, "anything"))
-        assertEquals(MavlinkSystemId.MAX, MavlinkSystemId.resolve(300, "anything"))
+        assertEquals(
+            MavlinkSystemId.fromKey("anything"),
+            MavlinkSystemId.resolve(MavlinkSystemId.AUTO_MIN, "anything")
+        )
+        assertEquals(
+            MavlinkSystemId.fromKey("anything"),
+            MavlinkSystemId.resolve(300, "anything")
+        )
     }
 
     @Test

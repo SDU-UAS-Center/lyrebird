@@ -61,13 +61,16 @@ launch. Every `DjiNode` it creates lives inside this one process, sharing one
 `MultiThreadedExecutor`, since the fleet size isn't known ahead of time and a fixed set of
 `ros2 launch` `Node` actions can't be declared for it.
 
-Because they share one process, they also share one network namespace, so each drone is given
-its own MAVLink listen port (offset from `mavlink_port_base`, stably keyed by the drone's own
-name so a reconnecting drone keeps its port). On connecting, each drone is also pushed the
-settings in `lyrebird_controller/config/fleet_settings.yaml` -- the same settings the app's
-cockpit settings menu edits, plus which transport (HTTP/MAVLink/both) to use and an optional
-auto-assigned `rthAltitude` range spaced across the fleet -- so a fleet can be brought up with
-consistent settings without opening the app on each aircraft.
+Because they share one process, the manager creates one shared MAVLink UDP listener for the whole
+fleet. Each aircraft is registered provisionally by its discovered IP and name, then bound to its
+MAVLink `sysid` when the first autopilot heartbeat arrives. `sysid` is used for wire routing; the
+discovered name still determines the ROS namespace (for example `/mini1/`) and is never inferred
+from a numeric system id. Duplicate active system ids are rejected, while a stale route can be
+rebound when an aircraft reconnects. On connecting, each drone is also pushed the settings in
+`lyrebird_controller/config/fleet_settings.yaml` -- the same settings the app's cockpit settings
+menu edits, plus which transport (HTTP/MAVLink/both) to use and an optional auto-assigned
+`rthAltitude` range spaced across the fleet -- so a fleet can be brought up with consistent
+settings without opening the app on each aircraft.
 
 This replaced an older mechanism (`auto_discovery_native.launch.py`, one `ros2 launch` `Node`
 action per drone via a rescanning `TimerAction`) that could not assign MAVLink ports or push any
@@ -89,8 +92,8 @@ Top-level (ground-station-side, not pushed to the drone):
 | `transport` | `both` | Which wire every discovered drone is commanded over: `http` \| `mavlink` \| `both`. Independent of everything below -- this is how the ground station talks to the aircraft, not an app setting. Keep it `both` (MAVLink carries what it can, HTTP fills the rest) unless you have a specific reason to run one wire only. |
 | `discovery_period_sec` | `30.0` | Seconds between rescans for newly joined drones. |
 | `discovery_timeout_sec` | `5.0` | How long each scan waits for answers. |
-| `mavlink_port_base` | `14550` | This ground station's own MAVLink listen port for the first discovered drone; later drones get `base + <stable per-drone offset>` so they don't collide on the same UDP port. Otherwise comes from `LB_MAVLINK_PORT`. |
-| `mavlink_peer_port` | `14550` | The UDP port every aircraft listens on. Fleet-wide only -- no per-drone override yet. Otherwise comes from `LB_MAVLINK_PEER_PORT`. |
+| `mavlink_port` | `14551` | One shared MAVLink listen port for the whole Lyrebird fleet. The bundled value leaves QGroundControl's usual `14550` available on the same host. `mavlink_port_base` remains a backwards-compatible alias. Otherwise comes from `LB_MAVLINK_PORT`. |
+| `mavlink_peer_port` | `14550` | The common UDP port every aircraft listens on for commands. Otherwise comes from `LB_MAVLINK_PEER_PORT`. |
 
 `fleet_settings` (pushed to every drone on connection -- the same values the app's cockpit
 settings menu edits):
@@ -117,12 +120,14 @@ settings menu edits):
 |---|---|
 | `min` | RTH altitude (meters) for the first discovered drone. |
 | `max` | Ceiling: no drone is assigned above this. |
-| `step` | Meters added per drone, by the same stable per-drone identity `mavlink_port_base` offsets by (so a reconnecting drone keeps its altitude), capped at `max` once the fleet outgrows the range. |
+| `step` | Meters added per logical drone slot, independent of MAVLink ports, capped at `max` once the fleet outgrows the range. |
 
 `drone_settings` maps a drone's discovered name (e.g. `mini3`) to its own settings dict,
 overriding `fleet_settings`/`rth_altitude_range` for that drone only -- e.g. `{"mini3":
-{"rthAltitude": 60, "droneName": "Mini 3"}}`. `droneName` is deliberately not a `fleet_settings`
-key (setting it fleet-wide would give every drone the same name) but is valid here.
+{"rthAltitude": 60, "droneName": "Mini 3", "mavlinkSystemId": 1}}`. `droneName` and
+`mavlinkSystemId` are deliberately not fleet-wide keys: the former is human identity and the
+latter is a unique manual vehicle assignment. Manual IDs are `1..99`; omitted IDs use the
+aircraft's serial-derived automatic range `100..254`. Both can also be changed in the app.
 
 ## Commands (`fmu/in/...`)
 

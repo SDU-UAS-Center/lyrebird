@@ -263,7 +263,7 @@
             android:id="@+id/text_drone_name"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="drone_1"
+            android:text="lb_unknown"
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:textStyle="bold"

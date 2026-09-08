@@ -31,7 +31,7 @@ Two related environment variables matter once MAVLink is in play:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LB_MAVLINK_PORT` | `14550` | UDP port *this* ground station listens on. Give a second ground station on the same machine (QGroundControl, say) a different port, or the two compete for the same datagrams and each sees roughly half the telemetry. |
+| `LB_MAVLINK_PORT` | `14550` | UDP port *this* ground station listens on. The fleet ROS manager uses one shared value for all aircraft; give a second ground station on the same machine (QGroundControl, say) a different port, or the two compete for the same datagrams. |
 | `LB_MAVLINK_PEER_PORT` | `14550` | UDP port the *aircraft* listens on for commands. Only needs to differ from `LB_MAVLINK_PORT` when this ground station's own listen port has been moved. |
 | `LB_MAVLINK_SIGNING_KEY` | *(unset)* | 64 hex characters. When set, every outbound command is MAVLink-2-signed with it, so the aircraft treats this ground station as the Safety Computer — the MAVLink equivalent of the HTTP `X-Safety-Token` header. |
 

@@ -16,7 +16,7 @@ This is a full control surface, not a telemetry feed. Every command the ROS grou
 | `lb_mav_0_host` | string | *(empty)* | Ground-station address. Empty means broadcast on the subnet |
 | `lb_mav_0_port` | int | `14550` | Port to send to and listen on |
 | `lb_mav_0_mode` | string | `normal` | Stream profile: `normal` or `minimal` |
-| `lb_mav_0_sysid` | int | `1` | MAVLink system id — one per aircraft |
+| `lb_mav_0_sysid` | int | `0` (auto) | MAVLink system id — `1..99` is an explicit user/fleet assignment; `0` derives a stable serial-based id in `100..254` |
 | `lb_mav_0_allow_flight` | bool | `true` | Allow commands that move the aircraft; disable it from the app settings when flight control must be blocked |
 | `lb_mav_0_signing_key` | string | *(empty)* | 64 hex characters shared with the Safety Computer |
 | `lb_mission_exec` | string | `dji_native` | Who flies an uploaded plan: `onboard` or `dji_native` — see [Missions](/missions/) |
@@ -121,10 +121,18 @@ A UDP datagram goes to exactly one socket, so each ground station needs its own 
 | | Listens | Sends to aircraft |
 |---|---|---|
 | QGroundControl | 14550 | 14550 |
-| ROS drone nodes (`LB_MAVLINK_PORT`) | 14551 | 14550 |
+| Lyrebird fleet router (`mavlink_port` / `LB_MAVLINK_PORT`) | 14551 | 14550 |
 | Dashboard MAVLink tab (`LB_WEBAPP_MAVLINK_PORT`) | 14552 | 14550 |
 
-A fleet needs one port per aircraft for the same reason.
+A Lyrebird fleet uses one shared local listener for all aircraft. The router registers each
+aircraft by its discovered IP, binds the route to the first autopilot heartbeat's `sysid`, and
+uses that `sysid` for telemetry and command demultiplexing. The aircraft name from discovery
+continues to define the ROS namespace; it is not reconstructed from `sysid`. An active duplicate
+`sysid` is rejected and reported, while a stale route may be rebound after reconnect.
+
+QGroundControl and Lyrebird should not bind the same local UDP port. The aircraft can send to
+both destinations, or Lyrebird can explicitly forward a copy to QGroundControl in a future relay
+configuration. If the aircraft sends only to Lyrebird, QGroundControl will not see that stream.
 
 ## Verify without QGroundControl
 

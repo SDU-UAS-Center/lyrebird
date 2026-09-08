@@ -310,6 +310,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val PARAM_DETECTIONS = "LB_DETECT_EN"
         private const val PARAM_EDGE_CONFIDENCE = "LB_EDGE_CONF"
         private const val PARAM_SURFACE_H264_ENCODER = "LB_SURFACE_H264"
+        private const val PARAM_MAVLINK_SYSTEM_ID = "LB_MAV_SYSID"
 
         /**
          * The string-valued settings, carried by the extended parameter protocol.
@@ -328,6 +329,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val TAG_THERMAL = "LyrebirdThermal"
         private const val MEDIAMTX_WHIP_PORT = 8889  // mediamtx WebRTC port for WHIP publish
         private const val PREF_DRONE_NAME = "drone_name"
+        private const val PREF_DRONE_NAME_USER_SET = "drone_name_user_set"
         private const val PREF_MAVLINK_FLIGHT_DEFAULT_MIGRATED = "lb_mav_0_allow_flight_default_v2"
         private const val SETTINGS_BACKUP_DEBOUNCE_MS = 1500L
         private const val PREF_MEDIAMTX_SERVER = "mediamtx_server"
@@ -378,7 +380,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             0.60f,
             0.70f
         )
-        private const val DEFAULT_DRONE_NAME = "drone_1"
+        private const val DEFAULT_DRONE_NAME = "lb_unknown"
         private val WEBRTC_FPS_OPTIONS = intArrayOf(5, 10, 15, 20, 25, 30)
     }
 
@@ -1532,6 +1534,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         return buildString {
             append("{")
             append("\"droneName\":\"${jsonEscape(droneName)}\",")
+            append("\"aircraftSerialNumber\":\"${jsonEscape(droneSerialNumber)}\",")
+            append("\"mavlinkSystemId\":${currentMavlinkSystemId()},")
             append("\"videoSource\":\"${getVideoSourceMode().prefValue}\",")
             append("\"streamingMode\":\"${getStreamingMode().prefValue}\",")
             append("\"webrtcResolution\":\"${getWebRTCResolutionPreset().prefValue}\",")
@@ -1558,6 +1562,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             // consumers (dashboard, ROS, ...) can render settings in sections.
             append("\"groups\":{")
             append("\"droneName\":\"identity\",")
+            append("\"aircraftSerialNumber\":\"identity\",")
+            append("\"mavlinkSystemId\":\"identity\",")
             append("\"detectedAircraft\":\"identity\",")
             append("\"controlProfile\":\"identity\",")
             append("\"videoSource\":\"video\",")
@@ -1582,10 +1588,33 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val trimmed = name.trim()
         if (trimmed.isEmpty() || trimmed.length > 32) return false
         droneName = trimmed
-        sharedPreferences.edit().putString(PREF_DRONE_NAME, trimmed).apply()
+        sharedPreferences.edit()
+            .putString(PREF_DRONE_NAME, trimmed)
+            .putBoolean(PREF_DRONE_NAME_USER_SET, true)
+            .apply()
         LyrebirdFlightLogger.setDroneName(trimmed)
         mainHandler.post { updateDroneNameDisplay() }
         Log.i(TAG, "Drone name set to: $trimmed")
+        return true
+    }
+
+    private fun setAutomaticDroneName() {
+        sharedPreferences.edit().putBoolean(PREF_DRONE_NAME_USER_SET, false).apply()
+        applyAutomaticDroneName()
+    }
+
+    override fun setMavlinkSystemId(value: Int): Boolean {
+        if (value != MavlinkSystemId.AUTO && !MavlinkSystemId.isManual(value)) return false
+        val current = prefIntOrDefault(
+            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
+        )
+        sharedPreferences.edit().putInt(MavlinkEndpointConfig.PREF_SYSTEM_ID, value).apply()
+        if (current != value) restartMavlinkEndpoint()
+        mainHandler.post { updateDroneNameDisplay() }
+        Log.i(
+            TAG,
+            "MAVLink vehicle ID set to ${if (value == MavlinkSystemId.AUTO) "automatic" else value}"
+        )
         return true
     }
 
@@ -3016,7 +3045,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val droneNameText = findViewById<TextView>(R.id.text_drone_name)
         droneNameText?.let {
             // Set initial text
-            it.text = droneName
+            it.text = "$droneName · V${currentMavlinkSystemId()}"
             
             // Make it clickable to change drone name
             it.setOnClickListener {
@@ -3072,6 +3101,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val aircraftColumn = columns[0]
         addCockpitSection(aircraftColumn, "AIRCRAFT")
         addCockpitRow(aircraftColumn, "Drone name", droneName) { showBrandedDroneNamePage() }
+        addCockpitRow(aircraftColumn, "MAVLink vehicle ID", "V${currentMavlinkSystemId()}") {
+            showBrandedMavlinkSystemIdPage()
+        }
         val detectedProductType = productTypeKey.get(ProductType.UNKNOWN) ?: ProductType.UNKNOWN
         addCockpitRow(aircraftColumn, "Detected aircraft", detectedProductType.name)
         addCockpitRow(
@@ -3555,6 +3587,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         currentValue: Int,
         hint: String,
         minimum: Int = 1,
+        maximum: Int = Int.MAX_VALUE,
+        resetLabel: String? = null,
+        onReset: (() -> Unit)? = null,
         onSave: (Int) -> Unit,
         returnPage: () -> Unit = ::showLyrebirdSettingsMenu,
         onBack: () -> Unit = returnPage
@@ -3577,10 +3612,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             container.addView(input)
             addBrandedSettingsButton(container, "Save", {
                 val value = input.text.toString().trim().toIntOrNull()
-                if (value == null || value < minimum) {
+                if (value == null || value < minimum || value > maximum) {
                     Toast.makeText(
                         this,
-                        "Enter a whole number of at least $minimum",
+                        "Enter a whole number from $minimum to $maximum",
                         Toast.LENGTH_SHORT
                     ).show()
                 } else {
@@ -3588,6 +3623,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     returnPage()
                 }
             })
+            if (resetLabel != null && onReset != null) {
+                addBrandedSettingsButton(container, resetLabel, {
+                    onReset()
+                    returnPage()
+                })
+            }
         }
     }
 
@@ -3656,11 +3697,38 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             droneName,
             "e.g. mini3, alpha, scout",
             onSave = { value ->
-                droneName = value.ifBlank { DEFAULT_DRONE_NAME }
-                sharedPreferences.edit().putString(PREF_DRONE_NAME, droneName).apply()
-                LyrebirdFlightLogger.setDroneName(droneName)
-                updateDroneNameDisplay()
-                Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
+                if (value.isBlank()) {
+                    setAutomaticDroneName()
+                    Toast.makeText(this, "Drone name is now automatic", Toast.LENGTH_SHORT).show()
+                } else if (setDroneName(value)) {
+                    Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
+                }
+            },
+            returnPage = ::showLyrebirdSettingsMenu,
+            onBack = ::showLyrebirdSettingsMenu
+        )
+    }
+
+    private fun showBrandedMavlinkSystemIdPage() {
+        val configured = prefIntOrDefault(
+            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
+        )
+        showBrandedIntegerEditPage(
+            "MAVLINK VEHICLE ID",
+            "Manual IDs are 1-99. Automatic IDs 100-254 are derived from the aircraft serial.",
+            configured.takeIf { MavlinkSystemId.isManual(it) } ?: -1,
+            "1-99",
+            minimum = MavlinkSystemId.MANUAL_MIN,
+            maximum = MavlinkSystemId.MANUAL_MAX,
+            onSave = { value ->
+                if (setMavlinkSystemId(value)) {
+                    Toast.makeText(this, "MAVLink vehicle ID saved: V$value", Toast.LENGTH_SHORT).show()
+                }
+            },
+            resetLabel = "Use automatic ID",
+            onReset = {
+                setMavlinkSystemId(MavlinkSystemId.AUTO)
+                Toast.makeText(this, "MAVLink vehicle ID is now automatic", Toast.LENGTH_SHORT).show()
             },
             returnPage = ::showLyrebirdSettingsMenu,
             onBack = ::showLyrebirdSettingsMenu
@@ -3884,7 +3952,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     
     private fun updateDroneNameDisplay() {
         val droneNameText = findViewById<TextView>(R.id.text_drone_name)
-        droneNameText?.text = droneName
+        droneNameText?.text = "$droneName · V${currentMavlinkSystemId()}"
     }
 
     private fun setupKeyListeners() {
@@ -4103,28 +4171,40 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
     
     private fun loadDroneName() {
-        val storedName = sharedPreferences.getString(PREF_DRONE_NAME, DEFAULT_DRONE_NAME)?.trim().orEmpty()
-        droneName = storedName.ifEmpty { DEFAULT_DRONE_NAME }
+        val storedName = sharedPreferences.getString(PREF_DRONE_NAME, "")?.trim().orEmpty()
+        val explicit = sharedPreferences.getBoolean(PREF_DRONE_NAME_USER_SET, false)
+        droneName = if (explicit) storedName else defaultDroneName()
+        sharedPreferences.edit()
+            .putString(PREF_DRONE_NAME, droneName)
+            .putBoolean(PREF_DRONE_NAME_USER_SET, explicit)
+            .apply()
+        Log.i(TAG, "Loaded ${if (explicit) "user" else "automatic"} drone name: $droneName")
+        LyrebirdFlightLogger.setDroneName(droneName)
+    }
 
-        if (storedName.isEmpty()) {
-            // Persist a safe fallback to avoid generating malformed URLs like //whip.
-            sharedPreferences.edit().putString(PREF_DRONE_NAME, droneName).apply()
-        }
+    private fun defaultDroneName(): String {
+        val suffix = droneSerialNumber
+            .trim()
+            .takeLast(8)
+            .ifEmpty { "unknown" }
+            .replace(Regex("[^a-zA-Z0-9_]"), "_")
+            .lowercase()
+        return "lb_$suffix"
+    }
 
-        if (storedName.isEmpty()) {
-            // First time - prompt user for drone name
-            mainHandler.post {
-                showDroneNameDialog(isFirstTime = true)
-            }
-        } else {
-            Log.i(TAG, "Loaded drone name: $droneName")
-            LyrebirdFlightLogger.setDroneName(droneName)
-        }
+    private fun applyAutomaticDroneName() {
+        if (sharedPreferences.getBoolean(PREF_DRONE_NAME_USER_SET, false)) return
+        val generated = defaultDroneName()
+        if (droneName == generated) return
+        droneName = generated
+        sharedPreferences.edit().putString(PREF_DRONE_NAME, generated).apply()
+        LyrebirdFlightLogger.setDroneName(generated)
+        mainHandler.post { updateDroneNameDisplay() }
     }
     
     private fun showDroneNameDialog(isFirstTime: Boolean = false) {
         val input = EditText(this)
-        input.hint = "e.g., drone_01, alpha, scout"
+        input.hint = "e.g., lb_01, alpha, scout"
         if (!isFirstTime) {
             input.setText(droneName)
         }
@@ -4136,18 +4216,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             .setPositiveButton("Save") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    droneName = name
-                    sharedPreferences.edit().putString(PREF_DRONE_NAME, droneName).apply()
-                    LyrebirdFlightLogger.setDroneName(droneName)
-                    Log.i(TAG, "Drone name set to: $droneName")
-                    Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
-                    updateDroneNameDisplay()
+                    if (setDroneName(name)) {
+                        Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
+                    }
                 } else {
-                    droneName = DEFAULT_DRONE_NAME
-                    sharedPreferences.edit().putString(PREF_DRONE_NAME, droneName).apply()
-                    LyrebirdFlightLogger.setDroneName(droneName)
-                    Toast.makeText(this, "Using default name: $droneName", Toast.LENGTH_SHORT).show()
-                    updateDroneNameDisplay()
+                    Toast.makeText(this, "Enter a name to override the automatic name", Toast.LENGTH_SHORT).show()
                 }
             }
         
@@ -5048,8 +5121,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             val serialKey = KeyTools.createKey(FlightControllerKey.KeySerialNumber)
             KeyManager.getInstance().getValue(serialKey, object : dji.v5.common.callback.CommonCallbacks.CompletionCallbackWithParam<String> {
                 override fun onSuccess(serialNumber: String?) {
-                    droneSerialNumber = serialNumber?.takeLast(8) ?: "UNKNOWN"
+                    val previousSystemId = currentMavlinkSystemId()
+                    droneSerialNumber = serialNumber?.trim()?.takeIf { it.isNotEmpty() } ?: "UNKNOWN"
                     Log.i(TAG, "Drone serial number: $droneSerialNumber")
+                    applyAutomaticDroneName()
+                    if (!configuredMavlinkSystemIdIsManual() && previousSystemId != currentMavlinkSystemId()) {
+                        restartMavlinkEndpoint()
+                    }
                 }
                 override fun onFailure(error: dji.v5.common.error.IDJIError) {
                     droneSerialNumber = "UNKNOWN"
@@ -5410,12 +5488,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         )
         // One system id per aircraft, so QGroundControl does not merge two drones into one vehicle.
         // 0 (the default) derives the id from the drone name once renamed, and the serial before that.
-        val systemId = MavlinkSystemId.resolve(
-            prefIntOrDefault(
-                MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
-            ),
-            sysIdKey()
-        )
+        val systemId = currentMavlinkSystemId()
         return MavlinkEndpointConfig(
             enabled = runCatching {
                 sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ENABLED, true)
@@ -5442,15 +5515,19 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         )
     }
 
-    /**
-     * The stable identity the MAVLink system id is derived from: the drone name once the operator
-     * has renamed it, otherwise the aircraft serial number. Every device shares the default name,
-     * so keying off the name alone would give every un-renamed drone the same id.
-     */
-    private fun sysIdKey(): String {
-        val name = droneName.trim()
-        return if (name.isNotEmpty() && name != DEFAULT_DRONE_NAME) name else droneSerialNumber
-    }
+    /** The full DJI serial is immutable; the editable drone name is never an ID input. */
+    private fun sysIdKey(): String = droneSerialNumber.trim().ifEmpty { "UNKNOWN" }
+
+    private fun configuredMavlinkSystemId(): Int =
+        prefIntOrDefault(
+            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
+        )
+
+    private fun configuredMavlinkSystemIdIsManual(): Boolean =
+        MavlinkSystemId.isManual(configuredMavlinkSystemId())
+
+    private fun currentMavlinkSystemId(): Int =
+        MavlinkSystemId.resolve(configuredMavlinkSystemId(), sysIdKey())
 
     /** Read an int preference that may have been stored as a string by a hand edit. */
     private fun prefIntOrDefault(key: String, fallback: Int): Int =
@@ -5638,6 +5715,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             CommandResult(MavlinkCommandOutcome.ACCEPTED)
         }
 
+        PARAM_MAVLINK_SYSTEM_ID -> {
+            val systemId = value.toInt()
+            if (value != systemId.toFloat() || !setMavlinkSystemId(systemId)) {
+                CommandResult(
+                    MavlinkCommandOutcome.DENIED,
+                    "Use 0 for automatic or 1-99 for a manual vehicle ID"
+                )
+            } else {
+                CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+        }
+
         PARAM_EDGE_CONFIDENCE ->
             if (setEdgeConfidence(value)) {
                 CommandResult(MavlinkCommandOutcome.ACCEPTED)
@@ -5709,6 +5798,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             PARAM_DETECTIONS to if (isDetectionsEnabled()) 1f else 0f,
             PARAM_EDGE_CONFIDENCE to getEdgeConfidenceThreshold(),
             PARAM_SURFACE_H264_ENCODER to if (isDjiSurfaceH264EncoderEnabled()) 1f else 0f,
+            PARAM_MAVLINK_SYSTEM_ID to currentMavlinkSystemId().toFloat(),
             // QGC's PX4 airframe component reads this one PX4 parameter and pops a "Parameters
             // are missing from firmware" dialog when it is absent. 4001 is PX4's "Generic
             // Quadcopter" airframe id; published read-only like the rest of the list.
@@ -6873,6 +6963,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             mavlinkFtpServer = ftpServer
         }.onFailure { error ->
             Log.e(TAG, "Error starting MAVLink endpoint: ${error.message}", error)
+        }
+    }
+
+    private fun restartMavlinkEndpoint() {
+        mainHandler.post {
+            mavlinkEndpoint?.stop()
+            mavlinkEndpoint = null
+            mavlinkFtpServer?.shutdown()
+            mavlinkFtpServer = null
+            if (!isDestroyed && !isFinishing) startMavlinkEndpoint()
         }
     }
 

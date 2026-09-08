@@ -88,11 +88,10 @@ HTTP_ONLY_BY_DESIGN: dict[str, str] = {
 def mavlink_port_from_env(environ: dict[str, str] | None = None) -> int:
     """UDP port this ground station listens on, from ``LB_MAVLINK_PORT``.
 
-    Configurable for two reasons, and both bite in practice. A fleet needs one port per aircraft,
-    because only one socket receives a given UDP port's packets. And a second ground station on
-    the same machine -- QGroundControl beside this one -- needs its own port for the same reason:
-    sharing 14550 means the two compete for datagrams and each sees roughly half the telemetry,
-    which looks like one of them being frozen rather than like a conflict.
+    Configurable for two reasons, and both bite in practice. A fleet router uses one shared port
+    for all aircraft, while a second ground station on the same machine -- QGroundControl beside
+    this one -- needs its own port: sharing 14550 means the two compete for datagrams and each sees
+    roughly half the telemetry, which looks like one of them being frozen rather than a conflict.
 
     The aircraft fans its telemetry out to every ground station it has heard from, so running on
     a different port is all it takes for both to be fed.
@@ -560,11 +559,395 @@ def apply_mavlink_message(telemetry: dict[str, Any], msg: Any) -> bool:
     return handler(telemetry, msg) if handler is not None else False
 
 
+MAVLINK_ROUTE_STALE_TIMEOUT_S = 10.0
+
+
+def _message_identity(msg: Any) -> tuple[int | None, int | None]:
+    """Return a decoded message's source system and component, if it has a MAVLink header."""
+    try:
+        header = msg.get_header()
+        return getattr(header, "srcSystem", None), getattr(header, "srcComponent", None)
+    except (AttributeError, TypeError):
+        return None, None
+
+
+class MavlinkRoute:
+    """Logical aircraft registration owned by a :class:`MavlinkRouter`."""
+
+    def __init__(
+        self,
+        router: MavlinkRouter,
+        host: str,
+        peer_port: int,
+        name: str = "",
+        system_id: int | None = None,
+    ):
+        self.router = router
+        self.host = host
+        self.peer_port = peer_port
+        self.name = name or host
+        self._system_id = system_id
+        self.last_seen = 0.0
+        self.duplicate_system_id: int | None = None
+        self.replaced = False
+        self._closed = False
+        self._callbacks: list[Callable[[bytes, list[Any], tuple[str, int]], None]] = []
+        self._condition = threading.Condition()
+
+    @property
+    def system_id(self) -> int | None:
+        with self._condition:
+            return self._system_id
+
+    @property
+    def closed(self) -> bool:
+        with self._condition:
+            return self._closed
+
+    def subscribe(self, callback: Callable[[bytes, list[Any], tuple[str, int]], None]) -> None:
+        with self._condition:
+            if self._closed:
+                raise RuntimeError(f"MAVLink route for {self.name!r} is closed")
+            if callback not in self._callbacks:
+                self._callbacks.append(callback)
+
+    def unsubscribe(self, callback: Callable[[bytes, list[Any], tuple[str, int]], None]) -> None:
+        with self._condition, suppress(ValueError):
+            self._callbacks.remove(callback)
+
+    def wait_for_system_id(self, timeout: float = 1.0) -> int | None:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while self._system_id is None and not self._closed and not self.replaced:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._condition.wait(remaining)
+            return self._system_id
+
+    def send(self, frame: bytes) -> None:
+        self.router.send(self, frame)
+
+    def close(self) -> None:
+        self.router.unregister(self)
+
+    def _bind_system_id(self, system_id: int) -> None:
+        with self._condition:
+            self._system_id = system_id
+            self.duplicate_system_id = None
+            self._condition.notify_all()
+
+    def _mark_duplicate(self, system_id: int) -> None:
+        with self._condition:
+            self.duplicate_system_id = system_id
+            self._condition.notify_all()
+
+    def _mark_replaced(self) -> None:
+        with self._condition:
+            self.replaced = True
+            self._condition.notify_all()
+
+    def _mark_closed(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+
+    def _dispatch(self, data: bytes, messages: list[Any], address: tuple[str, int]) -> None:
+        with self._condition:
+            callbacks = tuple(self._callbacks)
+        for callback in callbacks:
+            try:
+                callback(data, messages, address)
+            except Exception:
+                # A subscriber must not kill the router's sole receive thread. The subscriber owns
+                # its logging because the transport module has no ROS dependency.
+                continue
+
+
+class MavlinkRouter:
+    """One UDP listener that demultiplexes MAVLink frames into logical aircraft routes.
+
+    A route is provisionally identified by the discovered aircraft IP. Its MAVLink system id is
+    learned only from an autopilot heartbeat, which prevents an unsolicited packet from creating a
+    vehicle. Once learned, every later frame must carry that system id and may use any component
+    id, so camera telemetry remains attached to the same aircraft.
+    """
+
+    def __init__(
+        self,
+        port: int = DEFAULT_MAVLINK_PORT,
+        bind_host: str = "",
+        peer_port: int = DEFAULT_MAVLINK_PORT,
+        logger: Callable[[str], None] | None = None,
+    ):
+        self.port = port
+        self.bind_host = bind_host
+        self.peer_port = peer_port
+        self._logger = logger
+        self._routes_by_host: dict[str, MavlinkRoute] = {}
+        self._routes_by_system_id: dict[int, MavlinkRoute] = {}
+        self._lock = threading.RLock()
+        self._socket: socket.socket | None = None
+        self._parser: Any | None = None
+        self._thread: threading.Thread | None = None
+        self._running = False
+        self._heartbeat_frame: bytes | None = None
+        self.errors: list[str] = []
+
+    @property
+    def routes(self) -> tuple[MavlinkRoute, ...]:
+        with self._lock:
+            return tuple(self._routes_by_host.values())
+
+    def register(
+        self,
+        host: str,
+        peer_port: int | None = None,
+        *,
+        name: str = "",
+        system_id: int | None = None,
+    ) -> MavlinkRoute:
+        """Register an aircraft and start the shared listener on first use."""
+        if not host:
+            raise ValueError("A MAVLink route requires an aircraft host")
+        if system_id is not None and not 1 <= system_id <= 254:
+            raise ValueError("MAVLink system_id must be in the range 1..254")
+
+        with self._lock:
+            route = self._routes_by_host.get(host)
+            if route is not None and not route.closed:
+                return route
+            route = MavlinkRoute(
+                self,
+                host,
+                peer_port if peer_port is not None else self.peer_port,
+                name=name,
+                system_id=system_id,
+            )
+            self._routes_by_host[host] = route
+            if system_id is not None and not self._bind_system_id(route, system_id):
+                route._mark_duplicate(system_id)
+            try:
+                self.start()
+            except Exception:
+                self._routes_by_host.pop(host, None)
+                route._mark_closed()
+                raise
+            return route
+
+    def unregister(self, route: MavlinkRoute) -> None:
+        with self._lock:
+            if self._routes_by_host.get(route.host) is route:
+                del self._routes_by_host[route.host]
+            if (
+                route.system_id is not None
+                and self._routes_by_system_id.get(route.system_id) is route
+            ):
+                del self._routes_by_system_id[route.system_id]
+            route._mark_closed()
+            if not self._routes_by_host:
+                self.stop()
+
+    def start(self) -> None:
+        with self._lock:
+            if self._running:
+                return
+            from pymavlink.dialects.v20 import common as mavlink_common
+
+            parser = mavlink_common.MAVLink(None)
+            parser.robust_parsing = True
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Deliberately do not set SO_REUSEADDR: another ground station must not silently
+            # compete for the same UDP endpoint and lose an arbitrary subset of datagrams.
+            sock.bind((self.bind_host, self.port))
+            sock.settimeout(0.2)
+            self.port = sock.getsockname()[1]
+            self._parser = parser
+            self._socket = sock
+            self._running = True
+            self._thread = threading.Thread(
+                target=self._receive_loop, name="mavlink-router", daemon=True
+            )
+            self._thread.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._running = False
+            sock = self._socket
+            self._socket = None
+            thread = self._thread
+            self._thread = None
+        if sock is not None:
+            with suppress(OSError):
+                sock.close()
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2)
+
+    def send(self, route: MavlinkRoute, frame: bytes) -> None:
+        with self._lock:
+            current = self._routes_by_host.get(route.host)
+            if current is not route or route.closed or route.replaced:
+                raise RuntimeError(f"MAVLink route for {route.name!r} is no longer active")
+            sock = self._socket
+            if sock is None or not self._running:
+                raise RuntimeError("MAVLink router is not running")
+            sock.sendto(frame, (route.host, route.peer_port))
+
+    def _receive_loop(self) -> None:
+        next_heartbeat = 0.0
+        while self._running:
+            if time.monotonic() >= next_heartbeat:
+                self._send_heartbeats()
+                next_heartbeat = time.monotonic() + GCS_HEARTBEAT_PERIOD_S
+            sock = self._socket
+            if sock is None:
+                return
+            try:
+                data, address = sock.recvfrom(2048)
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            self._dispatch_datagram(data, address)
+
+    def _dispatch_datagram(self, data: bytes, address: tuple[str, int]) -> None:
+        parser = self._parser
+        if parser is None:
+            return
+        messages = parser.parse_buffer(data) or []
+        frame_system_id = data[5] if len(data) >= 10 and data[0] == MAVLINK2_MAGIC else None
+
+        with self._lock:
+            route = self._routes_by_host.get(address[0])
+            if route is None:
+                self._report(f"Ignoring MAVLink datagram from unknown host {address[0]}")
+                return
+            if not self._bind_heartbeat(route, messages):
+                return
+            accepted = self._accepted_messages(route, frame_system_id, messages)
+            if accepted is None:
+                return
+            route.last_seen = time.monotonic()
+
+        route._dispatch(data, accepted, address)
+
+    def _bind_heartbeat(self, route: MavlinkRoute, messages: list[Any]) -> bool:
+        heartbeat_system_id = self._autopilot_heartbeat_system_id(messages)
+        if heartbeat_system_id is None:
+            if route.system_id is not None:
+                return True
+            self._report(
+                f"Ignoring MAVLink data from {route.name!r} until its autopilot heartbeat "
+                "registers a system id"
+            )
+            return False
+        if route.system_id == heartbeat_system_id:
+            return True
+        if self._bind_system_id(route, heartbeat_system_id):
+            if route.system_id is not None:
+                self._report(
+                    f"Bound MAVLink system id {heartbeat_system_id} to route {route.name!r}"
+                )
+            return True
+        route._mark_duplicate(heartbeat_system_id)
+        return False
+
+    @staticmethod
+    def _autopilot_heartbeat_system_id(messages: list[Any]) -> int | None:
+        for message in messages:
+            system_id, component_id = _message_identity(message)
+            if (
+                message.get_type() == "HEARTBEAT"
+                and component_id == COMP_ID_AUTOPILOT1
+                and system_id is not None
+            ):
+                return system_id
+        return None
+
+    def _accepted_messages(
+        self, route: MavlinkRoute, frame_system_id: int | None, messages: list[Any]
+    ) -> list[Any] | None:
+        system_id = route.system_id
+        if system_id is None or self._routes_by_system_id.get(system_id) is not route:
+            return None
+        if frame_system_id is not None and frame_system_id != system_id:
+            self._report(
+                f"Ignoring MAVLink system id {frame_system_id} from route {route.name!r}; "
+                f"expected {system_id}"
+            )
+            return None
+        accepted = [message for message in messages if _message_identity(message)[0] == system_id]
+        if not accepted and frame_system_id != system_id:
+            return None
+        return accepted
+
+    def _bind_system_id(self, route: MavlinkRoute, system_id: int) -> bool:
+        if not 1 <= system_id <= 254:
+            self._report(f"Ignoring reserved MAVLink system id {system_id} from {route.name!r}")
+            return False
+        previous = route.system_id
+        existing = self._routes_by_system_id.get(system_id)
+        if existing is not None and existing is not route:
+            age = time.monotonic() - existing.last_seen
+            if existing.last_seen and age > MAVLINK_ROUTE_STALE_TIMEOUT_S:
+                existing._mark_replaced()
+                del self._routes_by_system_id[system_id]
+                self._report(
+                    f"Rebinding stale MAVLink system id {system_id} from {existing.name!r} "
+                    f"to {route.name!r}"
+                )
+            else:
+                self._report(
+                    f"Rejecting duplicate MAVLink system id {system_id} from {route.name!r}; "
+                    f"already assigned to {existing.name!r}"
+                )
+                return False
+        if (
+            previous != system_id
+            and previous is not None
+            and self._routes_by_system_id.get(previous) is route
+        ):
+            del self._routes_by_system_id[previous]
+        self._routes_by_system_id[system_id] = route
+        route._bind_system_id(system_id)
+        return True
+
+    def _send_heartbeats(self) -> None:
+        if self._heartbeat_frame is None:
+            from pymavlink.dialects.v20 import common as mavlink_common
+
+            sink = _FrameSink()
+            mav = mavlink_common.MAVLink(sink, srcSystem=255, srcComponent=190)
+            mav.heartbeat_send(
+                mavlink_common.MAV_TYPE_GCS,
+                mavlink_common.MAV_AUTOPILOT_INVALID,
+                0,
+                0,
+                mavlink_common.MAV_STATE_ACTIVE,
+            )
+            self._heartbeat_frame = sink.buf
+        with self._lock:
+            routes = tuple(
+                route
+                for route in self._routes_by_host.values()
+                if not route.closed and not route.replaced and route.duplicate_system_id is None
+            )
+        for route in routes:
+            with suppress(OSError, RuntimeError):
+                self.send(route, self._heartbeat_frame)
+
+    def _report(self, message: str) -> None:
+        self.errors.append(message)
+        if self._logger is not None:
+            self._logger(message)
+
+
 class MavlinkTelemetrySource:
     """Listens for the aircraft's MAVLink stream and keeps a telemetry dictionary current.
 
-    Runs its own receive thread, like the HTTP telemetry reader it stands in for, and writes
-    through the callback it is given so the owning client keeps a single lock over its state.
+    In single-aircraft mode it owns a receive thread; with a :class:`MavlinkRoute`, the shared
+    router owns the socket and this object only folds its route's decoded messages into state.
+    Both paths write through the callback so the owning client keeps a single lock over its state.
     """
 
     def __init__(
@@ -574,16 +957,16 @@ class MavlinkTelemetrySource:
         on_update: Callable[[dict[str, Any]], None] | None = None,
         peer_host: str = "",
         peer_port: int = DEFAULT_MAVLINK_PORT,
+        route: MavlinkRoute | None = None,
     ):
         self.port = port
         #: Where the aircraft listens. Distinct from [port], which is where we listen.
         self.peer_port = peer_port
         self.bind_host = bind_host
-        #: Only accept packets from this aircraft. A fleet is the reason: several aircraft
-        #: streaming to one port would be folded into a single telemetry dictionary, and the
-        #: result would look like one drone teleporting between positions rather than like an
-        #: error. Empty means accept anything, which is right for a single aircraft.
+        #: Only accept packets from this aircraft in the legacy private-socket mode. Shared routes
+        #: perform the same filtering by discovered host and MAVLink system id in the router.
         self.peer_host = peer_host
+        self._route = route
         self._on_update = on_update
         self._telemetry: dict[str, Any] = {}
         self._socket: socket.socket | None = None
@@ -601,11 +984,18 @@ class MavlinkTelemetrySource:
         if self._running:
             return
         self._running = True
+        if self._route is not None:
+            self.peer = (self._route.host, self._route.peer_port)
+            self._route.subscribe(self._receive_routed_datagram)
+            return
         self._thread = threading.Thread(target=self._receive_loop, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._running = False
+        if self._route is not None:
+            self._route.unsubscribe(self._receive_routed_datagram)
+            return
         if self._socket is not None:
             with suppress(OSError):
                 self._socket.close()
@@ -650,9 +1040,22 @@ class MavlinkTelemetrySource:
         if self.peer_host and addr[0] != self.peer_host:
             return
         self.peer = addr
+        self._process_datagram(data, parser.parse_buffer(data) or [], addr)
+
+    def _receive_routed_datagram(
+        self, data: bytes, messages: list[Any], address: tuple[str, int]
+    ) -> None:
+        if self._running:
+            self.peer = address
+            self._process_datagram(data, messages, address)
+
+    def _process_datagram(
+        self, data: bytes, messages: list[Any], _address: tuple[str, int]
+    ) -> None:
+        """Apply one already-demultiplexed datagram to this aircraft's state."""
 
         changed = self._apply_lyrebird_status(data)
-        for msg in parser.parse_buffer(data) or []:
+        for msg in messages:
             changed |= apply_mavlink_message(self._telemetry, msg)
         if changed:
             _derive(self._telemetry)
@@ -840,7 +1243,12 @@ _INBOX_LIMIT = 64
 
 def _ack_matcher(command: int) -> Callable[[Any], bool]:
     def matches(msg: Any) -> bool:
-        return msg.get_type() == "COMMAND_ACK" and msg.command == command
+        _, component_id = _message_identity(msg)
+        return (
+            msg.get_type() == "COMMAND_ACK"
+            and msg.command == command
+            and component_id == COMP_ID_AUTOPILOT1
+        )
 
     return matches
 
@@ -1141,6 +1549,7 @@ SETTING_PARAM_ENDPOINTS = {
     "/send/setDetectionsEnabled": "LB_DETECT_EN",
     "/send/setEdgeConfidence": "LB_EDGE_CONF",
     "/send/setSurfaceH264Encoder": "LB_SURFACE_H264",
+    "/send/setMavlinkSystemId": "LB_MAV_SYSID",
 }
 
 #: CRC_EXTRA for LYREBIRD_STATUS, from lyrebird.xml. Changes whenever the fields do, which is
@@ -1476,17 +1885,21 @@ class MavlinkCommandChannel:
         self,
         host: str,
         port: int = DEFAULT_MAVLINK_PORT,
-        target_system: int = 1,
+        target_system: int | None = None,
         on_latch: Callable[[dict[str, Any]], None] | None = None,
         signing_key: bytes | None = None,
+        route: MavlinkRoute | None = None,
     ):
         #: Called when a moving command completes, with the reach-latch keys to merge into
         #: telemetry. The client wires this to its own telemetry state.
         self._on_latch = on_latch
         self.host = host
         self.port = port
-        self.target_system = target_system
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._configured_target_system = target_system
+        self._route = route
+        self._socket = (
+            None if route is not None else socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        )
         self._lock = threading.Lock()
         self._seq = 0
         # Built lazily so importing this module does not require pymavlink until a command is
@@ -1499,6 +1912,28 @@ class MavlinkCommandChannel:
         # With a signing key every outbound frame is signed, so the aircraft reads this ground
         # station as the Safety Computer rather than the Pilot.
         self._sink = _FrameSink(_FrameSigner(signing_key) if signing_key is not None else None)
+        if self._route is not None:
+            self._route.subscribe(self._receive_routed_datagram)
+
+    @property
+    def target_system(self) -> int:
+        """The configured target, or the system id learned by the shared route."""
+        if self._configured_target_system is not None:
+            return self._configured_target_system
+        if self._route is not None:
+            system_id = self._route.wait_for_system_id()
+            if system_id is None:
+                raise RuntimeError(f"MAVLink system id for {self._route.name!r} is not registered")
+            return system_id
+        return 1
+
+    def close(self) -> None:
+        """Release the command reader and its route or private socket."""
+        if self._route is not None:
+            self._route.unsubscribe(self._receive_routed_datagram)
+        if self._socket is not None:
+            with suppress(OSError):
+                self._socket.close()
 
     def supports(self, endpoint: str) -> bool:
         return endpoint in _COMMAND_MAP
@@ -1572,7 +2007,7 @@ class MavlinkCommandChannel:
         """
         frame = self._frame_command(command, params)
         with self._lock:
-            self._socket.sendto(frame, (self.host, self.port))
+            self._send_frame(frame)
 
         ack = self._await(_ack_matcher(command), timeout)
         if ack is None:
@@ -1616,6 +2051,8 @@ class MavlinkCommandChannel:
                 self._inbox_ready.wait(remaining)
 
     def _start_reader(self) -> None:
+        if self._route is not None:
+            return
         if self._reader is not None:
             return
         with self._lock:
@@ -1628,6 +2065,8 @@ class MavlinkCommandChannel:
 
     def _read_loop(self) -> None:
         parser = self._ensure_parser()
+        if self._socket is None:
+            return
         self._socket.settimeout(1.0)
         while True:
             try:
@@ -1637,13 +2076,30 @@ class MavlinkCommandChannel:
             except OSError:
                 return
             for msg in parser.parse_buffer(data) or []:
-                if msg.get_type() not in _INTERESTING_REPLIES:
-                    continue
-                with self._inbox_ready:
-                    self._inbox.append(msg)
-                    # Bounded: a reply nobody is waiting for must not accumulate forever.
-                    del self._inbox[:-_INBOX_LIMIT]
-                    self._inbox_ready.notify_all()
+                self._receive_command_message(msg)
+
+    def _receive_routed_datagram(
+        self, _data: bytes, messages: list[Any], _address: tuple[str, int]
+    ) -> None:
+        for message in messages:
+            self._receive_command_message(message)
+
+    def _receive_command_message(self, msg: Any) -> None:
+        if msg.get_type() not in _INTERESTING_REPLIES:
+            return
+        with self._inbox_ready:
+            self._inbox.append(msg)
+            # Bounded: a reply nobody is waiting for must not accumulate forever.
+            del self._inbox[:-_INBOX_LIMIT]
+            self._inbox_ready.notify_all()
+
+    def _send_frame(self, frame: bytes) -> None:
+        if self._route is not None:
+            self._route.send(frame)
+            return
+        if self._socket is None:
+            raise RuntimeError("MAVLink command channel is closed")
+        self._socket.sendto(frame, (self.host, self.port))
 
     def _ensure_parser(self):
         from pymavlink.dialects.v20 import common as mavlink_common
@@ -1665,7 +2121,7 @@ class MavlinkCommandChannel:
             self.target_system, axis(pitch), axis(roll), axis(throttle), axis(yaw), 0
         )
         with self._lock:
-            self._socket.sendto(self._sink.buf, (self.host, self.port))
+            self._send_frame(self._sink.buf)
 
     def set_parameter(self, name: str, value: float, timeout: float = 3.0) -> str:
         """Write one parameter and report what the aircraft says it now holds.
@@ -1680,7 +2136,7 @@ class MavlinkCommandChannel:
             self.target_system, COMP_ID_AUTOPILOT1, name.encode()[:16], float(value), 9
         )
         with self._lock:
-            self._socket.sendto(self._sink.buf, (self.host, self.port))
+            self._send_frame(self._sink.buf)
 
         reply = self._await(
             lambda m: m.get_type() == "PARAM_VALUE" and m.param_id.rstrip("\x00") == name,
@@ -1714,7 +2170,7 @@ class MavlinkCommandChannel:
             PARAM_EXT_TYPE_CUSTOM,
         )
         with self._lock:
-            self._socket.sendto(self._sink.buf, (self.host, self.port))
+            self._send_frame(self._sink.buf)
 
         reply = self._await(
             lambda m: m.get_type() == "PARAM_EXT_ACK" and _trim(m.param_id) == name,
@@ -1738,7 +2194,7 @@ class MavlinkCommandChannel:
             self._sink.buf = b""
             fn(*args)
             with self._lock:
-                self._socket.sendto(self._sink.buf, (self.host, self.port))
+                self._send_frame(self._sink.buf)
 
         transmit(mav.mission_count_send, self.target_system, COMP_ID_AUTOPILOT1, count, 0)
         for _ in range(count + 2):
@@ -1799,8 +2255,9 @@ class MavlinkCommandChannel:
         values = [float(p) for p in (list(params) + [0.0] * 7)[:7]]
 
         if command in POSITION_COMMANDS:
+            target_system = self.target_system
             mav.command_int_send(
-                self.target_system,
+                target_system,
                 COMP_ID_AUTOPILOT1,
                 MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
                 command,

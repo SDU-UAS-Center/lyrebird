@@ -41,7 +41,17 @@ def discover_drone(timeout=5.0, verbose=True):
 class DJIInterface(_SharedDJIInterface):
     """Backward-compatible ROS lyrebird_controller DJI client."""
 
-    def __init__(self, IP_RC="", *, mavlink_port=None, mavlink_peer_port=None, transport=None):
+    def __init__(
+        self,
+        IP_RC="",
+        *,
+        mavlink_port=None,
+        mavlink_peer_port=None,
+        transport=None,
+        mavlink_router=None,
+        mavlink_system_id=None,
+        mavlink_vehicle_name="",
+    ):
         if isinstance(transport, str):
             transport = Transport(transport)
         super().__init__(
@@ -50,6 +60,9 @@ class DJIInterface(_SharedDJIInterface):
             mavlink_port=mavlink_port,
             mavlink_peer_port=mavlink_peer_port,
             transport=transport,
+            mavlink_router=mavlink_router,
+            mavlink_system_id=mavlink_system_id,
+            mavlink_vehicle_name=mavlink_vehicle_name,
         )
 
 

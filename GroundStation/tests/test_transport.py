@@ -33,6 +33,7 @@ from lyrebird_groundstation.transport import (
     LYREBIRD_STATUS_ID,
     LYREBIRD_STATUS_SIZE,
     LYREBIRD_STATUS_STRUCT,
+    MAV_RESULT_ACCEPTED,
     MAV_RESULT_CANCELLED,
     MAV_RESULT_IN_PROGRESS,
     PARAM_EXT_TYPE_CUSTOM,
@@ -46,6 +47,7 @@ from lyrebird_groundstation.transport import (
     USER2_CAPTURE_THERMAL_IMAGE,
     USER2_LRF_MEASURE,
     MavlinkCommandChannel,
+    MavlinkRouter,
     MavlinkTelemetrySource,
     Transport,
     _crc_extra_for,
@@ -281,6 +283,170 @@ def test_the_heartbeat_frame_is_built_once_and_reused():
     source._send_heartbeat()
     source._send_heartbeat()
     assert sent[0] == sent[1]
+
+
+def _aircraft_frame(system_id, component_id=COMP_ID_AUTOPILOT1, custom_mode=1 << 16):
+    from pymavlink.dialects.v20 import common as mavlink_common
+
+    sink = type("Sink", (), {"buf": b"", "write": lambda self, data: setattr(self, "buf", data)})()
+    mav = mavlink_common.MAVLink(sink, srcSystem=system_id, srcComponent=component_id)
+    mav.heartbeat_send(
+        mavlink_common.MAV_TYPE_QUADROTOR,
+        mavlink_common.MAV_AUTOPILOT_PX4,
+        0,
+        custom_mode,
+        0,
+        mavlink_common.MAV_STATE_ACTIVE,
+    )
+    return sink.buf
+
+
+def _aircraft_ack_frame(system_id, command=CMD_NAV_TAKEOFF, component_id=COMP_ID_AUTOPILOT1):
+    from pymavlink.dialects.v20 import common as mavlink_common
+
+    sink = type("Sink", (), {"buf": b"", "write": lambda self, data: setattr(self, "buf", data)})()
+    mav = mavlink_common.MAVLink(sink, srcSystem=system_id, srcComponent=component_id)
+    mav.command_ack_send(command, MAV_RESULT_ACCEPTED)
+    return sink.buf
+
+
+def test_shared_router_dispatches_two_aircraft_to_separate_telemetry_states():
+    router = MavlinkRouter(port=0, peer_port=14550)
+    route_a = router.register("10.0.0.1", name="alpha")
+    route_b = router.register("10.0.0.2", name="bravo")
+    updates_a = []
+    updates_b = []
+    source_a = MavlinkTelemetrySource(route=route_a, on_update=updates_a.append)
+    source_b = MavlinkTelemetrySource(route=route_b, on_update=updates_b.append)
+    source_a.start()
+    source_b.start()
+
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_frame(42), ("10.0.0.2", 14550))
+
+        assert route_a.system_id == 41
+        assert route_b.system_id == 42
+        assert len(updates_a) == 1
+        assert len(updates_b) == 1
+        assert updates_a[0]["flightMode"] == "MANUAL"
+        assert updates_b[0]["flightMode"] == "MANUAL"
+    finally:
+        source_a.stop()
+        source_b.stop()
+        route_a.close()
+        route_b.close()
+
+
+def test_shared_router_routes_commands_to_the_registered_aircraft_endpoint():
+    router = MavlinkRouter(port=0, peer_port=14550)
+    route_a = router.register("10.0.0.1", name="alpha")
+    route_b = router.register("10.0.0.2", name="bravo")
+    router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+    router._dispatch_datagram(_aircraft_frame(42), ("10.0.0.2", 14550))
+
+    sent = []
+
+    class Socket:
+        def sendto(self, frame, address):
+            sent.append((frame, address))
+
+        def recvfrom(self, _size):
+            raise TimeoutError
+
+        def close(self):
+            pass
+
+    router._socket = Socket()
+    channel_a = MavlinkCommandChannel("10.0.0.1", route=route_a)
+    channel_b = MavlinkCommandChannel("10.0.0.2", route=route_b)
+    try:
+        sent.clear()
+        channel_a._send_frame(channel_a._frame_command(CMD_NAV_TAKEOFF, [0] * 7))
+        channel_b._send_frame(channel_b._frame_command(CMD_NAV_TAKEOFF, [0] * 7))
+
+        assert [address for _, address in sent] == [
+            ("10.0.0.1", 14550),
+            ("10.0.0.2", 14550),
+        ]
+        assert [_decode(frame).target_system for frame, _ in sent] == [41, 42]
+    finally:
+        channel_a.close()
+        channel_b.close()
+        route_a.close()
+        route_b.close()
+
+
+def test_shared_router_keeps_component_messages_and_acks_on_the_parent_vehicle():
+    router = MavlinkRouter(port=0)
+    route_a = router.register("10.0.0.1", name="alpha")
+    seen = []
+    route_a.subscribe(lambda _data, messages, _address: seen.append(messages))
+    channel_a = MavlinkCommandChannel("10.0.0.1", route=route_a)
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_frame(41, component_id=100), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_ack_frame(41, component_id=100), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_ack_frame(41), ("10.0.0.1", 14550))
+
+        assert route_a.system_id == 41
+        assert seen[1][0].get_header().srcComponent == 100
+        assert channel_a._inbox[0].get_type() == "COMMAND_ACK"
+    finally:
+        channel_a.close()
+        route_a.close()
+
+
+def test_shared_router_drops_unknown_hosts_and_rebinds_a_known_route():
+    router = MavlinkRouter(port=0)
+    route_a = router.register("10.0.0.1", name="alpha")
+    seen = []
+    route_a.subscribe(lambda *_args: seen.append(True))
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.99", 14550))
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_frame(42), ("10.0.0.1", 14550))
+
+        assert len(seen) == 2
+        assert route_a.system_id == 42
+        assert any("unknown host" in error for error in router.errors)
+        assert any("Bound MAVLink system id 42" in error for error in router.errors)
+    finally:
+        route_a.close()
+
+
+def test_shared_router_rejects_duplicate_system_ids():
+    router = MavlinkRouter(port=0)
+    route_a = router.register("10.0.0.1", name="alpha")
+    route_b = router.register("10.0.0.2", name="bravo")
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.2", 14550))
+
+        assert route_a.system_id == 41
+        assert route_b.system_id is None
+        assert route_b.duplicate_system_id == 41
+        assert any("duplicate MAVLink system id 41" in error for error in router.errors)
+    finally:
+        route_a.close()
+        route_b.close()
+
+
+def test_shared_router_rebinds_a_stale_system_id_to_a_reconnected_route():
+    router = MavlinkRouter(port=0)
+    route_a = router.register("10.0.0.1", name="old")
+    route_b = router.register("10.0.0.2", name="new")
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        route_a.last_seen -= 11.0
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.2", 14550))
+
+        assert route_a.replaced
+        assert route_b.system_id == 41
+        assert router._routes_by_system_id[41] is route_b
+    finally:
+        route_a.close()
+        route_b.close()
 
 
 # -- command translation ----------------------------------------------------------------------

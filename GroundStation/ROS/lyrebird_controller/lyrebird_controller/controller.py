@@ -85,6 +85,9 @@ class DjiNode(Node):
         mavlink_port=None,
         mavlink_peer_port=None,
         transport=None,
+        mavlink_router=None,
+        mavlink_system_id=None,
+        mavlink_vehicle_name="",
     ):
         """Create a node for one drone.
 
@@ -92,10 +95,9 @@ class DjiNode(Node):
         node under its own namespace. Launched on its own the defaults reproduce the previous
         single-drone behaviour exactly: no name, no namespace, IP from the ROS parameter.
 
-        When running several drones in one process with MAVLink transport, mavlink_port (and,
-        for BOTH/point-to-point setups, mavlink_peer_port) must be distinct per drone -- they all
-        share one network namespace, so leaving them at the LB_MAVLINK_PORT default means every
-        drone's listener binds the same UDP port and only one of them ever receives telemetry.
+        When a shared MAVLink router is supplied, all nodes consume one listener and are separated
+        by the aircraft's MAVLink system id. Without a router, the legacy single-aircraft listener
+        path remains available and preserves the historical constructor behaviour.
 
         transport selects which wire this drone is commanded over -- "http", "mavlink", or
         "both" (see lyrebird_groundstation.transport.Transport). Left unset (None, the default
@@ -114,6 +116,9 @@ class DjiNode(Node):
             mavlink_port=self._bind_optional_int("mavlink_port", mavlink_port),
             mavlink_peer_port=self._bind_optional_int("mavlink_peer_port", mavlink_peer_port),
             transport=self._bind_optional_str("transport", transport),
+            mavlink_router=mavlink_router,
+            mavlink_system_id=mavlink_system_id,
+            mavlink_vehicle_name=mavlink_vehicle_name,
         )
         if not self._finish_connection():
             return
@@ -256,6 +261,16 @@ class DjiNode(Node):
         self.create_timer(1.0, self.publish_settings)
 
         self.get_logger().info(f"DroneNode initialized and connected to IP: {self.ip_rc}")
+
+    def destroy_node(self):
+        """Release network workers before removing this logical vehicle from ROS."""
+        dji_interface = getattr(self, "dji_interface", None)
+        if dji_interface is not None:
+            dji_interface.close()
+        blocking_calls = getattr(self, "blocking_calls", None)
+        if blocking_calls is not None:
+            blocking_calls.shutdown(wait=False)
+        return super().destroy_node()
 
     def _bind_ip_rc(self, ip_rc):
         self.declare_parameter("ip_rc", ip_rc or "")  # Default IP (empty for auto-discovery)
@@ -732,10 +747,6 @@ def main(args=None):
     try:
         rclpy.spin(node)
     finally:
-        # Guard against a double shutdown (rclpy raises if the context is not
-        # initialized); the pool may not exist if init failed late.
-        if getattr(node, "blocking_calls", None):
-            node.blocking_calls.shutdown(wait=False)
         if rclpy.ok():
             node.destroy_node()
             rclpy.shutdown()

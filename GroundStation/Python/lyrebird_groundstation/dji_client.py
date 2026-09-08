@@ -25,6 +25,7 @@ from lyrebird_groundstation.dji_helpers import (
 from lyrebird_groundstation.transport import (
     TCP_GAP_MODE_REQUEST,
     MavlinkCommandChannel,
+    MavlinkRouter,
     MavlinkTelemetrySource,
     Transport,
     mavlink_peer_port_from_env,
@@ -62,6 +63,7 @@ EP_SET_MAX_FLIGHT_HEIGHT = "/send/setMaxFlightHeight"
 EP_SET_MAX_FLIGHT_DISTANCE = "/send/setMaxFlightDistance"
 EP_SET_DISTANCE_LIMIT_ENABLED = "/send/setDistanceLimitEnabled"
 EP_SET_DRONE_NAME = "/send/setDroneName"
+EP_SET_MAVLINK_SYSTEM_ID = "/send/setMavlinkSystemId"
 EP_SET_VIDEO_SOURCE = "/send/setVideoSource"
 EP_SET_WEBRTC_RESOLUTION = "/send/setWebRtcResolution"
 EP_SET_WEBRTC_FPS = "/send/setWebRtcFps"
@@ -84,6 +86,7 @@ SETTING_ENDPOINTS: dict[str, str] = {
     "maxFlightDistance": EP_SET_MAX_FLIGHT_DISTANCE,
     "distanceLimitEnabled": EP_SET_DISTANCE_LIMIT_ENABLED,
     "droneName": EP_SET_DRONE_NAME,
+    "mavlinkSystemId": EP_SET_MAVLINK_SYSTEM_ID,
     "videoSource": EP_SET_VIDEO_SOURCE,
     "webrtcResolution": EP_SET_WEBRTC_RESOLUTION,
     "webrtcFps": EP_SET_WEBRTC_FPS,
@@ -167,6 +170,9 @@ class DJIInterface:
         transport: Transport | None = None,
         mavlink_port: int | None = None,
         mavlink_peer_port: int | None = None,
+        mavlink_router: MavlinkRouter | None = None,
+        mavlink_system_id: int | None = None,
+        mavlink_vehicle_name: str = "",
     ):
         self.drone_name = "UNKNOWN"
         self._timestamp_factory = timestamp_factory
@@ -204,6 +210,10 @@ class DJIInterface:
         self._telemetry_thread = None
         self._running = False
 
+        self._mavlink_router = mavlink_router
+        self._mavlink_system_id = mavlink_system_id
+        self._mavlink_vehicle_name = mavlink_vehicle_name
+        self._mavlink_route = None
         self._configure_transport(transport, mavlink_port, mavlink_peer_port)
 
     def _configure_transport(self, transport, mavlink_port, mavlink_peer_port=None):
@@ -220,9 +230,18 @@ class DJIInterface:
         self._mavlink_telemetry: MavlinkTelemetrySource | None = None
         self._mavlink_commands: MavlinkCommandChannel | None = None
         if self.transport.uses_mavlink:
+            if self._mavlink_router is not None:
+                self._mavlink_route = self._mavlink_router.register(
+                    self.IP_RC,
+                    self.mavlink_peer_port,
+                    name=self._mavlink_vehicle_name or self.drone_name,
+                    system_id=self._mavlink_system_id,
+                )
             self._mavlink_commands = MavlinkCommandChannel(
                 self.IP_RC,
                 port=self.mavlink_peer_port,
+                target_system=self._mavlink_system_id,
+                route=self._mavlink_route,
                 # A completed goto raises the same reach latch the HTTP surface exposes, so
                 # isWaypointReached(seq) and friends keep working without the caller knowing
                 # which wire the answer came from.
@@ -257,6 +276,7 @@ class DJIInterface:
                 # as well, since one socket per port is all the OS will hand packets to.
                 peer_host=self.IP_RC,
                 peer_port=self.mavlink_peer_port,
+                route=self._mavlink_route,
             )
             self._mavlink_telemetry.start()
         if self.transport is not Transport.MAVLINK:
@@ -273,6 +293,15 @@ class DJIInterface:
             self._close_telemetry_socket()
         if self._telemetry_thread:
             self._telemetry_thread.join(timeout=2)
+
+    def close(self):
+        """Stop all transport activity and release a shared MAVLink route."""
+        self.stopTelemetryStream()
+        if self._mavlink_commands is not None:
+            self._mavlink_commands.close()
+        if self._mavlink_route is not None:
+            self._mavlink_route.close()
+            self._mavlink_route = None
 
     def _connect_telemetry_socket(self):
         self._telemetry_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

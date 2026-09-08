@@ -23,16 +23,14 @@ discovery_period_sec: 30.0
 discovery_timeout_sec: 5.0
 
 # Ground-station-side MAVLink ports, only used while transport is mavlink or both. These
-# otherwise silently come from the LB_MAVLINK_PORT / LB_MAVLINK_PEER_PORT environment variables
-# (default 14550 for both) -- putting them here instead makes them visible next to everything
-# else that shapes the fleet.
+# otherwise come from the LB_MAVLINK_PORT / LB_MAVLINK_PEER_PORT environment variables -- putting
+# them here instead makes them visible next to everything else that shapes the fleet.
 #
-# mavlink_port_base: this ground station's own listen port for the first discovered drone; each
-# later drone gets base + <stable per-drone offset>, the same identity rth_altitude_range steps
-# by, so they don't collide on the same UDP port (see _mavlink_port_offset).
-mavlink_port_base: 14550
-# mavlink_peer_port: the port every aircraft listens on. Fleet-wide only for now -- every
-# discovered drone gets this same value; there is no per-drone override for it yet.
+# mavlink_port is one shared listener for the whole fleet. 14551 leaves QGroundControl's usual
+# 14550 available on the same host. The legacy mavlink_port_base key is still accepted by the
+# manager as an alias.
+mavlink_port: 14551
+# mavlink_peer_port is the common port every aircraft listens on for commands.
 mavlink_peer_port: 14550
 
 fleet_settings:
@@ -112,3 +110,4 @@ drone_settings: {}
 #  mini3:
 #    rthAltitude: 60
 #    droneName: "Mini 3"
+#    mavlinkSystemId: 1

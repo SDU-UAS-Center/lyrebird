@@ -65,6 +65,9 @@ internal interface LyrebirdCommandHost {
     /** Set the drone name pref; returns false when the name is rejected. */
     fun setDroneName(name: String): Boolean
 
+    /** Set the explicit MAVLink vehicle id, or zero to restore serial-derived automatic mode. */
+    fun setMavlinkSystemId(value: Int): Boolean
+
     /** Set the video source (drone/phone/mock); false when rejected. */
     fun setVideoSource(value: String): Boolean
     /** Set the WebRTC resolution preset (auto/1080p/720p/480p); false when rejected. */
@@ -403,6 +406,15 @@ internal class LyrebirdHttpCommandHandler(
                     "Drone name set to ${host.droneName}"
                 } else {
                     "Invalid name (must be 1-32 non-empty characters)"
+                }
+            },
+            "/send/setMavlinkSystemId" to { postData ->
+                val value = postData.trim().toIntOrNull()
+                if (value != null && host.setMavlinkSystemId(value)) {
+                    if (value == 0) "MAVLink vehicle ID set to automatic"
+                    else "MAVLink vehicle ID set to V$value"
+                } else {
+                    "Invalid MAVLink vehicle ID (0 for automatic, 1-99 for manual)"
                 }
             },
             "/send/setVideoSource" to { postData ->
