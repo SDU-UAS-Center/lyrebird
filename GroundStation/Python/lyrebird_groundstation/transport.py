@@ -1140,6 +1140,7 @@ SETTING_PARAM_ENDPOINTS = {
     "/send/setWebRtcFps": "LB_RTC_FPS",
     "/send/setDetectionsEnabled": "LB_DETECT_EN",
     "/send/setEdgeConfidence": "LB_EDGE_CONF",
+    "/send/setSurfaceH264Encoder": "LB_SURFACE_H264",
 }
 
 #: CRC_EXTRA for LYREBIRD_STATUS, from lyrebird.xml. Changes whenever the fields do, which is

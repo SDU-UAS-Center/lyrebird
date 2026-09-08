@@ -4,7 +4,6 @@ import struct
 import time
 
 import pytest
-from pymavlink.dialects.v20 import common as mavlink_common
 from lyrebird_groundstation.ftp_client import (
     AIRCRAFT_COMPONENT_ID,
     AIRCRAFT_SYSTEM_ID,
@@ -25,6 +24,7 @@ from lyrebird_groundstation.ftp_client import (
     _parse_reply,
     _request_payload,
 )
+from pymavlink.dialects.v20 import common as mavlink_common
 
 
 class _Sink:

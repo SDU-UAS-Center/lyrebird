@@ -19,14 +19,6 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import numpy as np
 import rclpy
-from rclpy.node import Node
-from rclpy.parameter import Parameter
-from requests.exceptions import RequestException
-from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import String
-
-from lyrebird_controller import topics
-from lyrebird_controller.dji_interface import DJIInterface, get_config
 from lyrebird_msgs.msg import (
     BatteryStatus,
     CameraStatus,
@@ -41,6 +33,14 @@ from lyrebird_msgs.msg import (
     VehicleLocalPosition,
     VehicleStatus,
 )
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from requests.exceptions import RequestException
+from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import String
+
+from lyrebird_controller import topics
+from lyrebird_controller.dji_interface import DJIInterface, get_config
 
 # How often to check for a new telemetry snapshot. This is the poll rate, not the publish rate:
 # publishing happens only when the drone has sent something new, so a short period buys low
@@ -108,56 +108,15 @@ class DjiNode(Node):
         # False until the drone answers. A caller running several of these in one process checks
         # this and destroys the node itself, rather than the node tearing down the whole context.
         self.connection_ready = False
-
-        # Retrieve the drone's IP address from the parameter server
-        self.declare_parameter("ip_rc", ip_rc or "")  # Default IP (empty for auto-discovery)
-        self.ip_rc = ip_rc or self.get_parameter("ip_rc").get_parameter_value().string_value
-
-        # Per-instance MAVLink ports, same constructor-arg-or-ROS-parameter pattern as ip_rc.
-        # 0 means "unset" (falls back to LB_MAVLINK_PORT/LB_MAVLINK_PEER_PORT in DJIInterface).
-        self.declare_parameter("mavlink_port", mavlink_port or 0)
-        self.declare_parameter("mavlink_peer_port", mavlink_peer_port or 0)
-        mavlink_port = mavlink_port or (
-            self.get_parameter("mavlink_port").get_parameter_value().integer_value or None
-        )
-        mavlink_peer_port = mavlink_peer_port or (
-            self.get_parameter("mavlink_peer_port").get_parameter_value().integer_value or None
-        )
-
-        # "" means "unset" (falls back to LB_TRANSPORT in DJIInterface, default "both").
-        self.declare_parameter("transport", transport or "")
-        transport = transport or (
-            self.get_parameter("transport").get_parameter_value().string_value or None
-        )
-
-        # Initialize the DJI drone interface
+        self._bind_ip_rc(ip_rc)
         self.dji_interface = DJIInterface(
             self.ip_rc,
-            mavlink_port=mavlink_port,
-            mavlink_peer_port=mavlink_peer_port,
-            transport=transport,
+            mavlink_port=self._bind_optional_int("mavlink_port", mavlink_port),
+            mavlink_peer_port=self._bind_optional_int("mavlink_peer_port", mavlink_peer_port),
+            transport=self._bind_optional_str("transport", transport),
         )
-
-        # Update IP if discovered and set the ROS2 parameter so other nodes can query it
-        if not self.ip_rc and self.dji_interface.IP_RC:
-            self.ip_rc = self.dji_interface.IP_RC
-            # Update the ROS2 parameter so bridge can query it
-            self.set_parameters([Parameter("ip_rc", Parameter.Type.STRING, self.ip_rc)])
-            self.get_logger().info(f"Discovered drone at {self.ip_rc}, updated ip_rc parameter")
-
-        # Verify the connection to the drone
-        if not self.verify_connection():
-            self.get_logger().error(f"Unable to connect to the drone at IP: {self.ip_rc}.")
-            # Deliberately not rclpy.shutdown(): this node may be one of several created in the
-            # same process, and tearing down the context would kill every other drone's node
-            # over one unreachable aircraft. The caller checks connection_ready and destroys
-            # this node on its own.
+        if not self._finish_connection():
             return
-
-        self.connection_ready = True
-
-        # Start the telemetry stream (TCP socket on port 8081)
-        self.dji_interface.startTelemetryStream()
 
         self._command_handlers = {
             VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF: self._cmd_takeoff,
@@ -298,6 +257,39 @@ class DjiNode(Node):
 
         self.get_logger().info(f"DroneNode initialized and connected to IP: {self.ip_rc}")
 
+    def _bind_ip_rc(self, ip_rc):
+        self.declare_parameter("ip_rc", ip_rc or "")  # Default IP (empty for auto-discovery)
+        self.ip_rc = ip_rc or self.get_parameter("ip_rc").get_parameter_value().string_value
+
+    def _bind_optional_int(self, name, value):
+        # 0 means "unset" (falls back to LB_MAVLINK_PORT/LB_MAVLINK_PEER_PORT in DJIInterface).
+        self.declare_parameter(name, value or 0)
+        return value or (self.get_parameter(name).get_parameter_value().integer_value or None)
+
+    def _bind_optional_str(self, name, value):
+        # "" means "unset" (falls back to LB_TRANSPORT in DJIInterface, default "both").
+        self.declare_parameter(name, value or "")
+        return value or (self.get_parameter(name).get_parameter_value().string_value or None)
+
+    def _finish_connection(self) -> bool:
+        """Discover IP if needed, verify the aircraft answers, then start telemetry.
+
+        Returns False without shutting down rclpy so a multi-drone process can destroy just
+        this node when one aircraft is unreachable.
+        """
+        if not self.ip_rc and self.dji_interface.IP_RC:
+            self.ip_rc = self.dji_interface.IP_RC
+            self.set_parameters([Parameter("ip_rc", Parameter.Type.STRING, self.ip_rc)])
+            self.get_logger().info(f"Discovered drone at {self.ip_rc}, updated ip_rc parameter")
+
+        if not self.verify_connection():
+            self.get_logger().error(f"Unable to connect to the drone at IP: {self.ip_rc}.")
+            return False
+
+        self.connection_ready = True
+        self.dji_interface.startTelemetryStream()
+        return True
+
     ##############################
     # Connection Verification    #
     ##############################
@@ -404,9 +396,7 @@ class DjiNode(Node):
     def _cmd_goto_altitude(self, msg: VehicleCommand):
         self.get_logger().info("Received goto altitude command.")
         seq = self.dji_interface.requestSendGotoAltitude(msg.param1)
-        self._publish_command_ack(
-            VehicleCommand.VEHICLE_CMD_DO_CHANGE_ALTITUDE, parse_ack_seq(seq)
-        )
+        self._publish_command_ack(VehicleCommand.VEHICLE_CMD_DO_CHANGE_ALTITUDE, parse_ack_seq(seq))
 
     def _cmd_gimbal_pitchyaw(self, msg: VehicleCommand):
         """param1=pitch[deg], param2=yaw[deg]; NaN on either means "leave unset", per PX4's

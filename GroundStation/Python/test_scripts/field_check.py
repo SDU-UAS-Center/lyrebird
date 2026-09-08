@@ -95,7 +95,9 @@ class Checks:
         for status, _, _ in self.results:
             counts[status] = counts.get(status, 0) + 1
         print()
-        print("  ".join(f"{status}: {counts.get(status, 0)}" for status in (PASS, FAIL, WARN, SKIP)))
+        print(
+            "  ".join(f"{status}: {counts.get(status, 0)}" for status in (PASS, FAIL, WARN, SKIP))
+        )
         if self.failed():
             print()
             print("Failures:")
@@ -240,8 +242,11 @@ def phase_ground(args: argparse.Namespace, channel: MavlinkCommandChannel, check
         ("/send/setDetectionsEnabled", "true"),
         ("/send/setEdgeConfidence", "0.5"),
     ):
-        _expect_ok(checks, f"{endpoint.rsplit('/', 1)[-1]} accepted",
-                   channel.send(endpoint, value, timeout=args.timeout))
+        _expect_ok(
+            checks,
+            f"{endpoint.rsplit('/', 1)[-1]} accepted",
+            channel.send(endpoint, value, timeout=args.timeout),
+        )
 
     # A string setting has no honest float encoding, so PARAM_SET refuses it rather than
     # smuggling it through as a magic number. Being refused is the correct answer here.
@@ -261,8 +266,11 @@ def phase_payload(args: argparse.Namespace, channel: MavlinkCommandChannel, chec
     before, _ = _listen(args, 2.0)
     start_pitch = before.get("gimbalPitch")
 
-    if _expect_ok(checks, "gimbal pitch accepted",
-                  channel.send("/send/gimbal/pitch", "-45", timeout=args.timeout)):
+    if _expect_ok(
+        checks,
+        "gimbal pitch accepted",
+        channel.send("/send/gimbal/pitch", "-45", timeout=args.timeout),
+    ):
         after, _ = _listen(args, 3.0)
         now = after.get("gimbalPitch")
         if now is None:
@@ -273,7 +281,8 @@ def phase_payload(args: argparse.Namespace, channel: MavlinkCommandChannel, chec
             # The sign convention here was settled by measurement, not argument: a 48-sample
             # sweep gave slope +1.03. A reading near +45 means the sign flipped back.
             checks.record(
-                FAIL, "gimbal pitch reads back",
+                FAIL,
+                "gimbal pitch reads back",
                 f"commanded -45, reads {now:.1f} (from {start_pitch}) -- if this is near +45 the "
                 f"sign convention has inverted",
             )
@@ -283,27 +292,41 @@ def phase_payload(args: argparse.Namespace, channel: MavlinkCommandChannel, chec
             f"{now} (6553.5 is 65535/10, DJI's 'axis saturated')",
         )
 
-    _expect_ok(checks, "gimbal relative pitch accepted",
-               channel.send("/send/gimbal/rel_pitch", "10", timeout=args.timeout))
+    _expect_ok(
+        checks,
+        "gimbal relative pitch accepted",
+        channel.send("/send/gimbal/rel_pitch", "10", timeout=args.timeout),
+    )
     channel.send("/send/gimbal/pitch", "0", timeout=args.timeout)
 
-    _expect_ok(checks, "photo capture accepted",
-               channel.send("/send/capture", "", timeout=args.timeout))
+    _expect_ok(
+        checks, "photo capture accepted", channel.send("/send/capture", "", timeout=args.timeout)
+    )
     print("       -> confirm the new photo appears: python ftp_exercise.py", args.host)
 
     if before.get("hasThermal"):
-        _expect_ok(checks, "thermal capture accepted",
-                   channel.send("/send/captureThermalImage", "", timeout=args.timeout))
-        _expect_ok(checks, "temperature capture accepted",
-                   channel.send("/send/captureTemperature", "", timeout=args.timeout))
+        _expect_ok(
+            checks,
+            "thermal capture accepted",
+            channel.send("/send/captureThermalImage", "", timeout=args.timeout),
+        )
+        _expect_ok(
+            checks,
+            "temperature capture accepted",
+            channel.send("/send/captureTemperature", "", timeout=args.timeout),
+        )
     else:
         checks.record(SKIP, "thermal", "this aircraft reports no thermal camera")
 
-    _expect_ok(checks, "LRF measure accepted",
-               channel.send("/send/lrf/measure", "", timeout=args.timeout))
+    _expect_ok(
+        checks, "LRF measure accepted", channel.send("/send/lrf/measure", "", timeout=args.timeout)
+    )
 
-    if _expect_ok(checks, "autoSensing start accepted",
-                  channel.send("/send/autoSensing/start", "", timeout=args.timeout)):
+    if _expect_ok(
+        checks,
+        "autoSensing start accepted",
+        channel.send("/send/autoSensing/start", "", timeout=args.timeout),
+    ):
         telemetry, _ = _listen(args, 5.0)
         active = telemetry.get("autoSensingActive")
         count = telemetry.get("detections")
@@ -382,8 +405,10 @@ def main() -> None:
     key = bytes.fromhex(args.key) if args.key else None
     checks = Checks()
 
-    print(f"phone={args.host} listen=:{args.port} send=:{args.peer_port} "
-          f"signing={'on (Safety Computer)' if key else 'off (Pilot)'}")
+    print(
+        f"phone={args.host} listen=:{args.port} send=:{args.peer_port} "
+        f"signing={'on (Safety Computer)' if key else 'off (Pilot)'}"
+    )
     print()
 
     telemetry = phase_link(args, checks)

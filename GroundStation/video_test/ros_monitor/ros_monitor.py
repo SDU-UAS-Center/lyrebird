@@ -18,9 +18,8 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 import rclpy
-from rclpy.node import Node
-
 from lyrebird_controller import topics as lyrebird_topics
+from rclpy.node import Node
 
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "http://127.0.0.1:8090")
 

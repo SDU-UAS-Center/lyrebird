@@ -309,6 +309,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val PARAM_WEBRTC_FPS = "LB_RTC_FPS"
         private const val PARAM_DETECTIONS = "LB_DETECT_EN"
         private const val PARAM_EDGE_CONFIDENCE = "LB_EDGE_CONF"
+        private const val PARAM_SURFACE_H264_ENCODER = "LB_SURFACE_H264"
 
         /**
          * The string-valued settings, carried by the extended parameter protocol.
@@ -5632,6 +5633,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             CommandResult(MavlinkCommandOutcome.ACCEPTED)
         }
 
+        PARAM_SURFACE_H264_ENCODER -> {
+            setDjiSurfaceH264Encoder(value >= 0.5f)
+            CommandResult(MavlinkCommandOutcome.ACCEPTED)
+        }
+
         PARAM_EDGE_CONFIDENCE ->
             if (setEdgeConfidence(value)) {
                 CommandResult(MavlinkCommandOutcome.ACCEPTED)
@@ -5702,6 +5708,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             PARAM_WEBRTC_FPS to getWebRTCFps().toFloat(),
             PARAM_DETECTIONS to if (isDetectionsEnabled()) 1f else 0f,
             PARAM_EDGE_CONFIDENCE to getEdgeConfidenceThreshold(),
+            PARAM_SURFACE_H264_ENCODER to if (isDjiSurfaceH264EncoderEnabled()) 1f else 0f,
             // QGC's PX4 airframe component reads this one PX4 parameter and pops a "Parameters
             // are missing from firmware" dialog when it is absent. 4001 is PX4's "Generic
             // Quadcopter" airframe id; published read-only like the rest of the list.

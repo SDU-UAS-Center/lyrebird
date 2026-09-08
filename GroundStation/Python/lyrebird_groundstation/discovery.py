@@ -176,7 +176,7 @@ def _multicast_sweep(
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("", port))
-        membership = socket.inet_aton(group) + socket.inet_aton("0.0.0.0")
+        membership = socket.inet_aton(group) + socket.INADDR_ANY.to_bytes(4, "big")
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
         _broadcast_once(sock, group, port, timeout, found, verbose)
     except OSError as error:

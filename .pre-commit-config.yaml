@@ -1,3 +1,13 @@
+# Pre-commit hooks for GroundStation Python and Lyrebird-owned Android quality.
+# Install locally: pre-commit install
+# Run manually:    pre-commit run --all-files
+# Run tests:       pre-commit run groundstation-tests android-tests --hook-stage manual
+# Bypass checks:   git commit --no-verify (use sparingly)
+#
+# Keep these hooks in lockstep with .github/workflows/ci.yml. CI runs the same
+# default-stage checks plus GroundStation pytest and Android compile/unit tests
+# on every pull request and push to main.
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.14"
@@ -44,7 +54,25 @@ repos:
       - id: groundstation-tests
         name: GroundStation Python tests
         entry: python -m pytest GroundStation/tests -q
-        language: system
+        language: python
+        additional_dependencies:
+          - pytest
+          - pymavlink==2.4.43
+          - requests>=2.28
         pass_filenames: false
         stages: [manual]
         files: ^GroundStation/.*\.py$
+
+      - id: android-spotless
+        name: android spotless - Lyrebird-owned Kotlin format
+        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:spotlessKotlinCheck'
+        language: system
+        pass_filenames: false
+        files: ^LyrebirdApp/lyrebird-app/.*\.kt$
+      - id: android-tests
+        name: android tests - compile + unit tests
+        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest'
+        language: system
+        pass_filenames: false
+        stages: [manual]
+        files: ^LyrebirdApp/lyrebird-app/.*\.kt$

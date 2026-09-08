@@ -95,6 +95,7 @@ npm run build    # production build into dist/ (validate doc edits with this)
 | `GroundStation/video_test/compose.yaml` | MediaMTX + dashboard compose file |
 | `src/content/docs/` | Starlight documentation content |
 | `astro.config.mjs` | Starlight site config: sidebar, edit links, base path |
+| `.github/workflows/ci.yml` | GroundStation Python gates plus Lyrebird-owned Android Spotless/compile/unit tests on PRs and `main` |
 | `.github/workflows/docs.yml` | Builds the Starlight site and deploys it to GitHub Pages on `main` |
 
 ## Configuration Notes
@@ -105,27 +106,32 @@ npm run build    # production build into dist/ (validate doc edits with this)
 
 ## Testing & Quality Gates
 
-Pre-commit hooks and CI run the same checks; treat a failing local hook as part of finishing the change:
+Local pre-commit hooks and `.github/workflows/ci.yml` run the same checks.
+Treat a failing local hook as part of finishing the change — CI will fail the same way on
+pull requests and pushes to `main`.
 
 ```bash
-.pre-commit run --all-files
+pre-commit install
+pre-commit run --all-files
 ```
 
-Hooks configured in `.pre-commit-config.yaml`:
+Hooks configured in `.pre-commit-config.yaml` (mirrored by CI jobs of the same name):
 
-- **Ruff lint + format** — scoped to `GroundStation/**.py` (`ruff check --fix`, `ruff format`)
+- **Ruff lint + format** — scoped to `GroundStation/**.py` (`ruff check --fix` locally, `ruff check` / `ruff format --check` in CI)
 - **Radon complexity** — `python scripts/check_radon_complexity.py`, B-or-better blocks (blocks with cyclomatic complexity ≥ 11 fail)
 - **Mypy** — gradual typing over `GroundStation/Python/lyrebird_groundstation` + `lyrebird_dji_helpers.py`
 - **Bandit** — `bandit -r GroundStation -ll --skip B101`
-- **GroundStation tests** — `python -m pytest GroundStation/tests -q` (manual stage)
+- **GroundStation tests** — `python -m pytest GroundStation/tests -q` (manual stage locally; always run in CI)
+- **Android Spotless** — `./gradlew :app:spotlessKotlinCheck` on Lyrebird-owned Kotlin (`LyrebirdApp/lyrebird-app/**/*.kt`)
+- **Android compile + unit tests** — `./gradlew :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest` (manual stage locally; always run in CI, with `qualityLyrebird` Detekt/Lint reports)
 
-Run the manual test hook with:
+Run the manual test hooks with:
 
 ```bash
-pre-commit run groundstation-tests --hook-stage manual
+pre-commit run groundstation-tests android-tests --hook-stage manual
 ```
 
-Android/Kotlin quality is owned by the Gradle build (`./gradlew :app:compileDebugKotlin` + variant builds), not by the Python hooks.
+Vendor DJI/UXSDK quality stays out of the required gate (`qualityDji`); do not fail CI on inherited sample code.
 
 ## Code Conventions
 

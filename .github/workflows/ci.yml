@@ -1,0 +1,203 @@
+name: CI
+
+# Keep these jobs in lockstep with .pre-commit-config.yaml.
+# Default-stage hooks run on every commit locally; CI runs the same commands
+# (check-only, no --fix) plus the GroundStation pytest suite and Android
+# compile/unit tests that are manual-stage hooks locally.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  python-ruff-checks:
+    name: Python Ruff checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Ruff
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff
+
+      - name: Run Ruff linter
+        run: python -m ruff check GroundStation --output-format=github
+
+      - name: Run Ruff formatter check
+        run: python -m ruff format --check GroundStation
+
+  python-radon-metrics:
+    name: Python Radon metrics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Radon
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install radon
+
+      - name: Enforce cyclomatic complexity threshold
+        run: python scripts/check_radon_complexity.py
+
+      - name: Print maintainability and size summaries
+        run: |
+          python -m radon mi -s GroundStation > radon-mi.txt
+          python - <<'PY'
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          mi_report = Path("radon-mi.txt").read_text(encoding="utf-8")
+          counts = Counter(re.findall(r" - ([A-C]) \(", mi_report))
+          print("Maintainability Index grade counts:")
+          for grade in "ABC":
+              print(f"  {grade}: {counts.get(grade, 0)}")
+          PY
+          python -m radon raw -s GroundStation | tail -20
+          python -m radon hal -j GroundStation > radon-hal.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("radon-hal.json").read_text(encoding="utf-8"))
+          rows = []
+          for path, metrics in data.items():
+              total = metrics.get("total") or metrics
+              if isinstance(total, dict) and "effort" in total:
+                  rows.append((total.get("effort", 0), path))
+
+          print("Top 10 Halstead effort files:")
+          for effort, path in sorted(rows, reverse=True)[:10]:
+              print(f"  {effort:10.0f}  {path}")
+          PY
+
+  python-mypy-checks:
+    name: Python Mypy type checking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Mypy
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install mypy types-requests
+
+      - name: Run Mypy type checker
+        run: python -m mypy
+
+  python-bandit-checks:
+    name: Python Bandit security scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Bandit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install bandit
+
+      - name: Run Bandit security scanner
+        run: python -m bandit -r GroundStation -ll --skip B101
+
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: GroundStation/Python/pyproject.toml
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 2.4.47+ wheels omit message_definitions/v1.0, which the dialect
+          # compatibility test regenerates from the repository XML.
+          python -m pip install -e GroundStation/Python pytest pymavlink==2.4.43
+
+      - name: Run GroundStation tests
+        run: python -m pytest GroundStation/tests -q
+
+  android-quality:
+    name: Android quality checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: LyrebirdApp/android-sdk-v5-as
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Write CI local.properties
+        run: |
+          {
+            echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+            echo "AIRCRAFT_API_KEY=ci-placeholder"
+            echo "MAPLIBRE_TOKEN=dummy"
+          } > local.properties
+
+      - name: Spotless, compile, and unit tests
+        run: ./gradlew --no-daemon :app:spotlessKotlinCheck :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest
+
+      - name: Lyrebird Detekt and Lint reports
+        run: ./gradlew --no-daemon qualityLyrebird
+
+      - name: Upload Android quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-quality-reports
+          if-no-files-found: ignore
+          path: |
+            LyrebirdApp/android-sdk-v5-as/build/reports/detekt/
+            LyrebirdApp/lyrebird-app/build/reports/

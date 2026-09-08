@@ -24,8 +24,6 @@ compatibility shim that publishes/subscribes the exact old topics and types
 alongside the new ones, sourced from the same underlying data.
 """
 
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-
 from lyrebird_msgs.msg import (
     BatteryStatus,
     CameraStatus,
@@ -40,6 +38,7 @@ from lyrebird_msgs.msg import (
     VehicleLocalPosition,
     VehicleStatus,
 )
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image, NavSatFix
 from std_msgs.msg import String
 

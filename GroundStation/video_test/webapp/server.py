@@ -106,6 +106,7 @@ for item in os.environ.get("DRONE_FALLBACKS", "").split(","):
         name, ip = item.split("=", 1)
         FALLBACK_IPS[name.strip()] = ip.strip()
 
+
 def local_now():
     """Return the host-local time used by the dashboard and its event log."""
     return datetime.now().astimezone()

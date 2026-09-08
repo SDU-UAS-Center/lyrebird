@@ -9,6 +9,7 @@
 **DJI drones speaking [MAVLink 2](https://mavlink.io/en/) like a [PX4](https://px4.io/), working seamlessly with [QGroundControl](https://github.com/mavlink/qgroundcontrol) — lightweight multi-drone control and telemetry**
 
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-yellow.svg)](LICENSE)
+[![CI](https://github.com/SDU-UAS-Center/lyrebird/actions/workflows/ci.yml/badge.svg)](https://github.com/SDU-UAS-Center/lyrebird/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/📖_Docs-blue.svg)](https://SDU-UAS-Center.github.io/lyrebird/)
 [![DJI MSDK V5](https://img.shields.io/badge/DJI%20MSDK-V5.18.0-blue.svg)](https://developer.dji.com/doc/mobile-sdk-tutorial/en/)
 [![ROS 2 Humble](https://img.shields.io/badge/ROS%202-Humble-brightgreen.svg)](https://docs.ros.org/en/humble/)
@@ -19,6 +20,11 @@
 </div>
 
 ---
+
+> **Development status:** Lyrebird is already usable for development, research, and field testing,
+> but the project is still evolving. Interfaces, configuration, and supported hardware may change
+> before the first release. The first tagged release will be the stable reference version for
+> users who need a fixed, supported baseline.
 
 ## What is Lyrebird?
 

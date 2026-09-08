@@ -41,11 +41,11 @@ from pathlib import Path
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from lyrebird_groundstation.transport import mavlink_peer_port_from_env, mavlink_port_from_env
 from rclpy.node import Node
 
 from lyrebird_controller.controller import DjiNode
 from lyrebird_controller.dji_interface import discover_all_drones
-from lyrebird_groundstation.transport import mavlink_peer_port_from_env, mavlink_port_from_env
 
 DEFAULT_DISCOVERY_PERIOD_SEC = 30.0
 DEFAULT_DISCOVERY_TIMEOUT_SEC = 5.0
