@@ -77,12 +77,30 @@ def parse_ack_seq(response):
 
 
 class DjiNode(Node):
-    def __init__(self, ip_rc=None, node_name="DjiNode", namespace=None):
+    def __init__(
+        self,
+        ip_rc=None,
+        node_name="DjiNode",
+        namespace=None,
+        mavlink_port=None,
+        mavlink_peer_port=None,
+        transport=None,
+    ):
         """Create a node for one drone.
 
         The arguments exist so several drones can be run inside one process, each as its own
         node under its own namespace. Launched on its own the defaults reproduce the previous
         single-drone behaviour exactly: no name, no namespace, IP from the ROS parameter.
+
+        When running several drones in one process with MAVLink transport, mavlink_port (and,
+        for BOTH/point-to-point setups, mavlink_peer_port) must be distinct per drone -- they all
+        share one network namespace, so leaving them at the LB_MAVLINK_PORT default means every
+        drone's listener binds the same UDP port and only one of them ever receives telemetry.
+
+        transport selects which wire this drone is commanded over -- "http", "mavlink", or
+        "both" (see lyrebird_groundstation.transport.Transport). Left unset (None, the default
+        for both the constructor arg and the ROS parameter), it falls back to the LB_TRANSPORT
+        environment variable, which itself defaults to "both".
         """
         super().__init__(node_name, namespace=namespace)
         self.get_logger().info("Node Initialisation")
@@ -95,8 +113,30 @@ class DjiNode(Node):
         self.declare_parameter("ip_rc", ip_rc or "")  # Default IP (empty for auto-discovery)
         self.ip_rc = ip_rc or self.get_parameter("ip_rc").get_parameter_value().string_value
 
+        # Per-instance MAVLink ports, same constructor-arg-or-ROS-parameter pattern as ip_rc.
+        # 0 means "unset" (falls back to LB_MAVLINK_PORT/LB_MAVLINK_PEER_PORT in DJIInterface).
+        self.declare_parameter("mavlink_port", mavlink_port or 0)
+        self.declare_parameter("mavlink_peer_port", mavlink_peer_port or 0)
+        mavlink_port = mavlink_port or (
+            self.get_parameter("mavlink_port").get_parameter_value().integer_value or None
+        )
+        mavlink_peer_port = mavlink_peer_port or (
+            self.get_parameter("mavlink_peer_port").get_parameter_value().integer_value or None
+        )
+
+        # "" means "unset" (falls back to LB_TRANSPORT in DJIInterface, default "both").
+        self.declare_parameter("transport", transport or "")
+        transport = transport or (
+            self.get_parameter("transport").get_parameter_value().string_value or None
+        )
+
         # Initialize the DJI drone interface
-        self.dji_interface = DJIInterface(self.ip_rc)
+        self.dji_interface = DJIInterface(
+            self.ip_rc,
+            mavlink_port=mavlink_port,
+            mavlink_peer_port=mavlink_peer_port,
+            transport=transport,
+        )
 
         # Update IP if discovered and set the ROS2 parameter so other nodes can query it
         if not self.ip_rc and self.dji_interface.IP_RC:

@@ -984,7 +984,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     )
 
     private fun toggleDjiSurfaceH264Encoder() {
-        val enabled = !isDjiSurfaceH264EncoderEnabled()
+        setDjiSurfaceH264Encoder(!isDjiSurfaceH264EncoderEnabled())
+    }
+
+    override fun setDjiSurfaceH264Encoder(enabled: Boolean) {
         sharedPreferences.edit()
             .putBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, enabled)
             .apply()

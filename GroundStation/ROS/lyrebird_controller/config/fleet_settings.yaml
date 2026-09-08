@@ -1,0 +1,114 @@
+# Fleet-wide Lyrebird drone settings.
+#
+# FleetAutoDiscoveryManager (see lyrebird_controller/fleet_auto_discovery.py) loads this file
+# and, for each drone as soon as it connects: pushes `fleet_settings` (the same settings the
+# app's own cockpit settings menu edits, applied automatically instead of per-aircraft in the
+# app), then layers `rth_altitude_range` (if set) and finally `drone_settings` for that drone's
+# name on top. Point a launch file at a different copy of this file via the `fleet_settings_file`
+# ROS parameter to run a different profile (e.g. one per deployment).
+
+# Which wire every discovered drone is commanded over. Independent of fleet_settings below --
+# this isn't an app setting, it's how the ground station itself talks to the aircraft (see
+# lyrebird_groundstation.transport.Transport).
+# Valid values: http | mavlink | both
+# "both" keeps HTTP and MAVLink co-equal: MAVLink carries whatever it can, HTTP fills in the rest
+# (e.g. media download). Leave this as "both" unless you have a specific reason to run
+# HTTP-only or MAVLink-only -- disabling either wire is a deliberate, narrower choice, not the
+# default.
+transport: both
+
+# How often (seconds) to rescan for newly joined drones, and how long each scan waits for
+# answers. A launch file's own `parameters=[...]` still overrides these if given.
+discovery_period_sec: 30.0
+discovery_timeout_sec: 5.0
+
+# Ground-station-side MAVLink ports, only used while transport is mavlink or both. These
+# otherwise silently come from the LB_MAVLINK_PORT / LB_MAVLINK_PEER_PORT environment variables
+# (default 14550 for both) -- putting them here instead makes them visible next to everything
+# else that shapes the fleet.
+#
+# mavlink_port_base: this ground station's own listen port for the first discovered drone; each
+# later drone gets base + <stable per-drone offset>, the same identity rth_altitude_range steps
+# by, so they don't collide on the same UDP port (see _mavlink_port_offset).
+mavlink_port_base: 14550
+# mavlink_peer_port: the port every aircraft listens on. Fleet-wide only for now -- every
+# discovered drone gets this same value; there is no per-drone override for it yet.
+mavlink_peer_port: 14550
+
+fleet_settings:
+  # Flight ceiling, meters AGL. The aircraft will not climb past this.
+  maxFlightHeight: 120
+
+  # Max allowed distance from the home point, meters. Only enforced while
+  # distanceLimitEnabled is true.
+  maxFlightDistance: 500
+
+  # Whether maxFlightDistance is enforced.
+  # Valid values: true | false
+  distanceLimitEnabled: true
+
+  # Camera feed source used for the video stream.
+  # Valid values: drone | phone | mock
+  # mock is the built-in test pattern (Mock MP4) -- useful for testing streamingMode: webrtc
+  # (or any other transport below) end-to-end without a live drone feed.
+  videoSource: drone
+
+  # Live video transport. "webrtc" here means WebRTC via WHIP push (see WhipPublisher) -- DJI
+  # SDK naming, not a separate "whip" mode.
+  # Valid values: webrtc | rtmp | rtsp | agora | gb28181
+  streamingMode: webrtc
+
+  # WebRTC video resolution. Only used when streamingMode is webrtc.
+  # Valid values: auto | 1080p | 720p | 480p
+  webrtcResolution: auto
+
+  # WebRTC frame rate, fps. Only used when streamingMode is webrtc.
+  # Valid values: 5 | 10 | 15 | 20 | 25 | 30
+  webrtcFps: 20
+
+  # On-board object detection.
+  # Valid values: true | false
+  detectionsEnabled: false
+
+  # Where detections come from. Only used when detectionsEnabled is true.
+  # Valid values: none | dji_onboard | yolo_on_phone
+  detectionSource: none
+
+  # Minimum confidence for a detection to be reported.
+  # Valid values: 0.10-0.70 in 0.05 steps
+  edgeConfidenceThreshold: 0.30
+
+  # RC stick mapping.
+  # Valid values: jp | usa | ch | custom
+  rcControlMode: usa
+
+  # MediaMTX relay server URL. Only used by some streaming modes (e.g. an rtsp relay or
+  # gb28181 bridging). Leave commented out to use the phone's own local server.
+  # mediamtxServer: "rtsp://your-mediamtx-host:8554"
+
+  # Experimental: encode WebRTC video straight from a DJI SDK surface instead of the default
+  # encoder path. Takes effect on the phone's next app restart, not immediately -- this setting
+  # is applied like any other, but the drone won't actually switch encoders until it's restarted.
+  # Valid values: true | false
+  surfaceH264Encoder: false
+
+# Auto-assigns each newly connected drone its own rthAltitude instead of one fixed value for
+# the whole fleet: min, then +step per drone (same stable per-drone identity the MAVLink port
+# offset uses, so a reconnecting drone keeps its altitude), capped at max once the fleet is
+# larger than (max - min) / step + 1 drones. Overrides any rthAltitude in fleet_settings above.
+# Comment out this whole block to go back to a single fixed rthAltitude in fleet_settings instead.
+rth_altitude_range:
+  min: 30
+  max: 100
+  step: 5
+
+# Per-drone overrides, keyed by the drone's discovered name (e.g. "mini3"). Anything set here
+# replaces the matching fleet_settings/rth_altitude_range value for that drone only; keys not
+# listed here fall back to those.
+#
+# droneName is deliberately not a fleet_settings key -- setting it fleet-wide would give every
+# drone the same name -- but it is a valid per-drone override here (1-32 non-empty characters).
+drone_settings: {}
+#  mini3:
+#    rthAltitude: 60
+#    droneName: "Mini 3"

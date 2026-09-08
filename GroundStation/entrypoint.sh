@@ -13,6 +13,6 @@ echo ""
 echo "Starting ROS node with auto-discovery..."
 echo "========================================================"
 
-# Auto-discover Lyrebird drones and launch one lyrebird_controller node per drone
-exec ros2 launch lyrebird_bringup auto_discovery_native.launch.py
+# Auto-discover Lyrebird drones and give each its own namespaced lyrebird_controller node
+exec ros2 launch lyrebird_bringup fleet_auto_discovery.launch.py
 

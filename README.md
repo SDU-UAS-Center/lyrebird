@@ -37,7 +37,7 @@ The lyrebird is Australia's most famous mimic — it can reproduce almost any so
 - 🌐 **HTTP + TCP alongside it, also on by default** — REST commands and streaming JSON telemetry, kept for compatibility with WildBridge-era ground stations, as the API for what MAVLink doesn't cover yet (AI detections, live settings), and as the fast path for big transfers: HTTP saturates the Wi-Fi link for media and video, where MAVLink FTP stays deliberately slow and lightweight so it doesn't crowd the radio spectrum a whole swarm depends on
 - 🎥 **A complete video & dashboard pipeline, not just an SDK** — WHIP/WHEP through MediaMTX plus a browser dashboard for multi-drone video, telemetry, health, and settings
 - 🛡️ **Two-computer safety** — a Safety Computer can seize command authority at any time, and only it can hand control back
-- 🤖 **ROS 2 ready, PX4-style topics** — `fmu/in`/`fmu/out` topics per drone, the same shape PX4 developers already know, with dynamic namespaces and zero-config auto-discovery
+- 🤖 **ROS 2 ready, PX4-style topics** — `fmu/in`/`fmu/out` topics per drone, the same shape PX4 developers already know, with dynamic namespaces, zero-config auto-discovery, and one YAML file to set transport, MAVLink ports, and per-aircraft settings fleet-wide
 - 🔥 **Enterprise sensors** — thermal capture and temperature, laser rangefinder, payload drop
 - 🧭 **Mission-proven** — zebra-herd monitoring, wildfire detection (XPRIZE Wildfire finalist), wind-field profiling
 

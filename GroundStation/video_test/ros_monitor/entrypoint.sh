@@ -20,14 +20,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Auto-discover Lyrebird drones and launch one namespaced lyrebird_controller
-# node per drone (publishes telemetry under /<drone>/fmu/out/... and listens
-# for commands under /<drone>/fmu/in/...), re-scanning periodically for newly
-# joined drones, unless disabled. This is the same auto_discovery_native.launch.py
-# the rest of the ROS 2 stack uses (see GroundStation/ROS/lyrebird_bringup).
+# Auto-discover Lyrebird drones and give each its own namespaced lyrebird_controller_<name>
+# DjiNode (publishes telemetry under /<drone>/fmu/out/... and listens for commands under
+# /<drone>/fmu/in/...), re-scanning periodically for newly joined drones, unless disabled. This
+# is the same fleet_auto_discovery.launch.py the rest of the ROS 2 stack uses (see
+# GroundStation/ROS/lyrebird_bringup).
 if [[ "${ROS_RUN_CONTROLLER:-1}" == "1" ]]; then
   echo "[ros-monitor] discovering drones and starting namespaced lyrebird_controller nodes"
-  ros2 launch /opt/lyrebird/launch/auto_discovery_native.launch.py &
+  launch_args=()
+  # ROS_DISCOVERY_PERIOD overrides fleet_settings.yaml's discovery_period_sec -- kept as an env
+  # var here (rather than editing the YAML) so this test container can rescan faster than a
+  # real fleet deployment would want to.
+  if [[ -n "${ROS_DISCOVERY_PERIOD:-}" ]]; then
+    launch_args+=("discovery_period_sec:=${ROS_DISCOVERY_PERIOD}")
+  fi
+  ros2 launch /opt/lyrebird/launch/fleet_auto_discovery.launch.py "${launch_args[@]}" &
   CONTROLLER_PID=$!
 fi
 

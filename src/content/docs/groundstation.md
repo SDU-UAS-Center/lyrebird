@@ -39,6 +39,22 @@ Two related environment variables matter once MAVLink is in play:
 
 `GroundStation/Python/lyrebird_groundstation/dji_client.py` provides one class that wraps every command, every telemetry field, and both wires behind the same API — a script written against `DJIInterface` doesn't change when the transport underneath it does. It runs its telemetry reader (TCP, MAVLink, or both) on a background thread and hands back thread-safe snapshots, so a caller reading telemetry never blocks on the network and never sees a half-written update.
 
+### Installing it as a package, in another repo
+
+`GroundStation/Python` is a real pip-installable package (`pyproject.toml`, distribution name `lyrebird-groundstation`) — it does not need to be vendored (copy-pasted) into a consuming project. Install it straight from this repo, pinned to a commit or tag:
+
+```bash
+pip install "git+https://github.com/SDU-UAS-Center/lyrebird.git@<commit-or-tag>#subdirectory=GroundStation/Python"
+```
+
+or as a `requirements.txt` / `pyproject.toml` dependency line:
+
+```text
+lyrebird-groundstation @ git+https://github.com/SDU-UAS-Center/lyrebird.git@<commit-or-tag>#subdirectory=GroundStation/Python
+```
+
+**Keeping it up to date** is then just bumping `<commit-or-tag>` and reinstalling — no manual re-diffing of a vendored copy. The ROS 2 packages ([ROS 2](/ros/)) are a separate concern: they're normal ROS 2 (`ament_python`/`ament_cmake`) packages, not pip packages, so pull them into a colcon workspace the ROS way — a [vcstool](https://github.com/dirk-thomas/vcstool) `.repos` file pinned the same way, imported with `vcs import src < lyrebird.repos`, instead of a bind-mounted or hand-copied directory.
+
 A few things are worth knowing before reaching for it:
 
 - **Auto-discovery** finds the aircraft's IP over UDP broadcast (port 30000) when none is given, so a script doesn't need to hardcode it.

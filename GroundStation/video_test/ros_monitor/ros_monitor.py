@@ -3,7 +3,7 @@
 
 Watches the live ROS graph for `lyrebird_controller_*` nodes (one per drone,
 namespaced under its name — see
-GroundStation/ROS/lyrebird_bringup/launch/auto_discovery_native.launch.py),
+GroundStation/ROS/lyrebird_bringup/launch/fleet_auto_discovery.launch.py),
 subscribes to each drone's topics under its own namespace, tracks per-topic
 publish metrics (rate, last value, freshness) per drone, probes each drone's
 phone HTTP surface, and reports the result to the Lyrebird webapp via

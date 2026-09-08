@@ -34,9 +34,10 @@ RUN . /opt/ros/humble/setup.sh \
     && cd /opt/ros_ws \
     && colcon build --packages-select lyrebird_msgs lyrebird_controller --symlink-install
 
-# The auto-discovery launch file that starts one namespaced lyrebird_controller node per
-# discovered drone, unmodified apart from the added periodic re-scan.
-COPY GroundStation/ROS/lyrebird_bringup/launch/auto_discovery_native.launch.py /opt/lyrebird/launch/auto_discovery_native.launch.py
+# The fleet auto-discovery launch file: one FleetAutoDiscoveryManager node that re-scans
+# periodically and gives each discovered drone its own namespaced lyrebird_controller_<name>
+# DjiNode (see lyrebird_controller/fleet_auto_discovery.py).
+COPY GroundStation/ROS/lyrebird_bringup/launch/fleet_auto_discovery.launch.py /opt/lyrebird/launch/fleet_auto_discovery.launch.py
 
 COPY GroundStation/video_test/ros_monitor/ros_monitor.py /opt/lyrebird/ros_monitor/ros_monitor.py
 COPY GroundStation/video_test/ros_monitor/entrypoint.sh /opt/lyrebird/entrypoint.sh

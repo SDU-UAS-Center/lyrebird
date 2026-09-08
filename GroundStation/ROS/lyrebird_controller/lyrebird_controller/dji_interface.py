@@ -16,6 +16,7 @@ import time
 from lyrebird_groundstation.discovery import discover_all
 from lyrebird_groundstation.dji_client import *  # noqa: F403
 from lyrebird_groundstation.dji_client import DJIInterface as _SharedDJIInterface
+from lyrebird_groundstation.transport import Transport
 
 
 def discover_all_drones(timeout=5.0, verbose=True):
@@ -40,8 +41,16 @@ def discover_drone(timeout=5.0, verbose=True):
 class DJIInterface(_SharedDJIInterface):
     """Backward-compatible ROS lyrebird_controller DJI client."""
 
-    def __init__(self, IP_RC=""):
-        super().__init__(IP_RC, discover_callback=discover_drone)
+    def __init__(self, IP_RC="", *, mavlink_port=None, mavlink_peer_port=None, transport=None):
+        if isinstance(transport, str):
+            transport = Transport(transport)
+        super().__init__(
+            IP_RC,
+            discover_callback=discover_drone,
+            mavlink_port=mavlink_port,
+            mavlink_peer_port=mavlink_peer_port,
+            transport=transport,
+        )
 
 
 if __name__ == "__main__":

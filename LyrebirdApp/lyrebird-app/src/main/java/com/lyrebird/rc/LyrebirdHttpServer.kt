@@ -79,6 +79,8 @@ internal interface LyrebirdCommandHost {
     fun setEdgeConfidence(threshold: Float): Boolean
     /** Set the MediaMTX WHIP server (blank = auto/client IP); false when rejected. */
     fun setMediamtxServer(value: String): Boolean
+    /** Toggle the experimental DJI surface H264 encoder (restart required to take effect). */
+    fun setDjiSurfaceH264Encoder(enabled: Boolean)
 
     fun restartActiveStreaming()
     fun setStreamingMode(mode: StreamingMode)
@@ -461,6 +463,19 @@ internal class LyrebirdHttpCommandHandler(
                     "MediaMTX server set to ${postData.trim()}"
                 } else {
                     "Invalid server value"
+                }
+            },
+            "/send/setSurfaceH264Encoder" to { postData ->
+                when (postData.trim().lowercase()) {
+                    "true", "1", "on", "enable" -> {
+                        host.setDjiSurfaceH264Encoder(true)
+                        "Surface H264 encoder enabled (restart required)"
+                    }
+                    "false", "0", "off", "disable" -> {
+                        host.setDjiSurfaceH264Encoder(false)
+                        "Surface H264 encoder disabled (restart required)"
+                    }
+                    else -> "Invalid value (use true/false)"
                 }
             },
             "/send/deactivateManualOverride" to {

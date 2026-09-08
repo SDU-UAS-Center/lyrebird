@@ -21,7 +21,7 @@ GroundStation/Python/test_scripts
 GroundStation/ROS/lyrebird_videofeed
 GroundStation/ROS/lyrebird_bringup
 # ...except the launch file the ros-monitor image reuses for auto-discovery.
-!GroundStation/ROS/lyrebird_bringup/launch/auto_discovery_native.launch.py
+!GroundStation/ROS/lyrebird_bringup/launch/fleet_auto_discovery.launch.py
 GroundStation/ROS/requirements.txt
 GroundStation/video_test/compose.yaml
 scripts/verify-integration.sh

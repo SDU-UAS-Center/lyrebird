@@ -71,6 +71,7 @@ EP_SET_EDGE_CONFIDENCE = "/send/setEdgeConfidence"
 EP_SET_MEDIAMTX_SERVER = "/send/setMediamtxServer"
 EP_STREAMING_MODE = "/send/streaming/mode"
 EP_SET_RC_CONTROL_MODE = "/send/setRcControlMode"
+EP_SET_SURFACE_H264_ENCODER = "/send/setSurfaceH264Encoder"
 EP_RC_PAIRING_START = "/send/rcPairing/start"
 EP_RC_PAIRING_STOP = "/send/rcPairing/stop"
 EP_GET_SETTINGS = "/config/settings"
@@ -92,6 +93,7 @@ SETTING_ENDPOINTS: dict[str, str] = {
     "mediamtxServer": EP_SET_MEDIAMTX_SERVER,
     "streamingMode": EP_STREAMING_MODE,
     "rcControlMode": EP_SET_RC_CONTROL_MODE,
+    "surfaceH264Encoder": EP_SET_SURFACE_H264_ENCODER,
 }
 
 # --- payload, thermal, media and waypoint endpoints from the XPRIZE release ---

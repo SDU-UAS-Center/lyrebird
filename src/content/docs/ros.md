@@ -31,10 +31,14 @@ GroundStation/ROS/
 │   └── dji_interface.py
 ├── lyrebird_videofeed/    # RTSP video feed -> sensor_msgs/Image on fmu/out/video
 └── lyrebird_bringup/
-    ├── auto_discovery_native.launch.py  # one namespaced lyrebird_controller per discovered drone, re-scans periodically
+    ├── fleet_auto_discovery.launch.py  # one FleetAutoDiscoveryManager, re-scans + settings/ports for the whole fleet
     ├── swarm_connection.launch.py
     └── config/parameters.yaml
 ```
+
+`lyrebird_controller/fleet_auto_discovery.py` also ships its own
+`config/fleet_settings.yaml`, loaded by `FleetAutoDiscoveryManager` at startup -- see
+[Fleet auto-scaling](#fleet-auto-scaling) below.
 
 `lyrebird_controller/topics.py` is the single source of truth for every topic name, type, and QoS
 profile -- both `controller.py` and the `ros_monitor` container's dashboard bridge import it,
@@ -48,15 +52,77 @@ PX4's own per-vehicle namespacing pattern.
 
 ## Fleet auto-scaling
 
-`auto_discovery_native.launch.py` doesn't just launch whatever it finds at startup and stop looking.
-After the initial scan spawns one namespaced `lyrebird_controller` node per drone found, a
-`TimerAction` reruns discovery every `ROS_DISCOVERY_PERIOD` seconds (default 15, environment
-variable) for the life of the launch, and any drone that wasn't there yet gets its own node spawned
-live -- no restart of the ROS 2 stack needed to pick up a drone powered on after launch. A
-`known_namespaces` set carried across every rescan is what makes this safe: it stops an
-already-running drone from being launched a second time, and keeps namespace assignment stable as
-the fleet grows -- the second drone discovered is always the same namespace scan after scan, never
-reassigned out from under a node that's already running.
+`fleet_auto_discovery.launch.py` doesn't just launch whatever it finds at startup and stop
+looking. It runs one `FleetAutoDiscoveryManager` node (`lyrebird_controller/fleet_auto_discovery.py`),
+which rescans the network on a timer (`discovery_period_sec`, default 30s) for the life of the
+launch, and spins up a namespaced `lyrebird_controller_<name>` `DjiNode` for any drone that
+wasn't there yet -- no restart of the ROS 2 stack needed to pick up a drone powered on after
+launch. Every `DjiNode` it creates lives inside this one process, sharing one
+`MultiThreadedExecutor`, since the fleet size isn't known ahead of time and a fixed set of
+`ros2 launch` `Node` actions can't be declared for it.
+
+Because they share one process, they also share one network namespace, so each drone is given
+its own MAVLink listen port (offset from `mavlink_port_base`, stably keyed by the drone's own
+name so a reconnecting drone keeps its port). On connecting, each drone is also pushed the
+settings in `lyrebird_controller/config/fleet_settings.yaml` -- the same settings the app's
+cockpit settings menu edits, plus which transport (HTTP/MAVLink/both) to use and an optional
+auto-assigned `rthAltitude` range spaced across the fleet -- so a fleet can be brought up with
+consistent settings without opening the app on each aircraft.
+
+This replaced an older mechanism (`auto_discovery_native.launch.py`, one `ros2 launch` `Node`
+action per drone via a rescanning `TimerAction`) that could not assign MAVLink ports or push any
+settings, since each drone got its own OS process rather than sharing one.
+
+### `fleet_settings.yaml` reference
+
+Point a launch file at a different copy of this file via the `fleet_settings_file` ROS
+parameter to run a different profile per deployment (e.g.
+`ros2 launch lyrebird_bringup fleet_auto_discovery.launch.py fleet_settings_file:=/path/to/fleet_settings.yaml`).
+Any key below can also be set the normal ROS way (a launch file's own `parameters=[...]`, or
+`--ros-args -p`), which always wins over the file. Comment out a key to leave that setting alone
+on the drone instead of overwriting it.
+
+Top-level (ground-station-side, not pushed to the drone):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `transport` | `both` | Which wire every discovered drone is commanded over: `http` \| `mavlink` \| `both`. Independent of everything below -- this is how the ground station talks to the aircraft, not an app setting. Keep it `both` (MAVLink carries what it can, HTTP fills the rest) unless you have a specific reason to run one wire only. |
+| `discovery_period_sec` | `30.0` | Seconds between rescans for newly joined drones. |
+| `discovery_timeout_sec` | `5.0` | How long each scan waits for answers. |
+| `mavlink_port_base` | `14550` | This ground station's own MAVLink listen port for the first discovered drone; later drones get `base + <stable per-drone offset>` so they don't collide on the same UDP port. Otherwise comes from `LB_MAVLINK_PORT`. |
+| `mavlink_peer_port` | `14550` | The UDP port every aircraft listens on. Fleet-wide only -- no per-drone override yet. Otherwise comes from `LB_MAVLINK_PEER_PORT`. |
+
+`fleet_settings` (pushed to every drone on connection -- the same values the app's cockpit
+settings menu edits):
+
+| Key | Default | Valid values |
+|---|---|---|
+| `maxFlightHeight` | `120` | Meters AGL flight ceiling. |
+| `maxFlightDistance` | `500` | Meters, max distance from the home point. |
+| `distanceLimitEnabled` | `true` | `true` \| `false` -- whether `maxFlightDistance` is enforced. |
+| `videoSource` | `drone` | `drone` \| `phone` \| `mock` -- `mock` is the built-in Mock MP4 test pattern, useful for testing `streamingMode` end-to-end without a live feed. |
+| `streamingMode` | `webrtc` | `webrtc` \| `rtmp` \| `rtsp` \| `agora` \| `gb28181` -- `webrtc` means WebRTC via WHIP push (DJI SDK naming, not a separate "whip" mode). |
+| `webrtcResolution` | `auto` | `auto` \| `1080p` \| `720p` \| `480p` (only used when `streamingMode: webrtc`). |
+| `webrtcFps` | `20` | `5` \| `10` \| `15` \| `20` \| `25` \| `30` (only used when `streamingMode: webrtc`). |
+| `detectionsEnabled` | `false` | `true` \| `false` -- on-board object detection. |
+| `detectionSource` | `none` | `none` \| `dji_onboard` \| `yolo_on_phone` (only used when `detectionsEnabled: true`). |
+| `edgeConfidenceThreshold` | `0.30` | `0.10`-`0.70` in `0.05` steps -- minimum confidence for a detection to be reported. |
+| `rcControlMode` | `usa` | `jp` \| `usa` \| `ch` \| `custom` -- RC stick mapping. |
+| `mediamtxServer` | *(unset)* | MediaMTX relay server URL, only used by some streaming modes (an rtsp relay or gb28181 bridging). Leave unset to use the phone's own local server. |
+| `surfaceH264Encoder` | `false` | `true` \| `false` -- experimental: encode WebRTC video straight from a DJI SDK surface instead of the default encoder. Takes effect on the phone's next app restart, not immediately. |
+
+`rth_altitude_range` (optional; overrides `rthAltitude` in `fleet_settings` when present):
+
+| Key | Meaning |
+|---|---|
+| `min` | RTH altitude (meters) for the first discovered drone. |
+| `max` | Ceiling: no drone is assigned above this. |
+| `step` | Meters added per drone, by the same stable per-drone identity `mavlink_port_base` offsets by (so a reconnecting drone keeps its altitude), capped at `max` once the fleet outgrows the range. |
+
+`drone_settings` maps a drone's discovered name (e.g. `mini3`) to its own settings dict,
+overriding `fleet_settings`/`rth_altitude_range` for that drone only -- e.g. `{"mini3":
+{"rthAltitude": 60, "droneName": "Mini 3"}}`. `droneName` is deliberately not a `fleet_settings`
+key (setting it fleet-wide would give every drone the same name) but is valid here.
 
 ## Commands (`fmu/in/...`)
 
@@ -171,9 +237,11 @@ The image is based on `ros:humble` with CycloneDDS, `cv-bridge`, `vision-opencv`
 ```bash
 cd GroundStation/ROS
 colcon build --symlink-install && source install/setup.bash
-ros2 launch lyrebird_bringup auto_discovery_native.launch.py
+ros2 launch lyrebird_bringup fleet_auto_discovery.launch.py
 # or, to also expose the pure-rename legacy topics:
-ros2 launch lyrebird_bringup auto_discovery_native.launch.py legacy_topics:=true
+ros2 launch lyrebird_bringup fleet_auto_discovery.launch.py legacy_topics:=true
+# or, to use a fleet_settings.yaml other than lyrebird_controller's bundled default:
+ros2 launch lyrebird_bringup fleet_auto_discovery.launch.py fleet_settings_file:=/path/to/fleet_settings.yaml
 
 # Example commands (namespace is the drone's own name, e.g. "mini1")
 ros2 topic pub /mini1/fmu/in/vehicle_command lyrebird_msgs/msg/VehicleCommand \
