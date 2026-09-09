@@ -178,6 +178,74 @@ def test_request_set_setting_maps_key_to_endpoint():
     ]
 
 
+def test_mavlink_setting_uses_mavlink_when_an_equivalent_exists(monkeypatch):
+    client = DJIInterface("192.168.1.42", transport=Transport.MAVLINK)
+    calls = []
+
+    class Commands:
+        def supports(self, endpoint):
+            calls.append(("supports", endpoint))
+            return endpoint == "/send/setRTHAltitude"
+
+        def send(self, endpoint, payload):
+            calls.append(("send", endpoint, payload))
+            return "LB_RTH_ALT set to 60.0"
+
+    client._mavlink_commands = Commands()
+    monkeypatch.setattr(
+        client, "requestSend", lambda endpoint, value: Commands().send(endpoint, value)
+    )
+
+    assert client.requestSetSetting("rthAltitude", 60) == "LB_RTH_ALT set to 60.0"
+    assert calls == [
+        ("supports", "/send/setRTHAltitude"),
+        ("send", "/send/setRTHAltitude", "60"),
+    ]
+
+
+def test_mavlink_setting_falls_back_to_public_http_for_an_http_only_key(monkeypatch):
+    client = DJIInterface("192.168.1.42", transport=Transport.MAVLINK)
+    calls = []
+
+    class Commands:
+        def supports(self, endpoint):
+            return False
+
+    client._mavlink_commands = Commands()
+    monkeypatch.setattr(
+        client,
+        "set_setting_over_http",
+        lambda key, value: calls.append((key, value)) or "Video source set to phone",
+    )
+
+    assert client.requestSetSetting("videoSource", "phone") == "Video source set to phone"
+    assert calls == [("videoSource", "phone")]
+
+
+def test_mavlink_setting_falls_back_to_http_until_route_has_a_heartbeat(monkeypatch):
+    client = DJIInterface("192.168.1.42", transport=Transport.MAVLINK)
+
+    class Commands:
+        def supports(self, endpoint):
+            return endpoint == "/send/setRTHAltitude"
+
+    client._mavlink_commands = Commands()
+    monkeypatch.setattr(
+        client,
+        "requestSend",
+        lambda _endpoint, _value: (_ for _ in ()).throw(
+            RuntimeError("MAVLink system id is not registered")
+        ),
+    )
+    monkeypatch.setattr(
+        client,
+        "set_setting_over_http",
+        lambda key, value: f"HTTP {key}={value}",
+    )
+
+    assert client.requestSetSetting("rthAltitude", 60) == "HTTP rthAltitude=60"
+
+
 def test_request_rc_pairing_actions():
     client = RecordingDJIInterface()
 
@@ -236,7 +304,8 @@ def test_every_command_path_goes_through_the_post_hook():
 
     requestCapture, listMedia and downloadByName used to call requests.post directly, so
     DJIInterfaceSafety's header injection never reached them and ControlAuthority rejected
-    them as Pilot traffic. They must all route through _post.
+    them as Pilot traffic. They must all route through _post, whether directly or via
+    requestSend (requestCapture rides requestSend now, so it also gets a MAVLink path).
     """
     import inspect
 
@@ -245,7 +314,9 @@ def test_every_command_path_goes_through_the_post_hook():
     for name in ("requestSend", "requestCapture", "listMedia", "downloadByName"):
         source = inspect.getsource(getattr(dji_client.DJIInterface, name))
         assert "requests.post" not in source, f"{name} bypasses the _post hook"
-        assert "self._post(" in source, f"{name} does not call _post"
+        assert "self._post(" in source or "self.requestSend(" in source, (
+            f"{name} does not route through _post (directly or via requestSend)"
+        )
 
 
 def test_post_hook_is_the_only_direct_poster():

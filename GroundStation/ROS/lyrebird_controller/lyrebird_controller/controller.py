@@ -310,8 +310,23 @@ class DjiNode(Node):
     ##############################
 
     def verify_connection(self):
-        """Verify the connection to the drone by sending a test request."""
+        """Verify the connection to the drone.
+
+        Checks the wire this node actually has live at this point. In fleet mode the shared
+        MAVLink route was already registered (and its router listener started) back in the
+        DJIInterface constructor, ahead of startTelemetryStream -- so a bound system id there is
+        real evidence the aircraft is reachable, even if its HTTP bridge happens to be slow or
+        down. HTTP and MAVLink are co-equal transports, not one gating the other, so this is
+        checked first and short-circuits the HTTP probe below when it succeeds.
+        """
         timeout_duration = 5  # Timeout in seconds
+
+        route = self.dji_interface.mavlink_route
+        if route is not None and route.wait_for_system_id(timeout=timeout_duration) is not None:
+            self.get_logger().info(
+                f"Connection verified via MAVLink (system id {route.system_id})."
+            )
+            return True
 
         def connection_attempt():
             try:

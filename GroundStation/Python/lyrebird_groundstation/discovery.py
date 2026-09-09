@@ -99,8 +99,38 @@ def _probe_single(ip: str, timeout: float) -> tuple[str, str] | None:
                 sock.close()
 
 
-def local_ips() -> list[str]:
-    """Every local IPv4 address, excluding loopback."""
+def default_route_interface(destination: str = "8.8.8.8") -> str | None:
+    """Return the interface selected by the OS for the normal outbound route."""
+    try:
+        output = subprocess.check_output(["ip", "route", "get", destination], text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"\bdev\s+(\S+)", output)
+    return match.group(1) if match else None
+
+
+def _interface_ipv4_addresses(interface: str | None) -> list[tuple[str, str | None]]:
+    command = ["ip", "-o", "-4", "addr", "show"]
+    if interface:
+        command.extend(["dev", interface])
+    try:
+        output = subprocess.check_output(command, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    addresses: list[tuple[str, str | None]] = []
+    for line in output.splitlines():
+        match = re.search(
+            r"\binet\s+(\d+\.\d+\.\d+\.\d+)/\d+(?:\s+brd\s+(\d+\.\d+\.\d+\.\d+))?",
+            line,
+        )
+        if match:
+            addresses.append((match.group(1), match.group(2)))
+    return addresses
+
+
+def _hostname_ips() -> list[str]:
+    """Every non-loopback IPv4 address the hostname resolves to."""
     ip_list: list[str] = []
     try:
         for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
@@ -108,32 +138,47 @@ def local_ips() -> list[str]:
                 ip_list.append(ip)
     except OSError:
         pass
+    return ip_list
 
+
+def _outbound_socket_ip() -> str | None:
+    """The address the OS would route an outbound packet from, without sending one."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect(("8.8.8.8", 80))
         ip = sock.getsockname()[0]
         sock.close()
-        if ip not in ip_list and not ip.startswith("127."):
-            ip_list.append(ip)
+        return ip
     except OSError:
-        pass
+        return None
 
+
+def _socket_fallback_ips() -> list[str]:
+    """Local IPv4 addresses via plain sockets, for minimal containers without the `ip` utility."""
+    ip_list = _hostname_ips()
+    outbound_ip = _outbound_socket_ip()
+    if outbound_ip and not outbound_ip.startswith("127.") and outbound_ip not in ip_list:
+        ip_list.append(outbound_ip)
     return ip_list
 
 
-def subnet_broadcast_addresses() -> list[str]:
-    """Broadcast address of every local interface, plus the global one."""
+def local_ips(interface: str | None = None) -> list[str]:
+    """IPv4 addresses for [interface], defaulting to the OS default-route interface."""
+    selected_interface = interface or default_route_interface()
+    if selected_interface:
+        addresses = [ip for ip, _broadcast in _interface_ipv4_addresses(selected_interface)]
+        if addresses:
+            return [ip for ip in addresses if not ip.startswith("127.")]
+    return _socket_fallback_ips()
+
+
+def subnet_broadcast_addresses(interface: str | None = None) -> list[str]:
+    """Broadcast addresses for [interface], defaulting to the OS default-route interface."""
     broadcasts = ["255.255.255.255"]
-    try:
-        output = subprocess.check_output(["ip", "addr", "show"], text=True)
-        for line in output.split("\n"):
-            if "inet " in line and " brd " in line:
-                match = re.search(r"brd\s+(\d+\.\d+\.\d+\.\d+)", line)
-                if match and match.group(1) not in broadcasts:
-                    broadcasts.append(match.group(1))
-    except Exception:
-        pass
+    selected_interface = interface or default_route_interface()
+    for _ip, broadcast in _interface_ipv4_addresses(selected_interface):
+        if broadcast and broadcast not in broadcasts:
+            broadcasts.append(broadcast)
     return broadcasts
 
 
@@ -145,8 +190,13 @@ def _broadcast_sweep(timeout: float, found: dict[str, str], verbose: bool) -> No
         sock.close()
 
 
-def _per_interface_sweep(timeout: float, found: dict[str, str], verbose: bool) -> None:
-    for target in subnet_broadcast_addresses():
+def _per_interface_sweep(
+    timeout: float,
+    found: dict[str, str],
+    verbose: bool,
+    interface: str | None,
+) -> None:
+    for target in subnet_broadcast_addresses(interface):
         if target == "255.255.255.255":
             continue
         sock = _new_socket(timeout)
@@ -196,20 +246,23 @@ def discover_all(
     multicast: bool = False,
     multicast_group: str = MULTICAST_GROUP,
     multicast_port: int = MULTICAST_PORT,
+    interface: str | None = None,
 ) -> list[DiscoveryResponse]:
     """Discover every Lyrebird drone reachable on the network.
 
     The plain broadcast is always sent; ``per_interface_broadcast``, the
     direct probes (``scan_subnet``/``probe_known``) and the multicast sweep
-    are opt-in so each consumer pays only for the coverage it needs.
+    are opt-in so each consumer pays only for the coverage it needs. Subnet
+    probes and per-interface broadcasts use the OS default-route interface
+    unless [interface] is supplied.
     """
     found: dict[str, str] = {}
 
     _broadcast_sweep(timeout, found, verbose)
     if per_interface_broadcast:
-        _per_interface_sweep(timeout, found, verbose)
+        _per_interface_sweep(timeout, found, verbose, interface)
     if scan_subnet:
-        _probe_addresses(candidate_subnet_ips(local_ips()), found, verbose)
+        _probe_addresses(candidate_subnet_ips(local_ips(interface)), found, verbose)
     if probe_known:
         _probe_addresses(probe_known, found, verbose)
     if multicast:

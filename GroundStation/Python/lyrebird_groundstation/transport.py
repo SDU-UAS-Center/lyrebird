@@ -16,10 +16,9 @@ Select the wire with the ``LB_TRANSPORT`` environment variable:
     is the lighter wire, so it is preferred wherever it can carry the whole request; HTTP fills the
     gaps rather than being the primary path.
 ``mavlink``
-    Telemetry from the MAVLink stream, commands as MAVLink only. Anything MAVLink does not yet
-    implement is **refused, not quietly retried over HTTP** — the point of this mode is to make
-    the remaining gaps visible, and a silent fallback would hide exactly what we are trying to
-    measure.
+    Telemetry from the MAVLink stream, commands and settings through MAVLink wherever the
+    aircraft exposes an equivalent. A setting with no MAVLink representation uses its explicit
+    phone-HTTP configuration endpoint; flight commands never fall back to HTTP.
 ``http``
     Nothing touches MAVLink. Kept for ground stations built against this project's predecessor,
     WildBridge, and for links where only HTTP is reachable.
@@ -586,7 +585,11 @@ class MavlinkRoute:
         self.host = host
         self.peer_port = peer_port
         self.name = name or host
-        self._system_id = system_id
+        # A configured id is a desired identity, not evidence of the aircraft's current wire
+        # identity. The route must first bind to the autopilot heartbeat, which may still carry
+        # the factory/serial-derived id while a configuration write is being applied.
+        self.requested_system_id = system_id
+        self._system_id: int | None = None
         self.last_seen = 0.0
         self.duplicate_system_id: int | None = None
         self.replaced = False
@@ -679,11 +682,13 @@ class MavlinkRouter:
         bind_host: str = "",
         peer_port: int = DEFAULT_MAVLINK_PORT,
         logger: Callable[[str], None] | None = None,
+        debug_logger: Callable[[str], None] | None = None,
     ):
         self.port = port
         self.bind_host = bind_host
         self.peer_port = peer_port
         self._logger = logger
+        self._debug_logger = debug_logger
         self._routes_by_host: dict[str, MavlinkRoute] = {}
         self._routes_by_system_id: dict[int, MavlinkRoute] = {}
         self._lock = threading.RLock()
@@ -725,8 +730,6 @@ class MavlinkRouter:
                 system_id=system_id,
             )
             self._routes_by_host[host] = route
-            if system_id is not None and not self._bind_system_id(route, system_id):
-                route._mark_duplicate(system_id)
             try:
                 self.start()
             except Exception:
@@ -815,16 +818,17 @@ class MavlinkRouter:
         if parser is None:
             return
         messages = parser.parse_buffer(data) or []
-        frame_system_id = data[5] if len(data) >= 10 and data[0] == MAVLINK2_MAGIC else None
-
         with self._lock:
             route = self._routes_by_host.get(address[0])
             if route is None:
-                self._report(f"Ignoring MAVLink datagram from unknown host {address[0]}")
+                self._report(
+                    f"Ignoring MAVLink datagram from unknown host {address[0]}",
+                    transient=True,
+                )
                 return
             if not self._bind_heartbeat(route, messages):
                 return
-            accepted = self._accepted_messages(route, frame_system_id, messages)
+            accepted = self._accepted_messages(route, messages)
             if accepted is None:
                 return
             route.last_seen = time.monotonic()
@@ -838,7 +842,8 @@ class MavlinkRouter:
                 return True
             self._report(
                 f"Ignoring MAVLink data from {route.name!r} until its autopilot heartbeat "
-                "registers a system id"
+                "registers a system id",
+                transient=True,
             )
             return False
         if route.system_id == heartbeat_system_id:
@@ -846,7 +851,8 @@ class MavlinkRouter:
         if self._bind_system_id(route, heartbeat_system_id):
             if route.system_id is not None:
                 self._report(
-                    f"Bound MAVLink system id {heartbeat_system_id} to route {route.name!r}"
+                    f"Bound MAVLink system id {heartbeat_system_id} to route {route.name!r}",
+                    transient=True,
                 )
             return True
         route._mark_duplicate(heartbeat_system_id)
@@ -864,20 +870,24 @@ class MavlinkRouter:
                 return system_id
         return None
 
-    def _accepted_messages(
-        self, route: MavlinkRoute, frame_system_id: int | None, messages: list[Any]
-    ) -> list[Any] | None:
+    def _accepted_messages(self, route: MavlinkRoute, messages: list[Any]) -> list[Any] | None:
         system_id = route.system_id
         if system_id is None or self._routes_by_system_id.get(system_id) is not route:
             return None
-        if frame_system_id is not None and frame_system_id != system_id:
-            self._report(
-                f"Ignoring MAVLink system id {frame_system_id} from route {route.name!r}; "
-                f"expected {system_id}"
-            )
-            return None
         accepted = [message for message in messages if _message_identity(message)[0] == system_id]
-        if not accepted and frame_system_id != system_id:
+        if not accepted:
+            frame_ids = sorted(
+                {
+                    source_id
+                    for source_id, _component_id in (_message_identity(msg) for msg in messages)
+                    if source_id is not None
+                }
+            )
+            self._report(
+                f"Ignoring MAVLink system ids {frame_ids} from route {route.name!r}; "
+                f"expected {system_id}",
+                transient=True,
+            )
             return None
         return accepted
 
@@ -936,9 +946,11 @@ class MavlinkRouter:
             with suppress(OSError, RuntimeError):
                 self.send(route, self._heartbeat_frame)
 
-    def _report(self, message: str) -> None:
+    def _report(self, message: str, *, transient: bool = False) -> None:
         self.errors.append(message)
-        if self._logger is not None:
+        if transient and self._debug_logger is not None:
+            self._debug_logger(message)
+        elif self._logger is not None:
             self._logger(message)
 
 
@@ -1535,10 +1547,9 @@ _SPECIAL_SENDERS: dict[str, Any] = {
 
 #: Settings the aircraft accepts a write to, keyed by the endpoint the HTTP surface uses.
 #:
-#: Numeric only. PARAM_SET carries a float, and the string settings behind the rest of the
-#: /send/set* surface -- drone name, video source, the MediaMTX address -- have no honest float
-#: encoding, so they stay on HTTP rather than being smuggled through as magic numbers. In
-#: mavlink-only mode those come back refused, which is the truthful answer.
+#: Numeric only. PARAM_SET carries a float; string settings use the extended parameter protocol
+#: below. The map is kept beside the endpoint names so generic setting writes can choose the
+#: MAVLink representation before considering the explicit HTTP gap path.
 PARAM_RTH_ALTITUDE = "LB_RTH_ALT"
 SETTING_PARAM_ENDPOINTS = {
     "/send/setRTHAltitude": PARAM_RTH_ALTITUDE,
@@ -1917,14 +1928,14 @@ class MavlinkCommandChannel:
 
     @property
     def target_system(self) -> int:
-        """The configured target, or the system id learned by the shared route."""
-        if self._configured_target_system is not None:
-            return self._configured_target_system
+        """The observed route identity, or a configured target for an unshared channel."""
         if self._route is not None:
             system_id = self._route.wait_for_system_id()
             if system_id is None:
                 raise RuntimeError(f"MAVLink system id for {self._route.name!r} is not registered")
             return system_id
+        if self._configured_target_system is not None:
+            return self._configured_target_system
         return 1
 
     def close(self) -> None:
@@ -1936,7 +1947,7 @@ class MavlinkCommandChannel:
                 self._socket.close()
 
     def supports(self, endpoint: str) -> bool:
-        return endpoint in _COMMAND_MAP
+        return endpoint in _COMMAND_MAP or endpoint in _SPECIAL_SENDERS
 
     def send(self, endpoint: str, payload: str, timeout: float = 3.0) -> str:
         """Send one command and render the reply the way the HTTP surface would.

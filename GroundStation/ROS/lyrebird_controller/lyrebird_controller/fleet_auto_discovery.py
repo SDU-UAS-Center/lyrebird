@@ -74,6 +74,12 @@ def _clean_namespace(name, index):
     return namespace
 
 
+def _setting_result_is_success(result):
+    text = str(result or "").strip().lower()
+    failure_prefixes = ("rejected:", "invalid", "failed:", "error:", "refused:")
+    return bool(text) and text != "null" and not text.startswith(failure_prefixes)
+
+
 class FleetAutoDiscoveryManager(Node):
     """Discovers Lyrebird drones on a timer and gives each a logical DjiNode.
 
@@ -151,6 +157,7 @@ class FleetAutoDiscoveryManager(Node):
                 port=self._mavlink_port_base,
                 peer_port=self._mavlink_peer_port,
                 logger=self.get_logger().warning,
+                debug_logger=self.get_logger().debug,
             )
             if configured_transport.uses_mavlink
             else None
@@ -250,8 +257,10 @@ class FleetAutoDiscoveryManager(Node):
                 settings.pop("mavlinkSystemId", None)
         for key, value in settings.items():
             result = node.dji_interface.requestSetSetting(key, value)
-            if not result:
-                self.get_logger().warning(f"Failed to apply setting {key}={value} to {name!r}")
+            if not _setting_result_is_success(result):
+                self.get_logger().warning(
+                    f"Failed to apply setting {key}={value} to {name!r}: response={result!r}"
+                )
 
     def _auto_rth_altitude(self, slot):
         """Assign a fleet RTH altitude slot, capped for an oversized fleet."""

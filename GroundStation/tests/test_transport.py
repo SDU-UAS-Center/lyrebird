@@ -397,6 +397,24 @@ def test_shared_router_keeps_component_messages_and_acks_on_the_parent_vehicle()
         route_a.close()
 
 
+def test_shared_router_accepts_multiple_frames_in_one_datagram():
+    router = MavlinkRouter(port=0)
+    route = router.register("10.0.0.1", name="alpha")
+    seen = []
+    route.subscribe(lambda _data, messages, _address: seen.append(messages))
+
+    try:
+        router._dispatch_datagram(
+            _aircraft_frame(41) + _aircraft_ack_frame(41),
+            ("10.0.0.1", 14550),
+        )
+
+        assert route.system_id == 41
+        assert [message.get_type() for message in seen[0]] == ["HEARTBEAT", "COMMAND_ACK"]
+    finally:
+        route.close()
+
+
 def test_shared_router_drops_unknown_hosts_and_rebinds_a_known_route():
     router = MavlinkRouter(port=0)
     route_a = router.register("10.0.0.1", name="alpha")
@@ -430,6 +448,34 @@ def test_shared_router_rejects_duplicate_system_ids():
     finally:
         route_a.close()
         route_b.close()
+
+
+def test_setting_endpoints_are_supported_by_the_mavlink_command_channel():
+    channel = MavlinkCommandChannel("10.0.0.1")
+
+    assert channel.supports("/send/setRTHAltitude")
+    assert channel.supports("/send/setMaxFlightHeight")
+    assert channel.supports("/send/setSurfaceH264Encoder")
+    assert channel.supports("/send/setVideoSource")
+
+
+def test_configured_route_id_waits_for_the_aircraft_heartbeat():
+    router = MavlinkRouter(port=0)
+    route = router.register("10.0.0.1", name="mini4", system_id=4)
+
+    try:
+        assert route.system_id is None
+        assert 4 not in router._routes_by_system_id
+
+        router._dispatch_datagram(_aircraft_frame(250), ("10.0.0.1", 14550))
+
+        assert route.system_id == 250
+        assert router._routes_by_system_id[250] is route
+        channel = MavlinkCommandChannel("10.0.0.1", target_system=4, route=route)
+        assert channel.target_system == 250
+        channel.close()
+    finally:
+        route.close()
 
 
 def test_shared_router_rebinds_a_stale_system_id_to_a_reconnected_route():

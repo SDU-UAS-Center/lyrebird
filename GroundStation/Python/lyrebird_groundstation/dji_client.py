@@ -25,6 +25,7 @@ from lyrebird_groundstation.dji_helpers import (
 from lyrebird_groundstation.transport import (
     TCP_GAP_MODE_REQUEST,
     MavlinkCommandChannel,
+    MavlinkRoute,
     MavlinkRouter,
     MavlinkTelemetrySource,
     Transport,
@@ -120,7 +121,15 @@ def telemetry_timestamp() -> str:
 
 
 def get_config(ip_address: str) -> dict[str, Any] | None:
-    """Query drone configuration via HTTP GET /config endpoint."""
+    """Query drone configuration via HTTP GET /config endpoint.
+
+    Deliberately HTTP-only regardless of transport, like get_settings() below: this is a full
+    snapshot read (every field the phone knows, in one call), not a single command or setting
+    write, so it has no COMMAND_MAP/param analogue to route through requestSend(). MAVLink does
+    carry an equivalent slice as LYREBIRD_CONFIG on the telemetry stream (decode_lyrebird_config
+    in transport.py), but that arrives passively once telemetry is running; it is not something
+    a one-off synchronous getter can request on demand the way this GET can.
+    """
     try:
         response = requests.get(f"http://{ip_address}:8080/config", timeout=2.0)
         if response.status_code == 200:
@@ -131,7 +140,13 @@ def get_config(ip_address: str) -> dict[str, Any] | None:
 
 
 def get_settings(ip_address: str) -> dict[str, Any] | None:
-    """Query the full Lyrebird settings JSON via HTTP GET /config/settings."""
+    """Query the full Lyrebird settings JSON via HTTP GET /config/settings.
+
+    Deliberately HTTP-only regardless of transport: a full-settings snapshot has no single
+    MAVLink message to answer it with, only per-setting PARAM_VALUE/PARAM_EXT_VALUE replies (see
+    requestSetSetting), so there is nothing here for requestSend() to route. Reading one setting
+    at a time over MAVLink is possible but is a different operation from this bulk read.
+    """
     try:
         response = requests.get(f"http://{ip_address}:8080/config/settings", timeout=2.0)
         if response.status_code == 200:
@@ -254,6 +269,17 @@ class DJIInterface:
                 f"Transport: {self.transport.value} "
                 f"(listening on udp/{self.mavlink_port}, aircraft on udp/{self.mavlink_peer_port})"
             )
+
+    @property
+    def mavlink_route(self) -> MavlinkRoute | None:
+        """The shared-router registration for this aircraft, or None outside fleet mode.
+
+        A route registered here already has the router's listener running (registered in
+        __init__, ahead of startTelemetryStream), so its bound system id is a live-liveness
+        signal a caller can check before telemetry has started -- see DjiNode.verify_connection,
+        which uses it as a MAVLink-side alternative to probing the HTTP config endpoint.
+        """
+        return self._mavlink_route
 
     def getVideoSource(self):
         if self.IP_RC == "":
@@ -510,13 +536,19 @@ class DJIInterface:
             build_command_url(self.baseCommandUrl, endPoint), data, timeout=timeout, **kwargs
         )
 
-    def requestSend(self, endPoint, data, verbose=False):
-        """Send a POST request to the drone."""
+    def requestSend(self, endPoint, data, verbose=False, timeout=5):
+        """Send a POST request to the drone.
+
+        ``timeout`` covers both wires: it bounds the wait for a MAVLink COMMAND_ACK and, on the
+        HTTP fallback, the request itself. Callers whose endpoint is known to be slow on its
+        first hit (e.g. a cold capture) should raise it explicitly rather than growing a second
+        code path per wire.
+        """
         if self.IP_RC == "":
             print(f"No IP_RC provided, returning empty string for request at {endPoint}")
             return ""
         if self._mavlink_commands is not None and self._mavlink_commands.supports(endPoint):
-            response = self._mavlink_commands.send(endPoint, str(data))
+            response = self._mavlink_commands.send(endPoint, str(data), timeout)
             if verbose:
                 print("EP : " + endPoint + "\t" + response)
             return response
@@ -528,7 +560,7 @@ class DJIInterface:
             return message
 
         try:
-            response = self._post(endPoint, str(data))
+            response = self._post(endPoint, str(data), timeout=timeout)
             if verbose:
                 print("EP : " + endPoint + "\t" + str(response.content, encoding="utf-8"))
             return response.content.decode("utf-8")
@@ -607,18 +639,54 @@ class DJIInterface:
     def requestSetSetting(self, key: str, value) -> str:
         """Set a single Lyrebird setting by webapp key.
 
-        The phone parses the raw request body for every /send/set* endpoint, so the
-        value is sent as a string body (same as requestSetRTHAltitude). Returns the
-        phone's response text, or "" for an unknown key or a failed request.
+        Use the MAVLink parameter protocol whenever this setting has an equivalent. Settings
+        without one deliberately fall back to the phone HTTP endpoint even in ``mavlink`` mode:
+        that mode means MAVLink-first, while an HTTP-only setting should remain configurable
+        rather than being silently discarded. The value is sent as a string body on HTTP, which
+        is what the phone parses for every /send/set* endpoint.
         """
         endpoint = SETTING_ENDPOINTS.get(key)
         if endpoint is None:
             print(f"Unknown setting key: {key}")
             return ""
-        return self.requestSend(endpoint, str(value))
+        if self._mavlink_commands is not None and self._mavlink_commands.supports(endpoint):
+            try:
+                return self.requestSend(endpoint, str(value))
+            except RuntimeError as exc:
+                # A newly discovered route may not have received its first autopilot heartbeat
+                # yet. Settings remain configurable during that short binding window; once the
+                # route is bound, the same key will use MAVLink again.
+                print(f"MAVLink setting {key} unavailable yet: {exc}; using HTTP")
+                return self.set_setting_over_http(key, value)
+        return self.set_setting_over_http(key, value)
+
+    def set_setting_over_http(self, key: str, value) -> str:
+        """Set one phone setting directly over HTTP, regardless of transport selection.
+
+        This is the public escape hatch for configuration keys that have no honest MAVLink
+        representation. It intentionally goes through ``_post`` so authenticated subclasses
+        such as ``DJIInterfaceSafety`` keep their safety headers.
+        """
+        endpoint = SETTING_ENDPOINTS.get(key)
+        if endpoint is None:
+            print(f"Unknown setting key: {key}")
+            return ""
+        if self.IP_RC == "":
+            print(f"No IP_RC provided, returning empty string for setting {key}")
+            return ""
+        try:
+            response = self._post(endpoint, str(value))
+            return response.content.decode("utf-8")
+        except requests.exceptions.RequestException as exc:
+            print(f"Request error at {endpoint}: {exc}")
+            return ""
 
     def getSettings(self) -> dict[str, Any] | None:
-        """Read the full settings JSON via GET /config/settings."""
+        """Read the full settings JSON via GET /config/settings.
+
+        HTTP-only regardless of transport -- see get_settings() above for why a bulk snapshot
+        read has no MAVLink form to prefer.
+        """
         if self.IP_RC == "":
             return None
         return get_settings(self.IP_RC)
@@ -735,35 +803,37 @@ class DJIInterface:
 
     def requestCapture(self):
         """Trigger ONE H20T shutter (no image download). Returns the capture descriptor.
+
+        Routed through requestSend() like every other command, so this rides MAVLink whenever
+        that wire has an equivalent (it does: USER_2/CAPTURE_THERMAL_IMAGE) and falls back to
+        HTTP otherwise -- matching requestCaptureTemperature() rather than posting directly.
+
         Returns:
-            dict {"thermal": fn|None, "wide": fn|None, "zoom": fn|None} on success (fn is the
-            on-camera filename, None if that lens was not stored), else False.
+            On HTTP: dict {"thermal": fn|None, "wide": fn|None, "zoom": fn|None} (fn is the
+            on-camera filename, None if that lens was not stored).
+            On MAVLink: {"captured": True} -- the ack has no room for filenames, so use
+            listMedia() to find what the shutter just wrote.
+            False on failure either way.
 
         Download any returned filename with downloadByName().
         For the thermal max temperature (no shutter), use requestCaptureTemperature().
         """
-
         if self.IP_RC == "":
             print("No IP_RC provided, cannot capture image")
             return False
-        # Trip the shutter. The bridge returns a JSON descriptor naming the on-camera filename
-        # of each lens the H20T stored (no image yet).
+        # Generous timeout: the very first capture after connect can be cold (the HTTP bridge
+        # builds the full SD-card list once), so allow well past the server's internal
+        # resolution cap.
+        response = self.requestSend(EP_CAPTURE_THERMAL_IMAGE, "", timeout=60)
         try:
-            # Generous timeout: the very first capture after connect can be cold (the bridge builds
-            # the full SD-card list once), so allow well past the server's internal resolution cap.
-            response = self._post(EP_CAPTURE_THERMAL_IMAGE, timeout=60)
-        except requests.exceptions.RequestException as e:
-            print(f"Error capturing image: {e}")
-            return False
-        try:
-            info = response.json()
+            info = json.loads(response)
         except ValueError:
-            print(
-                f"Capture returned non-JSON: HTTP {response.status_code}, "
-                f"body={response.text[:200]!r}"
-            )
+            print(f"Capture returned non-JSON: {response!r}")
             return False
-        if info.get("error") or not info.get("thermal"):
+        if info.get("error"):
+            print(f"Capture failed: {info}")
+            return False
+        if "captured" not in info and not info.get("thermal"):
             print(f"Capture failed: {info}")
             return False
         return info
