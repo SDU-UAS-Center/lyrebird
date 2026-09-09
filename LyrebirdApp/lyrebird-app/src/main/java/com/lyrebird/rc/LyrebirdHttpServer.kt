@@ -481,11 +481,11 @@ internal class LyrebirdHttpCommandHandler(
                 when (postData.trim().lowercase()) {
                     "true", "1", "on", "enable" -> {
                         host.setDjiSurfaceH264Encoder(true)
-                        "Surface H264 encoder enabled (restart required)"
+                        "Surface H264 encoder enabled; Flight Deck restart requested"
                     }
                     "false", "0", "off", "disable" -> {
                         host.setDjiSurfaceH264Encoder(false)
-                        "Surface H264 encoder disabled (restart required)"
+                        "Surface H264 encoder disabled; Flight Deck restart requested"
                     }
                     else -> "Invalid value (use true/false)"
                 }

@@ -290,6 +290,8 @@ class WebRTCStreamer(
 
     fun isRunning(): Boolean = whipPublisher?.isRunning() == true
 
+    fun isPublishing(): Boolean = whipPublisher?.isPublishing() == true
+
     /**
      * Change the streaming resolution for all active connections on-the-fly.
      */

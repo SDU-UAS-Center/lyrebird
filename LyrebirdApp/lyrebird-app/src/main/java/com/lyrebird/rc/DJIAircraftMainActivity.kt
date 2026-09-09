@@ -30,6 +30,7 @@ class DJIAircraftMainActivity : DJIMainActivity() {
     private var noDronePrompt: AlertDialog? = null
     private var noDronePromptShown = false
     private var flightDeckAutoLaunched = false
+    private var reopenFlightDeckPending = false
 
     /**
      * Polls for drone registration while the main activity is resumed. When a drone
@@ -75,6 +76,35 @@ class DJIAircraftMainActivity : DJIMainActivity() {
         } catch (_: Exception) {
             flightDeckAutoLaunched = false
             false
+        }
+    }
+
+    private fun reopenFlightDeckAfterRestart() {
+        flightDeckAutoLaunched = true
+        reopenFlightDeckPending = true
+        recoveryHandler.removeCallbacks(connectionCheck)
+        recoveryHandler.postDelayed({
+            if (!reopenFlightDeckPending || isFinishing || isDestroyed) return@postDelayed
+            reopenFlightDeckPending = false
+            if (!isDroneConnected()) {
+                flightDeckAutoLaunched = false
+                startConnectionWatcher()
+                return@postDelayed
+            }
+            try {
+                startActivity(Intent(this, FlightDeckActivity::class.java))
+            } catch (_: Exception) {
+                flightDeckAutoLaunched = false
+                startConnectionWatcher()
+            }
+        }, FLIGHT_DECK_REOPEN_DELAY_MS)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_REOPEN_FLIGHT_DECK, false)) {
+            reopenFlightDeckAfterRestart()
         }
     }
 
@@ -134,6 +164,7 @@ class DJIAircraftMainActivity : DJIMainActivity() {
     }
 
     override fun onPause() {
+        reopenFlightDeckPending = false
         recoveryHandler.removeCallbacksAndMessages(null)
         super.onPause()
     }
@@ -179,7 +210,9 @@ class DJIAircraftMainActivity : DJIMainActivity() {
     }
 
     companion object {
+        internal const val EXTRA_REOPEN_FLIGHT_DECK = "com.lyrebird.rc.extra.REOPEN_FLIGHT_DECK"
         private const val NO_DRONE_PROMPT_DELAY_MS = 12_000L
         private const val CONNECTION_POLL_MS = 1_000L
+        private const val FLIGHT_DECK_REOPEN_DELAY_MS = 500L
     }
 }

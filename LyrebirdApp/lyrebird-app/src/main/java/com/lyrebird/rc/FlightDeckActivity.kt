@@ -332,6 +332,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val PREF_DRONE_NAME_USER_SET = "drone_name_user_set"
         private const val PREF_MAVLINK_FLIGHT_DEFAULT_MIGRATED = "lb_mav_0_allow_flight_default_v2"
         private const val SETTINGS_BACKUP_DEBOUNCE_MS = 1500L
+        private const val FLIGHT_DECK_RESTART_DELAY_MS = 750L
         private const val PREF_MEDIAMTX_SERVER = "mediamtx_server"
         private const val SAFETY_TOKEN = "98"
         private const val PREF_WEBRTC_FPS = "webrtc_fps"
@@ -468,6 +469,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      */
     private val ftpExecutor = java.util.concurrent.Executors.newFixedThreadPool(2)
     private var webRTCStreamer: WebRTCStreamer? = null
+    private var videoSettingRestartScheduled = false
     private var lyrebirdSettingsDialog: Dialog? = null
     @Volatile private var lastWhipUrl: String? = null  // Remembered for FPS/Quality mode restarts
     @Volatile private var lastClientIp: String? = null
@@ -987,18 +989,43 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     )
 
     private fun toggleDjiSurfaceH264Encoder() {
-        setDjiSurfaceH264Encoder(!isDjiSurfaceH264EncoderEnabled())
+        val enabled = !isDjiSurfaceH264EncoderEnabled()
+        AlertDialog.Builder(this)
+            .setTitle("Restart Flight Deck to apply?")
+            .setMessage(
+                "Changing the experimental surface H264 encoder will close Flight Deck, " +
+                    "return to the main screen, and reopen Flight Deck. Video and telemetry " +
+                    "will briefly stop."
+            )
+            .setPositiveButton("Restart Flight Deck") { _, _ ->
+                setDjiSurfaceH264Encoder(enabled)
+                Toast.makeText(this, "Restarting Flight Deck...", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun setDjiSurfaceH264Encoder(enabled: Boolean) {
+        if (isDjiSurfaceH264EncoderEnabled() == enabled) return
         sharedPreferences.edit()
             .putBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, enabled)
             .apply()
-        Toast.makeText(
-            this,
-            "Surface H264 encoder ${if (enabled) "enabled" else "disabled"}; restart app to apply",
-            Toast.LENGTH_LONG
-        ).show()
+        if (videoSettingRestartScheduled) return
+        videoSettingRestartScheduled = true
+        mainHandler.postDelayed({
+            videoSettingRestartScheduled = false
+            restartFlightDeckForVideoSetting()
+        }, FLIGHT_DECK_RESTART_DELAY_MS)
+    }
+
+    private fun restartFlightDeckForVideoSetting() {
+        if (isFinishing || isDestroyed) return
+        val intent = Intent(this, DJIAircraftMainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(DJIAircraftMainActivity.EXTRA_REOPEN_FLIGHT_DECK, true)
+        }
+        startActivity(intent)
+        finish()
     }
 
     private fun getVideoSourceMode(): VideoSourceMode {
@@ -1545,6 +1572,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             append("\"edgeConfidenceThreshold\":${getEdgeConfidenceThreshold()},")
             append("\"mediamtxServer\":\"${jsonEscape(getMediamtxServer())}\",")
             append("\"rthAltitude\":${DroneController.getRTHAltitude()},")
+            append("\"rthAltitudeEffective\":${DroneController.getEffectiveRTHAltitude()},")
+            append("\"rthAltitudeStatus\":\"${DroneController.getRTHAltitudeStatus()}\",")
             append("\"maxFlightHeight\":${DroneController.getMaxFlightHeight()},")
             append("\"maxFlightDistance\":${DroneController.getMaxFlightDistance()},")
             append("\"distanceLimitEnabled\":${DroneController.getDistanceLimitEnabled()},")
@@ -1572,6 +1601,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             append("\"webrtcFps\":\"video\",")
             append("\"mediamtxServer\":\"video\",")
             append("\"rthAltitude\":\"flight\",")
+            append("\"rthAltitudeEffective\":\"flight\",")
+            append("\"rthAltitudeStatus\":\"flight\",")
             append("\"maxFlightHeight\":\"flight\",")
             append("\"maxFlightDistance\":\"flight\",")
             append("\"distanceLimitEnabled\":\"flight\",")
@@ -2410,7 +2441,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * rebuild the identical publish would drop the picture for everyone watching it.
      */
     private fun startStreamingForClient(clientIp: String) {
-        if (lastClientIp == clientIp && lastWhipUrl != null) return
+        if (lastClientIp == clientIp && lastWhipUrl != null) {
+            val publisherHealthy = webRTCStreamer?.isRunning() == true &&
+                webRTCStreamer?.isPublishing() == true
+            if (publisherHealthy) return
+            Log.w(TAG, "Restarting stale WHIP publisher for $clientIp")
+        }
         Log.i(TAG, "Starting active streaming for $clientIp")
         lastClientIp = clientIp
         rebuildTelemetryCache()
@@ -2933,7 +2969,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         // checked here rather than folded into the enum's own IDLE label. Sized up and in red
         // rather than sharing the operational status colors: offline needs to read as an alarm,
         // not an operational status.
-        if (!aircraftConnected) {
+        if (!aircraftConnected && !isReadyToTakeoff()) {
             statusTv.text = "OFFLINE"
             statusTv.setTextColor(0xFFFF1744.toInt())
             statusTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, DRONE_STATUS_ALERT_TEXT_SIZE_SP)
@@ -3089,13 +3125,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         columns.forEachIndexed { index, column ->
             column.orientation = LinearLayout.VERTICAL
             column.layoutParams = LinearLayout.LayoutParams(
-                0,
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                1f
-            ).apply {
-                if (index > 0) marginStart = dpToPx(5)
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            val columnScroll = android.widget.ScrollView(this).apply {
+                isFillViewport = true
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    1f
+                ).apply {
+                    if (index > 0) marginStart = dpToPx(5)
+                }
+                addView(column)
             }
-            cockpit?.addView(column)
+            cockpit?.addView(columnScroll)
         }
 
         val aircraftColumn = columns[0]
@@ -3150,7 +3194,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             if (isDjiSurfaceH264EncoderEnabled()) "Experimental / on" else "Default encoder"
         ) {
             toggleDjiSurfaceH264Encoder()
-            showLyrebirdSettingsMenu()
         }
 
         val flightColumn = columns[2]
@@ -3764,7 +3807,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                         if (isDjiSurfaceH264EncoderEnabled()) "Experimental / enabled" else "Default WebRTC encoder"
                     ) {
                         toggleDjiSurfaceH264Encoder()
-                        showBrandedStreamSettingsPage()
                     }
                 }
                 StreamingMode.RTMP -> addBrandedSettingsRow(container, "RTMP server", getRtmpUrl(NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1")) {
@@ -4995,6 +5037,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             settingsBackupExecutor.shutdownNow()
             webRTCStreamer?.listener = null
             stopActiveStreaming()
+            WebRTCPeerFactory.reset()
             discoveryManager.stopDiscoveryServer()
             // Must stop the HTTP server, not just drop the reference: its accept thread and
             // worker pool hold this activity via the command handler. Without stop() the

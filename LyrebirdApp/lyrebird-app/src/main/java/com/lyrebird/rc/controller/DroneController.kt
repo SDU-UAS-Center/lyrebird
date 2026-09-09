@@ -1741,8 +1741,11 @@ object DroneController {
     private val maxFlightHeightKey: DJIKey<Int> = FlightControllerKey.KeyHeightLimit.create()
     private val maxFlightDistanceKey: DJIKey<Int> = FlightControllerKey.KeyDistanceLimit.create()
     private val distanceLimitEnabledKey: DJIKey<Boolean> = FlightControllerKey.KeyDistanceLimitEnabled.create()
+    private const val RTH_ALTITUDE_SET_MAX_ATTEMPTS = 2
+    private const val RTH_ALTITUDE_SET_RETRY_DELAY_MS = 500L
 
     @Volatile private var cachedRTHAltitude: Int = -1
+        @Volatile private var requestedRTHAltitude: Int = -1
     @Volatile private var cachedMaxFlightHeight: Int = -1
     @Volatile private var cachedMaxFlightDistance: Int = -1
     @Volatile private var cachedDistanceLimitEnabled: Boolean = false
@@ -1800,6 +1803,19 @@ object DroneController {
         return cachedRTHAltitude
     }
 
+    /** The requested value while a DJI write is still pending, otherwise the confirmed value. */
+    fun getEffectiveRTHAltitude(): Int {
+        setupFlightLimitListeners()
+        return cachedRTHAltitude.takeIf { it >= 0 } ?: requestedRTHAltitude
+    }
+
+    /** confirmed, pending, or not_reported when the DJI key has not answered yet. */
+    fun getRTHAltitudeStatus(): String = when {
+        cachedRTHAltitude >= 0 -> "confirmed"
+        requestedRTHAltitude >= 0 -> "pending"
+        else -> "not_reported"
+    }
+
     /**
      * Set the return-to-home altitude.
      *
@@ -1809,19 +1825,38 @@ object DroneController {
      * can only hope about.
      */
     fun setRTHAltitude(altitude: Int, onResult: ((Boolean) -> Unit)? = null) {
-        goHomeHeightKey.set(
-            altitude,
-            {
-                cachedRTHAltitude = altitude
-                ToastUtils.showToast("RTH altitude set to $altitude m")
-                onResult?.invoke(true)
-            },
-            { error ->
-                Log.w("DroneController", "RTH altitude set failed: ${error.description()}")
-                ToastUtils.showToast("RTH altitude change refused: ${error.description()}")
-                onResult?.invoke(false)
-            }
-        )
+        requestedRTHAltitude = altitude
+        fun attemptSet(attempt: Int) {
+            goHomeHeightKey.set(
+                altitude,
+                {
+                    cachedRTHAltitude = altitude
+                    requestedRTHAltitude = -1
+                    ToastUtils.showToast("RTH altitude set to $altitude m")
+                    onResult?.invoke(true)
+                },
+                { error ->
+                    val description = error.description().orEmpty().trim()
+                    val reason = description.ifBlank { "DJI error code ${error.errorCode()}" }
+                    if (attempt < RTH_ALTITUDE_SET_MAX_ATTEMPTS) {
+                        Log.w(
+                            "DroneController",
+                            "RTH altitude set failed (attempt $attempt): $reason; retrying"
+                        )
+                        statusResetHandler.postDelayed(
+                            { attemptSet(attempt + 1) },
+                            RTH_ALTITUDE_SET_RETRY_DELAY_MS
+                        )
+                    } else {
+                        requestedRTHAltitude = -1
+                        Log.w("DroneController", "RTH altitude set failed: $reason")
+                        ToastUtils.showToast("RTH altitude change refused: $reason")
+                        onResult?.invoke(false)
+                    }
+                }
+            )
+        }
+        attemptSet(1)
     }
 
     fun getMaxFlightHeight(): Int {

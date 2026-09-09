@@ -49,6 +49,16 @@ object WebRTCPeerFactory {
         }
     }
 
+    fun reset() {
+        synchronized(factoryLock) {
+            factory?.dispose()
+            factory = null
+            eglBase?.release()
+            eglBase = null
+            activeConsumerWatcher = null
+        }
+    }
+
     private fun initializeFactory(
         context: Context,
         cameraIndex: ComponentIndexType,
