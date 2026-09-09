@@ -29,7 +29,12 @@ data class WebRTCStreamMetrics(
     // AdaptiveFrameRatePolicy already tracks above.
     val qualityLimitationReason: String? = null,
     val framesEncodedNotSent: Long? = null,
-    val sendBitrateBps: Long? = null
+    val sendBitrateBps: Long? = null,
+    // Host:port this device is currently publishing to, and MediaMTX's own count of readers
+    // (WHEP/RTSP/RTMP/HLS) attached to that path -- shown on-screen so a wrong or unreachable
+    // publish target is obvious from the phone itself instead of only from Logcat/MediaMTX.
+    val whipHost: String? = null,
+    val readerCount: Int? = null
 ) {
     val resolutionLabel: String
         get() = if (outputWidth > 0 && outputHeight > 0) {
@@ -43,8 +48,10 @@ data class WebRTCStreamMetrics(
         val errorLabel = if (processingErrors > 0) " err $processingErrors" else ""
         val recoveryLabel = if (recoveryCount > 0) " fix $recoveryCount" else ""
         val networkLabel = networkLabel()
+        val hostLabel = whipHost?.let { " host $it" }.orEmpty()
+        val listenersLabel = readerCount?.let { " listeners $it" }.orEmpty()
             return buildString {
-                append("WHIP $status$saturationLabel out $resolutionLabel")
+                append("WHIP $status$saturationLabel$hostLabel$listenersLabel out $resolutionLabel")
                 append(" req ${requestedLabel()} src ${sourceLabel()}")
                 append(" fps ${fpsLabel()} drop ${droppedFps.format1()}")
                 append(" resize ${averageFrameProcessingMs.format1()}ms")

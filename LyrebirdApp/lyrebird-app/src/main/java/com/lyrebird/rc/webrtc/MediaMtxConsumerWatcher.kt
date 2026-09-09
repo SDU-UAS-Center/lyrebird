@@ -40,6 +40,10 @@ internal class MediaMtxConsumerWatcher(
     @Volatile var shouldForceKeyframe: Boolean = true
         private set
 
+    /** Live WHEP/RTSP/RTMP/HLS reader count for this path, from the same poll -- 0 until the first successful poll. */
+    @Volatile var readerCount: Int = 0
+        private set
+
     private var executor: ScheduledExecutorService? = null
     private val isRunning = AtomicBoolean(false)
     private var lastInboundFramesInError: Int? = null
@@ -65,6 +69,7 @@ internal class MediaMtxConsumerWatcher(
         executor?.shutdownNow()
         executor = null
         shouldForceKeyframe = true
+        readerCount = 0
         lastInboundFramesInError = null
     }
 
@@ -80,6 +85,7 @@ internal class MediaMtxConsumerWatcher(
         runCatching {
             val body = fetchPathsList(host)
             val decision = shouldForceKeyframeFor(body, pathName)
+            readerCount = readerCountFor(body, pathName) ?: readerCount
             val inboundFramesInError = inboundFrameErrorsFor(body, pathName)
             val packetLossRecovery = hasNewInboundFrameErrors(
                 lastInboundFramesInError,
@@ -151,6 +157,16 @@ internal fun shouldForceKeyframeFor(pathsListJson: String, pathName: String): Bo
     }
     return false
 }
+
+/** Returns the number of readers (WHEP/RTSP/RTMP/HLS) currently attached to [pathName], or null when unavailable. */
+internal fun readerCountFor(pathsListJson: String, pathName: String): Int? = runCatching {
+    val items = JSONObject(pathsListJson).getJSONArray("items")
+    val path = (0 until items.length())
+        .map { items.getJSONObject(it) }
+        .firstOrNull { it.optString("name") == pathName }
+        ?: return@runCatching null
+    path.optJSONArray("readers")?.length()
+}.getOrNull()
 
 /** Returns MediaMTX's cumulative H264 ingest-error count for [pathName], or null when unavailable. */
 internal fun inboundFrameErrorsFor(pathsListJson: String, pathName: String): Int? = runCatching {

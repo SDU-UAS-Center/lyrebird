@@ -182,6 +182,7 @@ More refer to the release notes." </string>
     <string name="registered">Registered</string>
     <string name="logs">Logs</string>
     <string name="news">Notification</string>
+    <string name="new_sdk_version_available">New DJI SDK version available</string>
     <string name="showcase">Showcase &amp; Tools</string>
     <string name="widget_list">Widget List</string>
     <string name="testing_tools">Testing Tools</string>

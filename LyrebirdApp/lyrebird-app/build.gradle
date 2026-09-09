@@ -25,7 +25,6 @@ android {
     def lyrebirdGitSha = commandOutput(['git', '-C', lyrebirdRepoRoot.absolutePath, 'rev-parse', '--short=12', 'HEAD']) ?: 'unknown'
     def lyrebirdGitDirty = commandOutput(['git', '-C', lyrebirdRepoRoot.absolutePath, 'status', '--short']) ? 'dirty' : 'clean'
     def lyrebirdBuildTime = new Date().format("yyyy-MM-dd HH:mm:ss 'UTC'", TimeZone.getTimeZone('UTC'))
-    def lyrebirdFeatures = 'WHIP video, sender metrics telemetry, hidden mock video when aircraft connected, discovery, flight logs'
 
     // Load secrets from local.properties or environment variables.
     def localProps = new Properties()
@@ -61,7 +60,6 @@ android {
         buildConfigField 'String', 'LYREBIRD_BUILD_TIME', "\"${lyrebirdBuildTime}\""
         buildConfigField 'String', 'LYREBIRD_GIT_SHA', "\"${lyrebirdGitSha}\""
         buildConfigField 'String', 'LYREBIRD_GIT_STATE', "\"${lyrebirdGitDirty}\""
-        buildConfigField 'String', 'LYREBIRD_FEATURES', "\"${lyrebirdFeatures}\""
         manifestPlaceholders["API_KEY"] = aircraftApiKey
         manifestPlaceholders["GMAP_API_KEY"] = gmapApiKey
         manifestPlaceholders["MAPLIBRE_TOKEN"] = maplibreToken

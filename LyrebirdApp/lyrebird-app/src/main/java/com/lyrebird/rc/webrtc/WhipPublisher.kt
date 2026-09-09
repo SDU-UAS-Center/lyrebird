@@ -50,7 +50,12 @@ class WhipPublisher(
     private val videoCapturer: VideoCapturer,
     private val options: WebRTCMediaOptions = WebRTCMediaOptions(),
     private val whipUrl: String,
-    private var localPreviewSink: VideoSink? = null
+    private var localPreviewSink: VideoSink? = null,
+    // Re-resolved at the start of every publish attempt (not just once at construction) so a
+    // corrected mediamtxServer setting, or a freshly discovered client IP, takes effect on the
+    // very next reconnect instead of requiring the whole publisher to be torn down and recreated.
+    // Defaults to the fixed whipUrl for callers with no way to re-resolve it.
+    private val whipUrlProvider: () -> String = { whipUrl }
 ) {
     companion object {
         private const val TAG = "WhipPublisher"
@@ -222,9 +227,10 @@ class WhipPublisher(
      * [isRunning] becomes false.
      */
     private fun publish() {
-        Log.i(TAG, "Publishing to $whipUrl")
+        val targetWhipUrl = whipUrlProvider()
+        Log.i(TAG, "Publishing to $targetWhipUrl")
 
-        startConsumerWatcher()
+        startConsumerWatcher(targetWhipUrl)
 
         val factory = WebRTCPeerFactory.getFactory(appContext, cameraIndex, options)
 
@@ -301,7 +307,7 @@ class WhipPublisher(
         }
 
         // 5. POST offer to WHIP endpoint
-        val answerSdp = postWhipOffer(offerSdp)
+        val answerSdp = postWhipOffer(offerSdp, targetWhipUrl)
 
         // 6. Set remote description (answer from mediamtx)
         setRemoteWhipAnswer(peerConnection!!, answerSdp)
@@ -321,7 +327,7 @@ class WhipPublisher(
      * untouched, i.e. null, which the encoder's fallback (`?: true`) already treats as
      * "keep forcing" -- the same fail-safe default as every other failure mode here.
      */
-    private fun startConsumerWatcher() {
+    private fun startConsumerWatcher(whipUrl: String) {
         val hostAndPath = mediaMtxHostAndPathFromWhipUrl(whipUrl)
         if (hostAndPath == null) {
             Log.w(TAG, "Could not parse ground-station host/path from $whipUrl for keyframe watcher")
@@ -383,7 +389,7 @@ class WhipPublisher(
      * HTTP POST of SDP offer to the WHIP endpoint.
      * Returns the SDP answer body.
      */
-    private fun postWhipOffer(offerSdp: String): String {
+    private fun postWhipOffer(offerSdp: String, whipUrl: String): String {
         val url = URL(whipUrl)
         val conn = url.openConnection() as HttpURLConnection
         try {

@@ -334,6 +334,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val SETTINGS_BACKUP_DEBOUNCE_MS = 1500L
         private const val FLIGHT_DECK_RESTART_DELAY_MS = 750L
         private const val PREF_MEDIAMTX_SERVER = "mediamtx_server"
+        // A manually configured mediamtxServer override that stops resolving (wrong network,
+        // stale address left over from a different deployment) fails silently -- every retry
+        // just repeats in Logcat. After this many consecutive WHIP failures with an override
+        // active, clear it so the next reconnect falls back to the auto-detected client IP.
+        private const val WHIP_OVERRIDE_FAILURE_THRESHOLD = 3
         private const val SAFETY_TOKEN = "98"
         private const val PREF_WEBRTC_FPS = "webrtc_fps"
         private const val PREF_WEBRTC_RESOLUTION = "webrtc_resolution"
@@ -472,6 +477,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private var videoSettingRestartScheduled = false
     private var lyrebirdSettingsDialog: Dialog? = null
     @Volatile private var lastWhipUrl: String? = null  // Remembered for FPS/Quality mode restarts
+    @Volatile private var whipConsecutiveFailures = 0  // Reset on success; drives the override fallback below
     @Volatile private var lastClientIp: String? = null
     
     private var droneSerialNumber: String = "UNKNOWN"
@@ -2242,7 +2248,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                         updateStreamingFooter()
                     } else {
                         runCatching {
-                            streamer.startWhip(whipUrl)
+                            streamer.startWhip(whipUrl, whipUrlProvider = { buildWhipUrl(clientIp) })
                             Log.i(TAG, "WHIP publishing started: $whipUrl")
                             lastNativeStreamStatus = "running"
                             updateStreamingFooter()
@@ -4949,12 +4955,28 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             webRTCStreamer?.listener = object : WebRTCStreamer.WebRTCStreamerListener {
                 override fun onServerStarted(ip: String, port: Int) {
                     Log.i(TAG, "WHIP publishing from $ip")
+                    whipConsecutiveFailures = 0
                 }
                 override fun onServerStopped() {
                     Log.i(TAG, "WebRTC streamer stopped")
                 }
                 override fun onServerError(error: String) {
                     Log.e(TAG, "WebRTC error: $error")
+                    whipConsecutiveFailures++
+                    if (whipConsecutiveFailures >= WHIP_OVERRIDE_FAILURE_THRESHOLD) {
+                        whipConsecutiveFailures = 0
+                        val configuredServer = sharedPreferences.getString(PREF_MEDIAMTX_SERVER, "")
+                            ?.trim().orEmpty()
+                        if (configuredServer.isNotEmpty()) {
+                            Log.w(
+                                TAG,
+                                "WHIP failed $WHIP_OVERRIDE_FAILURE_THRESHOLD times in a row against " +
+                                    "configured mediamtxServer '$configuredServer' -- clearing it so the " +
+                                    "next reconnect falls back to the auto-detected client IP"
+                            )
+                            sharedPreferences.edit().remove(PREF_MEDIAMTX_SERVER).apply()
+                        }
+                    }
                 }
                 override fun onMetrics(metrics: WebRTCStreamMetrics) {
                     lastWebRTCMetrics = metrics

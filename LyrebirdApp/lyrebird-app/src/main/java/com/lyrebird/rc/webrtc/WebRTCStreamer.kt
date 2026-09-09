@@ -10,6 +10,7 @@ import org.webrtc.VideoCapturer
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.SocketException
+import java.net.URL
 
 /**
  * WebRTCStreamer manages DJI video capture and WHIP publishing for the drone feed.
@@ -152,8 +153,12 @@ class WebRTCStreamer(
     * pushes its stream once and MediaMTX fans it out to WHEP consumers.
      *
      * @param whipUrl Full WHIP endpoint URL, e.g. "http://192.168.x.y:8889/drone_1/whip"
+     * @param whipUrlProvider Optional re-resolver, called at the start of every reconnect
+     *   attempt instead of reusing [whipUrl] verbatim -- lets a corrected mediamtxServer
+     *   setting (or a freshly discovered client IP) take effect without tearing the publisher
+     *   down first. Falls back to the fixed [whipUrl] when omitted.
      */
-    fun startWhip(whipUrl: String) {
+    fun startWhip(whipUrl: String, whipUrlProvider: (() -> String)? = null) {
         Log.d(TAG, "Starting WHIP publisher to $whipUrl")
         logWhipLifecycle(
             event = "whip_start_requested",
@@ -181,7 +186,8 @@ class WebRTCStreamer(
             videoCapturer = capturer,
             options = currentOptions,
             whipUrl = whipUrl,
-            localPreviewSink = localPreviewSink
+            localPreviewSink = localPreviewSink,
+            whipUrlProvider = whipUrlProvider ?: { whipUrl }
         ).apply {
             this.listener = createWhipListener(whipUrl)
             start()
@@ -372,7 +378,9 @@ class WebRTCStreamer(
             scaleMode = if (currentOptions.usesSourceResolution) "native" else "fixed",
             qualityLimitationReason = networkStats?.qualityLimitationReason,
             framesEncodedNotSent = networkStats?.framesEncodedNotSent,
-            sendBitrateBps = networkStats?.sendBitrateBps
+            sendBitrateBps = networkStats?.sendBitrateBps,
+            whipHost = currentWhipHost(),
+            readerCount = WebRTCPeerFactory.activeConsumerWatcher?.readerCount
         )
         // TEMP diagnostic (frame-drop investigation): telemetry has been reported stuck at
         // status=idle/totalFrames=0 despite confirmed-active WHIP streaming (MediaMTX byte
@@ -395,10 +403,16 @@ class WebRTCStreamer(
             qualityLimitationReason = networkStats?.qualityLimitationReason,
             framesEncodedNotSent = networkStats?.framesEncodedNotSent,
             sendBitrateBps = networkStats?.sendBitrateBps,
-            status = if (whipPublisher?.isRunning() == true) "running" else metrics.status
+            status = if (whipPublisher?.isRunning() == true) "running" else metrics.status,
+            whipHost = currentWhipHost(),
+            readerCount = WebRTCPeerFactory.activeConsumerWatcher?.readerCount
         )
         mainHandler.post { listener?.onMetrics(enriched) }
     }
+
+    /** host:port this device is currently publishing to, parsed from [currentWhipUrl]. */
+    private fun currentWhipHost(): String? =
+        currentWhipUrl?.let { runCatching { URL(it).authority }.getOrNull() }
 
     private fun maybeAdaptFrameRate(metrics: WebRTCStreamMetrics) {
         val decision = frameRatePolicy.evaluate(metrics)

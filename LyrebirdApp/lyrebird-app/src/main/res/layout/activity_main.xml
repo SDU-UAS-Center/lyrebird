@@ -57,43 +57,28 @@
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="86dp"
+                android:layout_height="100dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="72dp"
-                    android:layout_height="72dp"
+                    android:layout_width="92dp"
+                    android:layout_height="92dp"
                     android:contentDescription="@string/app_name_aircraft"
                     android:scaleType="centerInside"
                     android:src="@mipmap/ic_main" />
 
-                <LinearLayout
+                <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="@font/pixelify_sans"
-                        android:letterSpacing="0.14"
-                        android:text="@string/lyrebird_brand_label"
-                        android:textColor="@color/lyrebird_teal"
-                        android:textSize="29sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="@font/space_grotesk"
-                        android:letterSpacing="0.08"
-                        android:text="@string/lyrebird_ground_station"
-                        android:textColor="@color/lyrebird_orange"
-                        android:textSize="11sp" />
-                </LinearLayout>
+                    android:fontFamily="@font/pixelify_sans"
+                    android:letterSpacing="0.14"
+                    android:text="@string/lyrebird_brand_label"
+                    android:textColor="@color/lyrebird_teal"
+                    android:textSize="40sp"
+                    android:textStyle="bold" />
             </LinearLayout>
 
             <Space
@@ -107,17 +92,39 @@
                 android:layout_marginTop="5dp"
                 android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/text_view_version"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:fontFamily="@font/dm_sans"
-                    android:gravity="start|center_vertical"
-                    android:maxLines="1"
-                    android:paddingStart="4dp"
-                    android:textColor="@color/lyrebird_text"
-                    android:textSize="10sp"
-                    tools:text="@string/sdk_version" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/text_view_version"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/dm_sans"
+                        android:gravity="start|center_vertical"
+                        android:maxLines="1"
+                        android:paddingStart="4dp"
+                        android:textColor="@color/lyrebird_text"
+                        android:textSize="10sp"
+                        tools:text="@string/sdk_version" />
+
+                    <TextView
+                        android:id="@+id/text_view_new_version_badge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="4dp"
+                        android:fontFamily="@font/dm_sans"
+                        android:gravity="end|center_vertical"
+                        android:maxLines="1"
+                        android:text="@string/new_sdk_version_available"
+                        android:textColor="@color/lyrebird_orange"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/text_view_package_product_category"
@@ -235,49 +242,34 @@
         app:layout_constraintRight_toRightOf="parent"
         app:layout_constraintTop_toTopOf="@+id/view_info_panel" />
 
-    <TextView
-        android:id="@+id/text_view_lyrebird_build_info"
+    <LinearLayout
+        android:id="@+id/layout_lyrebird_stats"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
         android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="@+id/msg_panel"
+        app:layout_constraintStart_toStartOf="@+id/msg_panel"
+        app:layout_constraintTop_toTopOf="@+id/msg_panel" />
+
+    <TextView
+        android:id="@+id/text_view_lyrebird_git_info"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="6dp"
         android:layout_marginEnd="8dp"
         android:gravity="start"
         android:lineSpacingExtra="2dp"
         android:fontFamily="@font/dm_sans"
-        android:textColor="@color/lyrebird_teal"
-        android:textSize="12sp"
+        android:textColor="@color/lyrebird_muted"
+        android:textSize="10sp"
         app:layout_constraintEnd_toEndOf="@+id/msg_panel"
         app:layout_constraintStart_toStartOf="@+id/msg_panel"
-        app:layout_constraintTop_toTopOf="@+id/msg_panel"
-        tools:text="Lyrebird app\nDrone: mini1\nBuilt: 2026-05-20 10:33 UTC\nGit: c90e63ce4cb5 dirty\nVersion: 1.0 (1)\nFeatures: WHIP video, sender metrics telemetry" />
-
-    <TextView
-        android:id="@+id/text_view_news_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginLeft="8dp"
-        android:layout_marginTop="8dp"
-        android:fontFamily="@font/space_grotesk"
-        android:letterSpacing="0.12"
-        android:text="@string/news"
-        android:textColor="@color/lyrebird_orange"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        app:layout_constraintStart_toStartOf="@+id/msg_panel"
-        app:layout_constraintTop_toBottomOf="@+id/text_view_lyrebird_build_info" />
-
-    <com.lyrebird.rc.views.VersionInfoView
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:layout_marginEnd="8dp"
-        app:layout_constraintBottom_toTopOf="@+id/flight_deck_button"
-        app:layout_constraintEnd_toEndOf="@+id/msg_panel"
-        app:layout_constraintHeight_percent="0.65"
-        app:layout_constraintStart_toStartOf="@+id/msg_panel"
-        app:layout_constraintTop_toBottomOf="@+id/text_view_news_title"
-        app:layout_constraintVertical_bias="0" />
+        app:layout_constraintTop_toBottomOf="@+id/layout_lyrebird_stats"
+        tools:text="Built 2026-05-20 10:33 UTC\nGit c90e63ce4cb5 · clean\nv1.0 (1)" />
 
     <Button
         android:id="@+id/flight_deck_button"
