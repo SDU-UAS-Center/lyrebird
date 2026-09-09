@@ -12,16 +12,17 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
+import android.graphics.Typeface
+import android.text.Spannable
+import android.text.SpannableStringBuilder
 import android.text.TextUtils
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
@@ -74,6 +75,10 @@ abstract class DJIMainActivity : AppCompatActivity() {
 //                add(Manifest.permission.READ_MEDIA_IMAGES)
 //                add(Manifest.permission.READ_MEDIA_VIDEO)
 //                add(Manifest.permission.READ_MEDIA_AUDIO)
+                // Targeting API 33+, reading the connected Wi-Fi SSID (WifiInfo/NetworkCapabilities
+                // transportInfo) is gated on this permission in addition to fine location -- without
+                // it the SSID comes back redacted/null even with location permission granted.
+                add(Manifest.permission.NEARBY_WIFI_DEVICES)
             } else {
                 add(Manifest.permission.READ_EXTERNAL_STORAGE)
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -181,57 +186,116 @@ abstract class DJIMainActivity : AppCompatActivity() {
         val systemId = MavlinkSystemId.resolve(configuredSystemId, currentDroneSerial() ?: "UNKNOWN")
 
         binding.layoutLyrebirdStats.removeAllViews()
-        addStatRow(binding.layoutLyrebirdStats, "Drone name", droneName) { promptRenameDrone(preferences) }
-        addStatRow(binding.layoutLyrebirdStats, "MAVLink vehicle ID", "V$systemId") {
-            promptMavlinkSystemId(preferences)
-        }
-        addStatRow(binding.layoutLyrebirdStats, "Wi-Fi network", currentWifiSsid() ?: "Not connected")
-        addStatRow(binding.layoutLyrebirdStats, "Phone IP", NetworkUtils.getDeviceIpAddress() ?: "Unavailable")
+        addStatGridRow(
+            binding.layoutLyrebirdStats,
+            "Drone name", droneName, { promptDroneIdentity(preferences) },
+            "Vehicle sysid", "V$systemId", { promptDroneIdentity(preferences) }
+        )
+        addStatGridRow(
+            binding.layoutLyrebirdStats,
+            "Wi-Fi network", currentWifiSsid() ?: "Not connected", null,
+            "Phone IP", NetworkUtils.getDeviceIpAddress() ?: "Unavailable", null
+        )
+        addSectionHeader(binding.layoutLyrebirdStats, "GIT INFO")
 
-        binding.textViewLyrebirdGitInfo.text = buildString {
-            append("Built ").append(formatBuildTimeForPhone())
-            append('\n').append("Git ").append(BuildConfig.LYREBIRD_GIT_SHA)
-                .append(" · ").append(BuildConfig.LYREBIRD_GIT_STATE)
-            append('\n').append('v').append(BuildConfig.VERSION_NAME)
-                .append(" (").append(BuildConfig.VERSION_CODE).append(')')
-        }
+        updateDroneSerialInfo()
+        binding.textViewLyrebirdGitInfo.text = buildGitInfoText()
     }
 
-    /** A stat/settings-style row matching FlightDeckActivity's cockpit rows: title left, value right. */
-    private fun addStatRow(container: LinearLayout, title: String, detail: String, onClick: (() -> Unit)? = null) {
+    private fun buildGitInfoText(): CharSequence {
+        val text = SpannableStringBuilder()
+        fun boldLabel(label: String) {
+            val start = text.length
+            text.append(label)
+            text.setSpan(StyleSpan(Typeface.BOLD), start, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        boldLabel("Built ")
+        text.append(formatBuildTimeForPhone())
+        text.append('\n')
+        boldLabel("Git ")
+        text.append(BuildConfig.LYREBIRD_GIT_SHA).append(" · ").append(BuildConfig.LYREBIRD_GIT_STATE)
+        text.append('\n')
+        boldLabel("Version ")
+        text.append(BuildConfig.VERSION_NAME).append(" (").append(BuildConfig.VERSION_CODE.toString()).append(')')
+        return text
+    }
+
+    /** Two stat cells side by side, forming one row of a 2x2 grid of drone/network facts. */
+    private fun addStatGridRow(
+        container: LinearLayout,
+        leftTitle: String,
+        leftDetail: String,
+        leftClick: (() -> Unit)?,
+        rightTitle: String,
+        rightDetail: String,
+        rightClick: (() -> Unit)?
+    ) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(7), 0, dpToPx(7), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dpToPx(5) }
+        }
+        row.addView(
+            buildStatCell(leftTitle, leftDetail, leftClick).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginEnd = dpToPx(4) }
+            }
+        )
+        row.addView(
+            buildStatCell(rightTitle, rightDetail, rightClick).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginStart = dpToPx(4) }
+            }
+        )
+        container.addView(row)
+    }
+
+    private fun buildStatCell(title: String, detail: String, onClick: (() -> Unit)?): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
             setBackgroundResource(R.drawable.lyrebird_settings_row)
             isClickable = onClick != null
             isFocusable = onClick != null
             onClick?.let { handler -> setOnClickListener { handler() } }
+            addView(TextView(this@DJIMainActivity).apply {
+                text = title.uppercase(Locale.getDefault())
+                setTextColor(ContextCompat.getColor(this@DJIMainActivity, R.color.lyrebird_orange))
+                textSize = 10f
+                setTypeface(ResourcesCompat.getFont(this@DJIMainActivity, R.font.space_grotesk), Typeface.BOLD)
+                letterSpacing = 0.05f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            addView(TextView(this@DJIMainActivity).apply {
+                text = detail.ifBlank { "Unavailable" }
+                setTextColor(ContextCompat.getColor(this@DJIMainActivity, R.color.lyrebird_text))
+                textSize = 14f
+                typeface = ResourcesCompat.getFont(this@DJIMainActivity, R.font.dm_sans)
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+        }
+    }
+
+    /** A single-row labeled divider, e.g. "GIT INFO", matching FlightDeckActivity's cockpit section headers. */
+    private fun addSectionHeader(container: LinearLayout, label: String) {
+        container.addView(TextView(this).apply {
+            text = label
+            setTextColor(ContextCompat.getColor(this@DJIMainActivity, R.color.lyrebird_orange))
+            textSize = 11f
+            setTypeface(ResourcesCompat.getFont(this@DJIMainActivity, R.font.space_grotesk), Typeface.BOLD)
+            letterSpacing = 0.12f
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(8), 0, dpToPx(8), 0)
+            setBackgroundResource(R.drawable.lyrebird_settings_row)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(26)
-            ).apply { bottomMargin = dpToPx(3) }
-        }
-        row.addView(TextView(this).apply {
-            text = title
-            setTextColor(ContextCompat.getColor(this@DJIMainActivity, R.color.lyrebird_text))
-            textSize = 10.5f
-            typeface = ResourcesCompat.getFont(this@DJIMainActivity, R.font.space_grotesk)
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                dpToPx(22)
+            ).apply { topMargin = dpToPx(4) }
         })
-        row.addView(TextView(this).apply {
-            text = detail.ifBlank { "Unavailable" }
-            setTextColor(ContextCompat.getColor(this@DJIMainActivity, R.color.lyrebird_muted))
-            textSize = 9.5f
-            typeface = ResourcesCompat.getFont(this@DJIMainActivity, R.font.dm_sans)
-            gravity = Gravity.END
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        container.addView(row)
     }
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
@@ -243,67 +307,67 @@ abstract class DJIMainActivity : AppCompatActivity() {
         null
     }
 
+    /** Show the aircraft DJI serial in its own row, under the model; hidden until it's readable. */
+    private fun updateDroneSerialInfo() {
+        val serial = currentDroneSerial()
+        binding.textViewSerialNumber.visibility = if (serial != null) View.VISIBLE else View.GONE
+        if (serial != null) {
+            binding.textViewSerialNumber.text = StringUtils.getResStr(R.string.serial_number, serial)
+        }
+    }
+
+    /**
+     * Best-effort connected Wi-Fi SSID read.
+     *
+     * For apps targeting API 33+, the SSID from NetworkCapabilities.transportInfo is redacted to
+     * "<unknown ssid>" (or null) even when NEARBY_WIFI_DEVICES is granted, and activeNetwork can
+     * point at cellular while the phone is also joined to a WiFi network. WifiManager.connectionInfo
+     * is the reliable source of the SSID of the currently connected network; fall back to scanning
+     * all networks for a WiFi transport otherwise.
+     */
     @Suppress("DEPRECATION")
     private fun currentWifiSsid(): String? {
-        val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            val network = connectivityManager?.activeNetwork ?: return null
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
-            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
-            (capabilities.transportInfo as? android.net.wifi.WifiInfo)?.ssid
-        } else {
+        try {
             val wifiManager = getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            wifiManager?.connectionInfo?.ssid
+            sanitizeSsid(wifiManager?.connectionInfo?.ssid)?.let { return it }
+        } catch (_: SecurityException) {
+            // Not granted -- fall through to the transportInfo scan below.
         }
-        return raw?.trim('"')?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return null
+        for (network in connectivityManager.allNetworks) {
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: continue
+            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+            val ssid = (capabilities.transportInfo as? android.net.wifi.WifiInfo)?.ssid
+            sanitizeSsid(ssid)?.let { return it }
+        }
+        return null
     }
 
-    private fun promptRenameDrone(preferences: SharedPreferences) {
-        val input = EditText(this).apply {
-            setText(preferences.getString(LYREBIRD_PREF_DRONE_NAME, LYREBIRD_DEFAULT_DRONE_NAME))
-            hint = "e.g., lb_01, alpha, scout"
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Drone name")
-            .setView(input)
-            .setPositiveButton("Save") { _, _ ->
-                val name = input.text.toString().trim()
-                if (name.isNotEmpty()) {
+    private fun sanitizeSsid(raw: String?): String? =
+        raw?.trim('"')?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+
+    private fun promptDroneIdentity(preferences: SharedPreferences) {
+        val currentName = preferences.getString(LYREBIRD_PREF_DRONE_NAME, LYREBIRD_DEFAULT_DRONE_NAME)
+            ?: LYREBIRD_DEFAULT_DRONE_NAME
+        val currentSysId = preferences.getInt(
+            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
+        )
+        LyrebirdIdentityDialog.show(
+            this,
+            "Drone identity",
+            getString(R.string.lyrebird_identity_subtitle),
+            currentName,
+            currentSysId,
+            onSave = { name, sysId ->
+                if (name != null) {
                     preferences.edit().putString(LYREBIRD_PREF_DRONE_NAME, name).apply()
-                    updateLyrebirdBuildInfo()
-                } else {
-                    showToast("Enter a name to override the automatic name")
                 }
+                preferences.edit().putInt(MavlinkEndpointConfig.PREF_SYSTEM_ID, sysId).apply()
+                updateLyrebirdBuildInfo()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun promptMavlinkSystemId(preferences: SharedPreferences) {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText(
-                preferences.getInt(
-                    MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
-                ).toString()
-            )
-            hint = "0 = automatic, or 1-99"
-        }
-        AlertDialog.Builder(this)
-            .setTitle("MAVLink vehicle ID")
-            .setMessage("0 derives the id automatically from the aircraft serial. 1-99 assigns it manually.")
-            .setView(input)
-            .setPositiveButton("Save") { _, _ ->
-                val value = input.text.toString().trim().toIntOrNull()
-                if (value != null && (value == MavlinkSystemId.AUTO || MavlinkSystemId.isManual(value))) {
-                    preferences.edit().putInt(MavlinkEndpointConfig.PREF_SYSTEM_ID, value).apply()
-                    updateLyrebirdBuildInfo()
-                } else {
-                    showToast("Enter 0 for automatic, or 1-99 for a manual id")
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        )
     }
 
     private fun observeSdkVersionAvailability() {
@@ -336,6 +400,7 @@ abstract class DJIMainActivity : AppCompatActivity() {
                 ToastUtils.showToast("Register Success")
                 statusText = StringUtils.getResStr(this, R.string.registered)
                 msdkInfoVm.initListener()
+                updateDroneSerialInfo()
                 handler.postDelayed({
                     prepareUxActivity()
                 }, 5000)

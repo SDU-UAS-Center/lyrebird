@@ -71,7 +71,7 @@ On the surface path, a rising `recoveryCount`, falling `outputFps`, or non-zero 
 
 ## Drone Identity & Auto-Discovery
 
-- **Custom naming**: Set drone name via the app UI (tap the name display). Examples: `"RedScout"`, `"Bravo"`.
+- **Custom naming**: Set the drone name and its MAVLink vehicle ID via the app UI (tap the name/ID display or the settings entry). Examples: `"RedScout"`, `"Bravo"`.
 - **UDP broadcast discovery**: `DJIInterface("")` broadcasts `DISCOVER_LYREBIRD` on port 30000; the app replies `LYREBIRD_HERE:{ip}`.
 - **UDP multicast discovery**: The app announces over `239.255.42.99:30001` for LANs where multicast is available.
 - **mDNS/Bonjour**: Lyrebird advertises `_lyrebird._tcp.` with service metadata.

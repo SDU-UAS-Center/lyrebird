@@ -11,13 +11,16 @@ android {
     def lyrebirdRepoRoot = rootProject.projectDir.parentFile.parentFile
     def commandOutput = { List<String> args ->
         try {
-            def stdout = new ByteArrayOutputStream()
-            exec {
+            // `providers.exec` (not the removed `Project.exec`/bare `exec {}` convenience
+            // methods -- the former no longer exists on this Gradle version's Project, and the
+            // latter resolves against this `android { }` block's DSL delegate instead of the
+            // project). Both used to throw MissingMethodException on every call here, silently
+            // swallowed below, which left the git SHA/dirty-state always falling back to
+            // "unknown"/"clean" regardless of the actual repo state.
+            return providers.exec {
                 commandLine args
-                standardOutput = stdout
                 ignoreExitValue = true
-            }
-            return stdout.toString().trim()
+            }.standardOutput.asText.get().trim()
         } catch (ignored) {
             return ""
         }

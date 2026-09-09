@@ -140,7 +140,7 @@ Launch the app on the default layout and every service in the architecture table
 
 | Item | What it does |
 |---|---|
-| Change Drone Name | Renames the aircraft — also used to derive its MAVLink system id and ROS namespace |
+| Change Drone Name | Edits the aircraft name and its MAVLink vehicle ID in one dialog — the name also derives the MAVLink system id and ROS namespace |
 | Configure Stream/WebRTC… | Picks the streaming protocol (WHIP/WebRTC, RTSP, RTMP, Agora.io, or GB28181) and its connection details |
 | Detection source toggle | Switches onboard object detection on/off (checkable, reflects current state) |
 | Detection Settings… | Picks the detection source (None / DJI onboard / YOLO on phone) and its confidence threshold |

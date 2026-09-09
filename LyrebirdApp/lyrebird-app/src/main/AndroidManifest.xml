@@ -16,6 +16,12 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Required (on top of ACCESS_FINE_LOCATION) to read the connected Wi-Fi SSID when
+         targeting API 33+; without it WifiInfo/NetworkCapabilities.transportInfo redact the SSID
+         even with location permission granted. Not neverForLocation since we do use the SSID as
+         a location-adjacent signal (which network the phone is on), matching the existing
+         ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION declarations above. -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />

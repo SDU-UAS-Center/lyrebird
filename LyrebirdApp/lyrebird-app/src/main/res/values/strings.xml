@@ -174,7 +174,11 @@ More refer to the release notes." </string>
     <string name="wsbridge_ip">WSBridge IP</string>
     <string name="sdk_version">Version: %1$s</string>
     <string name="product_name">Product Name: %1$s</string>
+    <string name="serial_number">DJI Serial: %1$s</string>
     <string name="is_sdk_debug">Is SDK Debug: %1$s</string>
+    <string name="drone_name_help">A stable name used by telemetry and video paths. Leave blank for the automatic name.</string>
+    <string name="vehicle_id_help">0 = automatic (derived from the aircraft serial). 1-99 = manual vehicle ID.</string>
+    <string name="lyrebird_identity_subtitle">Drone name and MAVLink vehicle ID, shown in telemetry and video paths</string>
     <string name="registration_status">Registration Status: %1$s</string>
     <string name="package_product_category">Package Category: %1$s</string>
     <string name="remote_controller">Remote Controller Only</string>

@@ -3740,48 +3740,86 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     private fun showBrandedDroneNamePage() {
-        showBrandedEditPage(
-            "DRONE NAME",
-            "A stable name used by telemetry and video paths",
-            droneName,
-            "e.g. mini3, alpha, scout",
-            onSave = { value ->
-                if (value.isBlank()) {
-                    setAutomaticDroneName()
-                    Toast.makeText(this, "Drone name is now automatic", Toast.LENGTH_SHORT).show()
-                } else if (setDroneName(value)) {
-                    Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
-                }
-            },
-            returnPage = ::showLyrebirdSettingsMenu,
-            onBack = ::showLyrebirdSettingsMenu
-        )
+        showBrandedIdentitiesPage()
     }
 
     private fun showBrandedMavlinkSystemIdPage() {
-        val configured = prefIntOrDefault(
+        showBrandedIdentitiesPage()
+    }
+
+    /** Combined editor for the drone name and MAVLink vehicle ID, with a short help line for each. */
+    private fun showBrandedIdentitiesPage() {
+        val configuredSysId = prefIntOrDefault(
             MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
         )
-        showBrandedIntegerEditPage(
-            "MAVLINK VEHICLE ID",
-            "Manual IDs are 1-99. Automatic IDs 100-254 are derived from the aircraft serial.",
-            configured.takeIf { MavlinkSystemId.isManual(it) } ?: -1,
-            "1-99",
-            minimum = MavlinkSystemId.MANUAL_MIN,
-            maximum = MavlinkSystemId.MANUAL_MAX,
-            onSave = { value ->
-                if (setMavlinkSystemId(value)) {
-                    Toast.makeText(this, "MAVLink vehicle ID saved: V$value", Toast.LENGTH_SHORT).show()
-                }
-            },
-            resetLabel = "Use automatic ID",
-            onReset = {
-                setMavlinkSystemId(MavlinkSystemId.AUTO)
-                Toast.makeText(this, "MAVLink vehicle ID is now automatic", Toast.LENGTH_SHORT).show()
-            },
-            returnPage = ::showLyrebirdSettingsMenu,
+        showBrandedSettingsSubpage(
+            "DRONE IDENTITY",
+            getString(R.string.lyrebird_identity_subtitle),
             onBack = ::showLyrebirdSettingsMenu
-        )
+        ) { container, _ ->
+            addBrandedSettingsSection(container, "DRONE NAME")
+            val nameInput = EditText(this).apply {
+                setText(droneName)
+                hint = "e.g. mini3, alpha, scout (blank = automatic)"
+                setSingleLine(true)
+                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                setBackgroundResource(R.drawable.lyrebird_settings_row)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(58)
+                ).apply { bottomMargin = dpToPx(0) }
+            }
+            container.addView(nameInput)
+            container.addView(identityHelpText(getString(R.string.drone_name_help)))
+
+            addBrandedSettingsSection(container, "MAVLINK VEHICLE ID")
+            val idInput = EditText(this).apply {
+                setText(if (MavlinkSystemId.isManual(configuredSysId)) configuredSysId.toString() else "")
+                hint = "0 = automatic, 1-99 = manual"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setSingleLine(true)
+                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                setBackgroundResource(R.drawable.lyrebird_settings_row)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(58)
+                ).apply { bottomMargin = dpToPx(0) }
+            }
+            container.addView(idInput)
+            container.addView(identityHelpText(getString(R.string.vehicle_id_help)))
+
+            addBrandedSettingsButton(container, "Save", {
+                var valid = true
+                val name = nameInput.text.toString().trim()
+                if (name.isBlank()) {
+                    setAutomaticDroneName()
+                } else if (!setDroneName(name)) {
+                    valid = false
+                    Toast.makeText(this, "Drone name must be 1-32 characters", Toast.LENGTH_SHORT).show()
+                }
+                val idText = idInput.text.toString().trim()
+                val id = if (idText.isBlank()) MavlinkSystemId.AUTO else idText.toIntOrNull()
+                if (id == null || (id != MavlinkSystemId.AUTO && !MavlinkSystemId.isManual(id))) {
+                    valid = false
+                    Toast.makeText(this, "Enter 0 for automatic, or 1-99 for a manual ID", Toast.LENGTH_SHORT).show()
+                } else {
+                    setMavlinkSystemId(id)
+                }
+                if (valid) showLyrebirdSettingsMenu()
+            })
+        }
+    }
+
+    private fun identityHelpText(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+            textSize = 12f
+            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
+            setPadding(0, dpToPx(4), 0, dpToPx(10))
+        }
     }
 
     private fun showBrandedStreamSettingsPage() {
@@ -4251,33 +4289,55 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
     
     private fun showDroneNameDialog(isFirstTime: Boolean = false) {
-        val input = EditText(this)
-        input.hint = "e.g., lb_01, alpha, scout"
-        if (!isFirstTime) {
-            input.setText(droneName)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
         }
-        
+        val nameInput = EditText(this).apply {
+            hint = "e.g., lb_01, alpha, scout (blank = automatic)"
+            if (!isFirstTime) setText(droneName)
+        }
+        container.addView(nameInput)
+        container.addView(identityHelpText(getString(R.string.drone_name_help)))
+
+        val configuredSysId = prefIntOrDefault(
+            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
+        )
+        val idInput = EditText(this).apply {
+            hint = "0 = automatic, 1-99 = manual"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText(if (MavlinkSystemId.isManual(configuredSysId)) configuredSysId.toString() else "")
+        }
+        container.addView(idInput)
+        container.addView(identityHelpText(getString(R.string.vehicle_id_help)))
+
         val builder = AlertDialog.Builder(this)
-            .setTitle(if (isFirstTime) "Drone Name" else "Change Drone Name")
-            .setMessage(if (isFirstTime) "Please enter a unique name for this drone:" else "Enter new name for this drone:")
-            .setView(input)
+            .setTitle(if (isFirstTime) "Drone Identity" else "Change Drone Identity")
+            .setView(container)
             .setPositiveButton("Save") { _, _ ->
-                val name = input.text.toString().trim()
+                val name = nameInput.text.toString().trim()
                 if (name.isNotEmpty()) {
                     if (setDroneName(name)) {
                         Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
                     }
+                } else if (!isFirstTime) {
+                    setAutomaticDroneName()
+                }
+                val idText = idInput.text.toString().trim()
+                val id = if (idText.isBlank()) MavlinkSystemId.AUTO else idText.toIntOrNull()
+                if (id != null && (id == MavlinkSystemId.AUTO || MavlinkSystemId.isManual(id))) {
+                    setMavlinkSystemId(id)
                 } else {
-                    Toast.makeText(this, "Enter a name to override the automatic name", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Enter 0 for automatic, or 1-99 for a manual ID", Toast.LENGTH_SHORT).show()
                 }
             }
-        
+
         if (isFirstTime) {
             builder.setCancelable(false)
         } else {
             builder.setNegativeButton("Cancel", null)
         }
-        
+
         builder.show()
     }
 

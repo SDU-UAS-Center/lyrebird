@@ -61,23 +61,19 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <ImageView
-                    android:layout_width="92dp"
-                    android:layout_height="92dp"
-                    android:contentDescription="@string/app_name_aircraft"
-                    android:scaleType="centerInside"
-                    android:src="@mipmap/ic_main" />
-
                 <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:autoSizeMaxTextSize="96sp"
+                    android:autoSizeMinTextSize="24sp"
+                    android:autoSizeTextType="uniform"
+                    android:ellipsize="none"
                     android:fontFamily="@font/pixelify_sans"
+                    android:gravity="center_vertical"
                     android:letterSpacing="0.14"
+                    android:maxLines="1"
                     android:text="@string/lyrebird_brand_label"
                     android:textColor="@color/lyrebird_teal"
-                    android:textSize="40sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
@@ -161,6 +157,20 @@
                     android:text="@string/product_name"
                     android:textColor="@color/lyrebird_text"
                     android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/text_view_serial_number"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/dm_sans"
+                    android:gravity="start|center_vertical"
+                    android:maxLines="1"
+                    android:paddingStart="4dp"
+                    android:textColor="@color/lyrebird_text"
+                    android:textSize="10sp"
+                    android:visibility="gone"
+                    tools:text="DJI Serial: 1234567890"
+                    tools:visibility="visible" />
 
                 <TextView
                     android:id="@+id/text_view_is_debug"
@@ -265,13 +275,13 @@
         android:lineSpacingExtra="2dp"
         android:fontFamily="@font/dm_sans"
         android:textColor="@color/lyrebird_muted"
-        android:textSize="10sp"
+        android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="@+id/msg_panel"
         app:layout_constraintStart_toStartOf="@+id/msg_panel"
         app:layout_constraintTop_toBottomOf="@+id/layout_lyrebird_stats"
         tools:text="Built 2026-05-20 10:33 UTC\nGit c90e63ce4cb5 · clean\nv1.0 (1)" />
 
-    <Button
+    <LinearLayout
         android:id="@+id/flight_deck_button"
         android:layout_width="0dp"
         android:layout_height="92dp"
@@ -279,18 +289,36 @@
         android:layout_marginEnd="18dp"
         android:layout_marginBottom="18dp"
         android:background="@drawable/lyrebird_flight_deck_button"
+        android:clickable="true"
         android:enabled="false"
-        android:fontFamily="@font/space_grotesk"
+        android:focusable="true"
         android:foreground="?selectableItemBackground"
-        android:gravity="center"
-        android:padding="8dp"
-        android:text="@string/flight_deck"
-        android:textColor="@color/lyrebird_flight_deck_text"
-        android:textSize="20sp"
-        android:textStyle="bold"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="@+id/msg_panel"
         app:layout_constraintEnd_toEndOf="@+id/msg_panel"
-        app:layout_constraintStart_toStartOf="@+id/msg_panel" />
+        app:layout_constraintStart_toStartOf="@+id/msg_panel">
+
+        <ImageView
+            android:layout_width="92dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/lyrebird_flight_deck_logo_bg"
+            android:contentDescription="@string/app_name_aircraft"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:src="@mipmap/ic_main" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:fontFamily="@font/space_grotesk"
+            android:gravity="center"
+            android:text="@string/flight_deck"
+            android:textColor="@color/lyrebird_flight_deck_text"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/text_core_info"

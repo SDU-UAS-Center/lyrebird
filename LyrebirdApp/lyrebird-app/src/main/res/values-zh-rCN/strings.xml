@@ -124,7 +124,11 @@
     <string name="wsbridge_ip">WSBridge IP</string>
     <string name="sdk_version">SDK版本: %1$s</string>
     <string name="product_name">产品名称: %1$s</string>
+    <string name="serial_number">DJI 序列号: %1$s</string>
     <string name="is_sdk_debug">Is SDK Debug: %1$s</string>
+    <string name="drone_name_help">遥测和视频路径使用的稳定名称。留空则使用自动名称。</string>
+    <string name="vehicle_id_help">0 = 自动（根据飞机序列号派生）。1-99 = 手动设备 ID。</string>
+    <string name="lyrebird_identity_subtitle">无人机名称和 MAVLink 设备 ID，用于遥测和视频路径</string>
     <string name="registration_status">注册状态：%1$s</string>
     <string name="package_product_category">包产品类型: %1$s</string>
     <string name="remote_controller">遥控</string>
