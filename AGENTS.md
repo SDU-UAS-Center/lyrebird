@@ -82,7 +82,7 @@ npm run build    # production build into dist/ (validate doc edits with this)
 | `LyrebirdApp/android-sdk-v5-as/` | Android build root (`:app`, `:uxsdk`); Lyrebird-owned code lives under `webrtc/`, `edge/`, `controller/`, `mavlink/`, `server/`, `telemetry/`, and related packages |
 | `LyrebirdApp/lyrebird-app/` | App source (`com.lyrebird.rc`), navigation graph, FlightDeckActivity |
 | `GroundStation/Python/lyrebird_groundstation/` | Shared Python helper package (dji_client, dji_helpers, mavlink_helpers, transport) |
-| `GroundStation/mavlink/lyrebird.xml` | The Lyrebird MAVLink dialect. Source of truth for `LYREBIRD_STATUS`; regenerate with mavgen and update the struct, size and CRC_EXTRA in `transport.py` together |
+| `GroundStation/mavlink/lyrebird.xml` | The Lyrebird MAVLink dialect. Source of truth for `LYREBIRD_STATUS`. Regenerate with mavgen and update `transport.py` (struct, size, CRC_EXTRA) together with the Android side (`MavlinkMessages.kt` wire layout, `MavlinkCrc.kt` CRC_EXTRA). mavgen sorts fields by type size on the wire for MAVLink 1/2 — XML declaration order is not the wire order |
 | `GroundStation/Python/djiInterfaceSafety.py` | Safety-authority handling for the two-computer model |
 | `GroundStation/ROS/lyrebird_controller/` | ROS package wrapping DJI control |
 | `GroundStation/ROS/lyrebird_videofeed/` | ROS package for video feed |

@@ -79,13 +79,18 @@ internal enum class MavlinkFlightMode(
          * was written from plausible guesses and silently reported UNKNOWN against a real
          * aircraft, which reports `GPS_NORMAL` rather than `GPS`.
          *
-         * When the manual-override latch is set the pilot has taken the sticks, so the reported
-         * mode is a position hold regardless of what the autonomous layer was doing — which is
-         * the behaviour the mode model makes standard later, when the latch is replaced by this
-         * transition outright.
+         * Return-to-home wins over everything else: a drone going home is going home whether the
+         * pilot also grabbed the sticks, and a ground station must see the RTH it has to react to
+         * rather than a mode the latch would paper over it with.
+         *
+         * The manual-override latch is reported as [MANUAL], not as a position hold: with the
+         * latch set the pilot has the sticks and autonomous commands are refused, and reporting
+         * the same mode as ordinary GPS flight would leave a heartbeat-only ground station
+         * unable to tell the two apart.
          */
         fun fromDjiMode(djiMode: String, manualOverrideActive: Boolean): MavlinkFlightMode {
-            if (manualOverrideActive) return POSITION_HOLD
+            if (djiMode.uppercase() == "GO_HOME") return SAFE_RECOVERY
+            if (manualOverrideActive) return MANUAL
             return when (djiMode.uppercase()) {
                 "GPS_NORMAL", "GPS_SPORT", "GPS_TRIPOD", "GPS_NOVICE",
                 "APAS", "AUTO_AVOIDANCE" -> POSITION_HOLD

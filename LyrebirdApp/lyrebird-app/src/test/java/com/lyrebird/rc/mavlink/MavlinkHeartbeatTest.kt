@@ -76,4 +76,37 @@ class MavlinkHeartbeatTest {
         val snapshot = MavlinkSnapshot(flightMode = "GPS_NORMAL")
         assertTrue((baseMode(snapshot) and Mav.MODE_FLAG_SAFETY_ARMED) == 0)
     }
+
+    @Test
+    fun anRthFlightIsReportedAsSafeRecoveryEvenWhenOverridden() {
+        // The app activates the override latch when the pilot presses RTH on the controller, so
+        // RTH and the latch arrive together. RTH must win: a ground station reacting to a drone
+        // going home has to see SAFE_RECOVERY, not a position hold.
+        val snapshot = MavlinkSnapshot(flightMode = "GO_HOME", manualOverrideActive = true)
+        assertEquals(Mav.PX4_MODE_RTL.toLong(), customMode(snapshot))
+        assertTrue((baseMode(snapshot) and Mav.MODE_FLAG_GUIDED_ENABLED) != 0)
+    }
+
+    @Test
+    fun anRthFlightIsReportedAsSafeRecoveryEvenWhileAMissionIsActive() {
+        // An RTH that interrupted a mission must read as Return, not as the mission that is no
+        // longer flying.
+        val snapshot = MavlinkSnapshot(flightMode = "GO_HOME", missionActive = true)
+        assertEquals(Mav.PX4_MODE_RTL.toLong(), customMode(snapshot))
+    }
+
+    @Test
+    fun anOverrideLatchIsReportedAsManualNotPositionHold() {
+        // With the latch set the pilot has the sticks and autonomous commands are refused; a
+        // heartbeat-only ground station must be able to tell that from ordinary GPS flight.
+        val snapshot = MavlinkSnapshot(flightMode = "GPS_NORMAL", manualOverrideActive = true)
+        assertEquals(Mav.PX4_MODE_MANUAL.toLong(), customMode(snapshot))
+        assertTrue((baseMode(snapshot) and Mav.MODE_FLAG_GUIDED_ENABLED) == 0)
+        assertTrue((baseMode(snapshot) and Mav.MODE_FLAG_MANUAL_INPUT_ENABLED) != 0)
+    }
+
+    @Test
+    fun aDjiManualFlightReportsManual() {
+        assertEquals(Mav.PX4_MODE_MANUAL.toLong(), customMode(MavlinkSnapshot(flightMode = "MANUAL")))
+    }
 }

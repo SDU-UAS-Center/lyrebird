@@ -30,6 +30,7 @@ from lyrebird_groundstation.transport import (
     LYREBIRD_CONFIG_CRC_EXTRA,
     LYREBIRD_CONFIG_ID,
     LYREBIRD_CONFIG_STRUCT,
+    LYREBIRD_STATUS_CRC_EXTRA,
     LYREBIRD_STATUS_ID,
     LYREBIRD_STATUS_SIZE,
     LYREBIRD_STATUS_STRUCT,
@@ -801,6 +802,9 @@ def test_the_hand_decoder_matches_the_dialect_definition():
             assert message.id == LYREBIRD_STATUS_ID
             assert message.unpacker.format == LYREBIRD_STATUS_STRUCT
             assert message.unpacker.size == LYREBIRD_STATUS_SIZE
+            # Also pin the checksum seed: a stale CRC_EXTRA on either end drops every
+            # LYREBIRD_STATUS frame silently, which hides all of its flags at once.
+            assert message.crc_extra == LYREBIRD_STATUS_CRC_EXTRA
         finally:
             sys.path.remove(str(work))
             sys.modules.pop("dialect", None)
