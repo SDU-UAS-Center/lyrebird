@@ -17,7 +17,12 @@ import org.webrtc.VideoEncoder
 import org.webrtc.VideoEncoderFactory
 import org.webrtc.VideoFrame
 import java.nio.ByteBuffer
+import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -45,7 +50,11 @@ import java.util.concurrent.atomic.AtomicLong
  * [encode] only exists to satisfy the [VideoEncoder] interface and to translate a WebRTC keyframe
  * request into the codec's own `PARAMETER_KEY_REQUEST_SYNC_FRAME` -- the same request DJI's own
  * FPS/keyframe machinery is asking for, just answered by the real encoder instead of
- * [PeriodicKeyframeEncoder]'s frame-type trick.
+ * [PeriodicKeyframeEncoder]'s frame-type trick. Encoded frames are handed to WebRTC by a
+ * dedicated delivery thread paced at the target fps, independent of the engine's [encode] call
+ * rate: flight 4 showed the engine calling [encode] at only 3-6/s during flight (captured-frame
+ * drops under CPU contention), which starved the previous encode()-driven drain and caused the
+ * observed queue-overflow cascade.
  */
 internal class DjiSurfaceH264Encoder(
     private val cameraIndex: ComponentIndexType,
@@ -69,6 +78,10 @@ internal class DjiSurfaceH264Encoder(
         const val PENDING_OUTPUT_CAPACITY = 8
         // Consecutive overflows before a sync frame is requested -- see deliverEncodedFrame.
         const val OVERFLOW_SYNC_STREAK = 10
+        // Give up waiting for a keyframe after this many consecutive dependent-frame drops
+        // (roughly 3s at 30fps): flight 4 showed waitingForKeyFrame stuck for minutes despite a
+        // 1s I-interval, silently dropping ~17fps the whole time.
+        const val KEYFRAME_WAIT_MAX_DROPS = 90
         // VBR quality target (0-100): high for crisp fast motion, bounded by the sender cap.
         const val VBR_QUALITY = 90
     }
@@ -81,8 +94,13 @@ internal class DjiSurfaceH264Encoder(
     private var inputSurface: Surface? = null
     private var callback: VideoEncoder.Callback? = null
     private var drainThread: Thread? = null
+    private var deliverExecutor: ScheduledExecutorService? = null
+    private var deliverTask: ScheduledFuture<*>? = null
     private val isRunning = AtomicBoolean(false)
     private val encodeCalls = AtomicLong(0)
+    // Encode-thread only (single writer); window for the periodic encode() call-rate log.
+    private var rateWindowCalls = 0
+    private var rateWindowStartNs = System.nanoTime()
     private val outputBuffers = AtomicLong(0)
     private val codecConfigBuffers = AtomicLong(0)
     private val encodedFrames = AtomicLong(0)
@@ -94,6 +112,7 @@ internal class DjiSurfaceH264Encoder(
     @Volatile private var codecConfig: ByteBuffer? = null
     // Drain-thread only (single writer), so a plain field is safe.
     private var overflowStreak = 0
+    private var keyframeWaitDrops = 0
 
     private data class PendingEncodedFrame(
         val buffer: ByteBuffer,
@@ -152,6 +171,7 @@ internal class DjiSurfaceH264Encoder(
             codec = mediaCodec
             inputSurface = surface
             startDrainThread(mediaCodec)
+            startDeliverThread()
             Log.i(TAG, "Started: ${width}x${height}@${fps}fps ${bitrateBps}bps VBR on $cameraIndex")
             VideoCodecStatus.OK
         }.getOrElse { error ->
@@ -166,6 +186,64 @@ internal class DjiSurfaceH264Encoder(
             isDaemon = true
             start()
         }
+    }
+
+    /**
+     * Delivery is paced here, not inside [encode]: flight 4 showed the engine calling [encode] at
+     * 3-6/s under in-flight CPU contention, which starved the encode()-driven drain and cascaded
+     * into constant queue overflows. Delivering from our own thread at the target fps keeps the
+     * queue drained regardless of engine cadence (libwebrtc supports asynchronous encoders).
+     */
+    private fun startDeliverThread() {
+        val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "DjiSurfaceH264Deliver").apply { isDaemon = true }
+        }
+        deliverExecutor = executor
+        deliverTask = executor.scheduleAtFixedRate(
+            ::deliverNextFrame, 0L, 1_000_000L / fps, TimeUnit.MICROSECONDS
+        )
+    }
+
+    private fun deliverNextFrame() {
+        if (!isRunning.get()) return
+        val cb = callback ?: return
+        val pending = pendingOutputs.poll() ?: return
+        val encodedImage = EncodedImage.builder()
+            .setBuffer(pending.buffer) { }
+            .setEncodedWidth(width)
+            .setEncodedHeight(height)
+            .setCaptureTimeNs(pending.presentationTimeUs * 1000)
+            .setFrameType(
+                if (pending.isKeyFrame) {
+                    EncodedImage.FrameType.VideoFrameKey
+                } else {
+                    EncodedImage.FrameType.VideoFrameDelta
+                }
+            )
+            .setRotation(0)
+            .setQp(null)
+            .createEncodedImage()
+        cb.onEncodedFrame(encodedImage, VideoEncoder.CodecSpecificInfo())
+        encodedImage.release()
+        val callbackCount = callbackFrames.incrementAndGet()
+        if (callbackCount == 1L || callbackCount % DIAGNOSTIC_LOG_INTERVAL == 0L) {
+            Log.i(
+                TAG,
+                "Delivered encoded output: callback=$callbackCount size=${pending.size} " +
+                    "keyframe=${pending.isKeyFrame} codecPtsUs=${pending.presentationTimeUs}"
+            )
+        }
+    }
+
+    /** Logs the engine's encode() call rate every ~5s so flight logcats show engine starvation. */
+    private fun logEncodeRateIfDue() {
+        rateWindowCalls += 1
+        val elapsedMs = (System.nanoTime() - rateWindowStartNs) / 1_000_000
+        if (elapsedMs < 5_000) return
+        val rate = rateWindowCalls * 1000.0 / elapsedMs
+        Log.i(TAG, String.format(Locale.US, "EncodeCallRate %.1f/s over %dms", rate, elapsedMs))
+        rateWindowCalls = 0
+        rateWindowStartNs = System.nanoTime()
     }
 
     private fun drainLoop(mediaCodec: MediaCodec) {
@@ -208,7 +286,15 @@ internal class DjiSurfaceH264Encoder(
         val isKeyFrame = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
         if (waitingForKeyFrame && !isKeyFrame) {
             val dropped = droppedFrames.incrementAndGet()
-            if (dropped == 1L || dropped % DIAGNOSTIC_LOG_INTERVAL == 0L) {
+            keyframeWaitDrops += 1
+            if (keyframeWaitDrops >= KEYFRAME_WAIT_MAX_DROPS) {
+                // Flight 4: stuck for minutes despite a 1s I-interval. Stop dropping footage
+                // and retry the sync-frame request instead of waiting indefinitely.
+                keyframeWaitDrops = 0
+                waitingForKeyFrame = false
+                requestSyncFrame()
+                Log.w(TAG, "Keyframe wait exceeded $KEYFRAME_WAIT_MAX_DROPS drops; accepting deltas")
+            } else if (dropped == 1L || dropped % DIAGNOSTIC_LOG_INTERVAL == 0L) {
                 Log.w(TAG, "Dropping dependent surface frames until next keyframe: count=$dropped")
             }
             return
@@ -237,6 +323,7 @@ internal class DjiSurfaceH264Encoder(
                 }
                 pendingOutputs.offer(pending)
                 waitingForKeyFrame = false
+                keyframeWaitDrops = 0
                 overflowStreak = 0
                 Log.w(
                     TAG,
@@ -252,13 +339,17 @@ internal class DjiSurfaceH264Encoder(
                 if (overflowStreak >= OVERFLOW_SYNC_STREAK) {
                     overflowStreak = 0
                     waitingForKeyFrame = true
+                    keyframeWaitDrops = 0
                     requestSyncFrame()
                     Log.w(TAG, "Sustained queue overflow; requesting sync frame")
                 }
             }
         } else {
             overflowStreak = 0
-            if (isKeyFrame) waitingForKeyFrame = false
+            if (isKeyFrame) {
+                waitingForKeyFrame = false
+                keyframeWaitDrops = 0
+            }
         }
         Log.d(
             TAG,
@@ -279,52 +370,30 @@ internal class DjiSurfaceH264Encoder(
     }
 
     /**
-     * Real encoding already happened via the surface DJI wrote into (or hasn't, if the two open
-     * questions above resolve unfavourably) -- this only forwards a keyframe request WebRTC/PLI
-     * makes to the actual encoder, via the standard MediaCodec sync-frame parameter.
+     * Real encoding already happened via the surface DJI wrote into. This only translates a
+     * keyframe request WebRTC/PLI makes into the codec's own sync-frame parameter; encoded output
+     * is delivered asynchronously by the delivery thread (see [startDeliverThread]), so the
+     * engine's encode() cadence no longer limits throughput.
      */
     override fun encode(frame: VideoFrame?, info: VideoEncoder.EncodeInfo?): VideoCodecStatus {
         val callCount = encodeCalls.incrementAndGet()
         if (callCount == 1L) {
-            Log.i(TAG, "First WebRTC encode call received; surface output is asynchronous")
+            Log.i(TAG, "First WebRTC encode call received; encoded output is delivered asynchronously")
         }
         val wantsKeyframe = info?.frameTypes?.any { it == EncodedImage.FrameType.VideoFrameKey } == true
         if (wantsKeyframe) {
             requestSyncFrame()
         }
-        pendingOutputs.poll()?.let { pending ->
-            val encodedImage = EncodedImage.builder()
-                .setBuffer(pending.buffer) { }
-                .setEncodedWidth(width)
-                .setEncodedHeight(height)
-                .setCaptureTimeNs(frame?.timestampNs ?: pending.presentationTimeUs * 1000)
-                .setFrameType(
-                    if (pending.isKeyFrame) {
-                        EncodedImage.FrameType.VideoFrameKey
-                    } else {
-                        EncodedImage.FrameType.VideoFrameDelta
-                    }
-                )
-                .setRotation(0)
-                .setQp(null)
-                .createEncodedImage()
-            callback?.onEncodedFrame(encodedImage, VideoEncoder.CodecSpecificInfo())
-            encodedImage.release()
-            val callbackCount = callbackFrames.incrementAndGet()
-            if (callbackCount == 1L || callbackCount % DIAGNOSTIC_LOG_INTERVAL == 0L) {
-                Log.i(
-                    TAG,
-                    "Delivered encoded output: encodeCall=$callCount callback=$callbackCount " +
-                        "size=${pending.size} keyframe=${pending.isKeyFrame} " +
-                        "codecPtsUs=${pending.presentationTimeUs} inputTsNs=${frame?.timestampNs}"
-                )
-            }
-        }
+        logEncodeRateIfDue()
         return VideoCodecStatus.OK
     }
 
     override fun release(): VideoCodecStatus {
         isRunning.set(false)
+        runCatching { deliverTask?.cancel(false) }
+        deliverTask = null
+        deliverExecutor?.shutdownNow()
+        deliverExecutor = null
         runCatching { drainThread?.join(500) }
         drainThread = null
         inputSurface?.let { surface ->
