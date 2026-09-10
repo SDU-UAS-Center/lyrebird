@@ -379,6 +379,8 @@ class WebRTCStreamer(
             qualityLimitationReason = networkStats?.qualityLimitationReason,
             framesEncodedNotSent = networkStats?.framesEncodedNotSent,
             sendBitrateBps = networkStats?.sendBitrateBps,
+            framesEncoded = networkStats?.framesEncoded,
+            framesSent = networkStats?.framesSent,
             whipHost = currentWhipHost(),
             readerCount = WebRTCPeerFactory.activeConsumerWatcher?.readerCount
         )
@@ -403,6 +405,8 @@ class WebRTCStreamer(
             qualityLimitationReason = networkStats?.qualityLimitationReason,
             framesEncodedNotSent = networkStats?.framesEncodedNotSent,
             sendBitrateBps = networkStats?.sendBitrateBps,
+            framesEncoded = networkStats?.framesEncoded,
+            framesSent = networkStats?.framesSent,
             status = if (whipPublisher?.isRunning() == true) "running" else metrics.status,
             whipHost = currentWhipHost(),
             readerCount = WebRTCPeerFactory.activeConsumerWatcher?.readerCount

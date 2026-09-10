@@ -120,7 +120,12 @@ class WhipPublisher(
     data class WhipNetworkStats(
         val qualityLimitationReason: String?,
         val framesEncodedNotSent: Long?,
-        val sendBitrateBps: Long?
+        val sendBitrateBps: Long?,
+        // Raw counters from outbound-rtp: framesEncoded minus framesSent isolates encoder-side
+        // drops from pacer/network-side drops (flight-1 follow-up; outputFps alone over-reports
+        // because it counts frames handed to the pipeline, not frames that left the device).
+        val framesEncoded: Long? = null,
+        val framesSent: Long? = null
     )
 
     fun start() {
@@ -381,7 +386,9 @@ class WhipPublisher(
         latestNetworkStats = WhipNetworkStats(
             qualityLimitationReason = qualityLimitationReason,
             framesEncodedNotSent = framesEncodedNotSent,
-            sendBitrateBps = sendBitrateBps
+            sendBitrateBps = sendBitrateBps,
+            framesEncoded = framesEncoded,
+            framesSent = framesSent
         )
     }
 

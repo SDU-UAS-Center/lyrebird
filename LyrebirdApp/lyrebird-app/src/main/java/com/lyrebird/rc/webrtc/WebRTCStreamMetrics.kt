@@ -30,6 +30,10 @@ data class WebRTCStreamMetrics(
     val qualityLimitationReason: String? = null,
     val framesEncodedNotSent: Long? = null,
     val sendBitrateBps: Long? = null,
+    // Raw outbound-rtp counters (flight-1 follow-up): split encoder-side drops
+    // (frames never encoded) from pacer/network-side drops (encoded but not sent).
+    val framesEncoded: Long? = null,
+    val framesSent: Long? = null,
     // Host:port this device is currently publishing to, and MediaMTX's own count of readers
     // (WHEP/RTSP/RTMP/HLS) attached to that path -- shown on-screen so a wrong or unreachable
     // publish target is obvious from the phone itself instead of only from Logcat/MediaMTX.

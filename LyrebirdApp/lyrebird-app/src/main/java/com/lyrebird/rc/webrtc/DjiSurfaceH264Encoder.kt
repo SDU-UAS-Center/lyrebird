@@ -58,10 +58,19 @@ internal class DjiSurfaceH264Encoder(
     private companion object {
         const val TAG = "DjiSurfaceH264Encoder"
         const val MIME_TYPE = "video/avc"
-        const val I_FRAME_INTERVAL_S = 2
+        // 1s instead of 2s: recovers faster from loss/motion-induced quality dips, and shortens
+        // RTSP/WHEP join time without meaningfully increasing bitrate on mostly-static footage.
+        const val I_FRAME_INTERVAL_S = 1
         const val DRAIN_TIMEOUT_US = 10_000L
         const val DIAGNOSTIC_LOG_INTERVAL = 100L
-        const val PENDING_OUTPUT_CAPACITY = 4
+        // Roomier queue so source bursts (high close-range DJI bitrate, sudden motion) do not
+        // immediately overflow. Combined with drop-oldest semantics below this is what stops
+        // the multi-second collapse loops seen on flights 2-3.
+        const val PENDING_OUTPUT_CAPACITY = 8
+        // Consecutive overflows before a sync frame is requested -- see deliverEncodedFrame.
+        const val OVERFLOW_SYNC_STREAK = 10
+        // VBR quality target (0-100): high for crisp fast motion, bounded by the sender cap.
+        const val VBR_QUALITY = 90
     }
 
     private val cameraStreamManager: ICameraStreamManager by lazy {
@@ -83,6 +92,8 @@ internal class DjiSurfaceH264Encoder(
     private val pendingOutputs = ArrayBlockingQueue<PendingEncodedFrame>(PENDING_OUTPUT_CAPACITY)
     @Volatile private var waitingForKeyFrame = false
     @Volatile private var codecConfig: ByteBuffer? = null
+    // Drain-thread only (single writer), so a plain field is safe.
+    private var overflowStreak = 0
 
     private data class PendingEncodedFrame(
         val buffer: ByteBuffer,
@@ -99,11 +110,31 @@ internal class DjiSurfaceH264Encoder(
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
                 setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL_S)
+                // VBR instead of the default CBR: motion gets more bits instead of blurring at a
+                // flat ceiling, and static scenes get fewer. Flight 1 showed CBR starving motion
+                // (blurry while moving, sharp when static) and, with frame-drops allowed, silently
+                // dropping frames under pressure -- the likely source of the phone-vs-relay fps gap.
+                setInteger(
+                    MediaFormat.KEY_BITRATE_MODE,
+                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // VBR quality target: without it VBR defaults to a mediocre quality trade;
+                    // a high value gives fast motion the bits it needs to stay crisp.
+                    setInteger(MediaFormat.KEY_QUALITY, VBR_QUALITY)
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     setInteger(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps)
                 }
+                // No B-frames: they add latency and motion smear; DJI's own stream is P-only.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                }
+                // Explicitly disallow the encoder dropping frames: with VBR there is no reason to
+                // trade temporal fidelity for a fixed bitrate. (KEY_ALLOW_FRAME_DROP defaults to 0
+                // and was previously set to 1 -- flight data showed exactly that drop signature.)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    setInteger(MediaFormat.KEY_ALLOW_FRAME_DROP, 1)
+                    setInteger(MediaFormat.KEY_ALLOW_FRAME_DROP, 0)
                 }
             }
             val mediaCodec = MediaCodec.createEncoderByType(MIME_TYPE)
@@ -121,7 +152,7 @@ internal class DjiSurfaceH264Encoder(
             codec = mediaCodec
             inputSurface = surface
             startDrainThread(mediaCodec)
-            Log.i(TAG, "Started: ${width}x${height}@${fps}fps ${bitrateBps}bps on $cameraIndex")
+            Log.i(TAG, "Started: ${width}x${height}@${fps}fps ${bitrateBps}bps VBR on $cameraIndex")
             VideoCodecStatus.OK
         }.getOrElse { error ->
             Log.e(TAG, "initEncode failed: ${error.message}", error)
@@ -198,19 +229,36 @@ internal class DjiSurfaceH264Encoder(
         encodedBytes.addAndGet(outputSize.toLong())
         val pending = PendingEncodedFrame(copy, outputSize, isKeyFrame, bufferInfo.presentationTimeUs)
         if (!pendingOutputs.offer(pending)) {
-            pendingOutputs.clear()
-            waitingForKeyFrame = true
-            requestSyncFrame()
-            if (!isKeyFrame) {
-                val dropped = droppedFrames.incrementAndGet()
-                Log.w(TAG, "Surface output queue overflow; waiting for keyframe: dropped=$dropped")
-                return
+            if (isKeyFrame) {
+                // A keyframe is the recovery point: evict the oldest backlog to make room
+                // instead of stalling. Never drop the keyframe itself.
+                while (pendingOutputs.poll() != null) {
+                    droppedFrames.incrementAndGet()
+                }
+                pendingOutputs.offer(pending)
+                waitingForKeyFrame = false
+                overflowStreak = 0
+                Log.w(
+                    TAG,
+                    "Queue overflow; evicted backlog for keyframe: dropped=${droppedFrames.get()}"
+                )
+            } else {
+                // Drop the OLDEST frame instead of clearing the queue: a source burst must not
+                // turn into a multi-second stall (flights 2-3 showed exactly that loop).
+                pendingOutputs.poll()
+                droppedFrames.incrementAndGet()
+                pendingOutputs.offer(pending)
+                overflowStreak += 1
+                if (overflowStreak >= OVERFLOW_SYNC_STREAK) {
+                    overflowStreak = 0
+                    waitingForKeyFrame = true
+                    requestSyncFrame()
+                    Log.w(TAG, "Sustained queue overflow; requesting sync frame")
+                }
             }
-            waitingForKeyFrame = false
-            pendingOutputs.offer(pending)
-            Log.w(TAG, "Surface output queue overflow; restarted with keyframe")
-        } else if (isKeyFrame) {
-            waitingForKeyFrame = false
+        } else {
+            overflowStreak = 0
+            if (isKeyFrame) waitingForKeyFrame = false
         }
         Log.d(
             TAG,

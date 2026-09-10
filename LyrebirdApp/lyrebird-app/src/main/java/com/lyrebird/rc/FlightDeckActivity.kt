@@ -513,6 +513,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private var sensorManager: SensorManager? = null
     private var wifiManager: WifiManager? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+    // Keeps the radio in low-latency mode while WHIP is publishing: flight 1 showed silent
+    // frame stalls at the encoder with zero RTP loss, a signature of Wi-Fi power save on the
+    // publishing device. Acquired when streaming starts, released in onDestroy.
+    private var lowLatencyWifiLock: WifiManager.WifiLock? = null
     private var batteryManager: BatteryManager? = null
         private var mockPreviewPlayer: MediaPlayer? = null
     @Volatile private var lastWebRTCMetrics = WebRTCStreamMetrics()
@@ -2216,7 +2220,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val qualityLimitationReasonJson = qualityLimitationReason?.let { "\"${escapeJson(it)}\"" } ?: "null"
         val framesEncodedNotSentJson = framesEncodedNotSent?.toString() ?: "null"
         val sendBitrateBpsJson = sendBitrateBps?.toString() ?: "null"
-        return """{"sourceWidth":$sourceWidth,"sourceHeight":$sourceHeight,"outputWidth":$outputWidth,"outputHeight":$outputHeight,"requestedWidth":$requestedWidth,"requestedHeight":$requestedHeight,"targetFps":$targetFps,"inputFps":$inputFps,"outputFps":$outputFps,"droppedFps":$droppedFps,"averageFrameProcessingMs":$averageFrameProcessingMs,"totalFrames":$totalFrames,"totalDroppedFrames":$totalDroppedFrames,"processingErrors":$processingErrors,"observerCount":$observerCount,"activeCamera":"${escapeJson(activeCamera)}","status":"${escapeJson(status)}","configuredFps":$configuredFps,"saturationState":"${escapeJson(saturationState)}","scaleMode":"${escapeJson(scaleMode)}","recoveryCount":$recoveryCount,"lastError":$lastErrorJson,"qualityLimitationReason":$qualityLimitationReasonJson,"framesEncodedNotSent":$framesEncodedNotSentJson,"sendBitrateBps":$sendBitrateBpsJson}"""
+        val framesEncodedJson = framesEncoded?.toString() ?: "null"
+        val framesSentJson = framesSent?.toString() ?: "null"
+        return """{"sourceWidth":$sourceWidth,"sourceHeight":$sourceHeight,"outputWidth":$outputWidth,"outputHeight":$outputHeight,"requestedWidth":$requestedWidth,"requestedHeight":$requestedHeight,"targetFps":$targetFps,"inputFps":$inputFps,"outputFps":$outputFps,"droppedFps":$droppedFps,"averageFrameProcessingMs":$averageFrameProcessingMs,"totalFrames":$totalFrames,"totalDroppedFrames":$totalDroppedFrames,"processingErrors":$processingErrors,"observerCount":$observerCount,"activeCamera":"${escapeJson(activeCamera)}","status":"${escapeJson(status)}","configuredFps":$configuredFps,"saturationState":"${escapeJson(saturationState)}","scaleMode":"${escapeJson(scaleMode)}","recoveryCount":$recoveryCount,"lastError":$lastErrorJson,"qualityLimitationReason":$qualityLimitationReasonJson,"framesEncodedNotSent":$framesEncodedNotSentJson,"sendBitrateBps":$sendBitrateBpsJson,"framesEncoded":$framesEncodedJson,"framesSent":$framesSentJson}"""
+    }
+
+    /**
+     * Hold WIFI_MODE_FULL_LOW_LATENCY while publishing. Flight 1 showed dips with zero RTP loss
+     * and a clean phone-side pipeline, consistent with radio power-save stalls between the
+     * encoder and the air. Idempotent: repeated streaming restarts keep one lock held.
+     */
+    private fun acquireLowLatencyWifiLock() {
+        if (lowLatencyWifiLock?.isHeld == true) return
+        runCatching {
+            lowLatencyWifiLock = wifiManager?.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "LyrebirdStreamingWifiLock"
+            )
+            lowLatencyWifiLock?.acquire()
+            Log.i(TAG, "Low-latency Wi-Fi lock acquired for streaming")
+        }.onFailure { error ->
+            Log.w(TAG, "Could not acquire low-latency Wi-Fi lock: ${error.message}")
+        }
     }
 
     /**
@@ -2228,6 +2252,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             mainHandler.post { startActiveStreaming(clientIp) }
             return
         }
+        acquireLowLatencyWifiLock()
         val mode = getStreamingMode()
         Log.i(TAG, "Starting active streaming in mode: ${mode.menuLabel}")
 
@@ -2447,11 +2472,23 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * rebuild the identical publish would drop the picture for everyone watching it.
      */
     private fun startStreamingForClient(clientIp: String) {
+        val publisherHealthy = webRTCStreamer?.isRunning() == true &&
+            webRTCStreamer?.isPublishing() == true
         if (lastClientIp == clientIp && lastWhipUrl != null) {
-            val publisherHealthy = webRTCStreamer?.isRunning() == true &&
-                webRTCStreamer?.isPublishing() == true
             if (publisherHealthy) return
             Log.w(TAG, "Restarting stale WHIP publisher for $clientIp")
+        }
+        // Guard against stream hijacking: a healthy publisher must not be retargeted just
+        // because a different client connected to the telemetry port. Field incidents:
+        // phones probing each other's telemetry port made the app repoint WHIP at another
+        // phone (which runs no MediaMTX), killing video until an app restart. Only retarget
+        // when the current publisher is unhealthy, or when no client was ever recorded.
+        if (lastClientIp != null && lastClientIp != clientIp && publisherHealthy) {
+            Log.w(
+                TAG,
+                "Ignoring telemetry client $clientIp while healthy publisher targets $lastClientIp"
+            )
+            return
         }
         Log.i(TAG, "Starting active streaming for $clientIp")
         lastClientIp = clientIp
@@ -5138,6 +5175,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {
                 multicastLock?.release()
+            }
+
+            // Release the low-latency Wi-Fi lock held while WHIP publishing was active.
+            if (lowLatencyWifiLock?.isHeld == true) {
+                lowLatencyWifiLock?.release()
             }
 
             // Cancel key listeners
