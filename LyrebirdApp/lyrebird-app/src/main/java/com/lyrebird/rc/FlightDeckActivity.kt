@@ -1780,6 +1780,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val wasConnected = aircraftConnected
         aircraftConnected = isConnected
         logConnectionKeySnapshot("flightController listener fired: $wasConnected -> $isConnected")
+        if (isConnected && !wasConnected) {
+            // The startup serial fetch fails when the app boots before the aircraft links (the
+            // normal RC case); re-fetch on connect so this aircraft's settings profile — name,
+            // manual sysid, streaming — is restored for exactly the drone that connected.
+            fetchDroneSerialNumber()
+        }
         if (shouldSwitchToDroneVideoSource(isConnected, wasConnected, forceDroneSourceDefault)) {
             sharedPreferences.edit()
                 .putString(PREF_VIDEO_SOURCE, VideoSourceMode.DJI.prefValue)
