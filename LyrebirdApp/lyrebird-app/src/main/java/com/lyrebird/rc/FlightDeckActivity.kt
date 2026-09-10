@@ -12,6 +12,7 @@ import android.provider.DocumentsContract
 import java.io.File
 import com.lyrebird.rc.settings.LyrebirdOnboarding
 import com.lyrebird.rc.settings.LyrebirdSettingsBackup
+import com.lyrebird.rc.settings.DroneSettingsProfiles
 import android.util.Log
 import android.util.TypedValue
 import android.widget.Toast
@@ -354,6 +355,22 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val PREF_EDGE_LABELS_NAME = "edge_labels_name"
         private const val PREF_EDGE_CONFIDENCE_THRESHOLD = "edge_confidence_threshold"
         private const val PREF_STREAMING_MODE = "streaming_mode"
+
+        /** Preferences that travel with the aircraft, swapped by [DroneSettingsProfiles] on serial change. */
+        private val PER_DRONE_PROFILE_KEYS = setOf(
+            PREF_DRONE_NAME,
+            PREF_DRONE_NAME_USER_SET,
+            PREF_MEDIAMTX_SERVER,
+            PREF_WEBRTC_FPS,
+            PREF_WEBRTC_RESOLUTION,
+            PREF_DETECTIONS_ENABLED,
+            PREF_DETECTION_SOURCE,
+            PREF_VIDEO_SOURCE,
+            PREF_STREAMING_MODE,
+            // lb_mav_0_sysid: 0 (the default) derives the id from the serial, so it needs no
+            // stored value; an operator-pinned manual id is per-drone and travels with it.
+            MavlinkEndpointConfig.PREF_SYSTEM_ID
+        )
         private const val PREF_RTMP_URL = "rtmp_url"
         private const val PREF_RTSP_PORT = "rtsp_port"
         private const val PREF_RTSP_USER = "rtsp_user"
@@ -5205,6 +5222,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             // Close the active flight log if the app is killed mid-flight
             LyrebirdFlightLogger.endSession("app_stopped")
 
+            // Persist this aircraft's settings so the next flight on the same drone restores them.
+            DroneSettingsProfiles.saveCurrentProfile(sharedPreferences, PER_DRONE_PROFILE_KEYS)
+
             mainHandler.removeCallbacksAndMessages(null)
             stopPhoneCameraPreview()
 
@@ -5289,8 +5309,29 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             KeyManager.getInstance().getValue(serialKey, object : dji.v5.common.callback.CommonCallbacks.CompletionCallbackWithParam<String> {
                 override fun onSuccess(serialNumber: String?) {
                     val previousSystemId = currentMavlinkSystemId()
+                    val previousConfiguredId = configuredMavlinkSystemId()
                     droneSerialNumber = serialNumber?.trim()?.takeIf { it.isNotEmpty() } ?: "UNKNOWN"
                     Log.i(TAG, "Drone serial number: $droneSerialNumber")
+                    LyrebirdFlightLogger.setVehicleSerial(droneSerialNumber)
+                    DroneSettingsProfiles.onAircraftChanged(
+                        sharedPreferences,
+                        PER_DRONE_PROFILE_KEYS,
+                        droneSerialNumber,
+                        mainHandler
+                    ) { profileApplied ->
+                        if (profileApplied) {
+                            // The restored profile may carry this aircraft's name and streaming
+                            // settings; re-derive the name and its display from them.
+                            loadDroneName()
+                            updateDroneNameDisplay()
+                            // The pre-profile sysid check above could not see a restored manual
+                            // sysid; restart the endpoint when the profile changed it.
+                            if (configuredMavlinkSystemId() != previousConfiguredId) {
+                                restartMavlinkEndpoint()
+                            }
+                            Log.i(TAG, "Applied per-drone settings profile for $droneSerialNumber")
+                        }
+                    }
                     applyAutomaticDroneName()
                     if (!configuredMavlinkSystemIdIsManual() && previousSystemId != currentMavlinkSystemId()) {
                         restartMavlinkEndpoint()

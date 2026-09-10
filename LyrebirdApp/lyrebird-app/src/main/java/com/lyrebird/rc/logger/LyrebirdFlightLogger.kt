@@ -50,6 +50,9 @@ object LyrebirdFlightLogger {
     @Volatile private var logFile: File? = null
     @Volatile private var sessionActive = false
 
+    /** Epoch seconds at which the current (or last) session started, 0 when unknown. */
+    @Volatile private var sessionStartEpochSec: Long = 0
+
     /** True while a log file is open. */
     val isSessionActive: Boolean get() = sessionActive
 
@@ -64,6 +67,19 @@ object LyrebirdFlightLogger {
      */
     fun setDroneName(name: String) {
         droneName = name.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "unknown" }
+    }
+
+    /**
+     * DJI serial of the connected aircraft, recorded in the video manifest so videos can be
+     * attributed to the airframe that recorded them.
+     */
+    @Volatile
+    var vehicleSerial: String = "unknown"
+        private set
+
+    /** Set (or update) the vehicle serial used in the video manifest. */
+    fun setVehicleSerial(serial: String) {
+        vehicleSerial = serial.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "unknown" }
     }
 
     /**
@@ -83,6 +99,7 @@ object LyrebirdFlightLogger {
             logFile = file
             writer = PrintWriter(FileWriter(file, /* append = */ false))
             sessionActive = true
+            sessionStartEpochSec = System.currentTimeMillis() / 1000
             commitLog("SESSION_START", mapOf("drone" to droneName, "logDir" to dir.absolutePath))
             Log.i(TAG, "Flight log started → ${file.absolutePath}")
         } catch (e: IOException) {
@@ -96,9 +113,14 @@ object LyrebirdFlightLogger {
     fun endSession(reason: String = "app_stopped") {
         if (!sessionActive) return
         commitLog("SESSION_END", mapOf("reason" to reason))
+        val windowSec = sessionStartEpochSec to System.currentTimeMillis() / 1000
+        val endedLog = logFile
         flushAndClose()
         sessionActive = false
-        Log.i(TAG, "Flight log ended ($reason) → ${logFile?.absolutePath}")
+        Log.i(TAG, "Flight log ended ($reason) → ${endedLog?.absolutePath}")
+        if (windowSec.first > 0) {
+            FlightVideoManifest.writeForSession(endedLog, droneName, vehicleSerial, windowSec)
+        }
     }
 
     /**
