@@ -257,6 +257,20 @@ internal class MavlinkTelemetryEndpoint(
                 // Kept as this package's own notion of origin. Mapping it onto Lyrebird's
                 // authority model is the host activity's job, which is what keeps this package
                 // free of the SDK and testable off a phone.
+                // Addressed to another vehicle? Then none of it is ours: not the command, not the
+                // mission item, not the peer registration. A ground station unicasts, so this
+                // costs nothing in the normal case, but the moment anything broadcasts commands —
+                // a script, a MAVLink router fanning out, a second aircraft on the same subnet —
+                // it is the only thing standing between one aircraft's takeoff and another's.
+                if (!isAddressedToThisVehicle(buffer, packet.length)) continue
+
+                // A heartbeat from something that flies is another vehicle, not a ground station.
+                // Registering it as a peer would start streaming this aircraft's full message set
+                // at it, and it would do the same back, so every pair of aircraft on the access
+                // point would trade tens of datagrams a second that neither asked for and neither
+                // reads. That is precisely the load dataDestinations() refuses to create.
+                if (isVehicleHeartbeat(buffer, packet.length)) continue
+
                 commandOrigin = origin
                 notePeer(InetSocketAddress(packet.address, packet.port))
                 MavlinkInbound.parseCommand(buffer, packet.length)?.let(::handleCommand)
@@ -300,6 +314,33 @@ internal class MavlinkTelemetryEndpoint(
                 MavlinkMessages.autoSensingTarget(target, index, targets.size, now, frameId)
             )
         }
+    }
+
+    /**
+     * Whether an addressed frame names this aircraft.
+     *
+     * Unaddressed messages pass: a heartbeat or a telemetry frame has no target, and refusing
+     * those would deafen the endpoint to the ground station it is trying to find. Target system
+     * zero is MAVLink's broadcast address and also passes, which is what lets a station that does
+     * not yet know this vehicle's id ask it for its camera information.
+     */
+    private fun isAddressedToThisVehicle(buffer: ByteArray, length: Int): Boolean {
+        val target = MavlinkInbound.targetSystemOf(buffer, length) ?: return true
+        if (target == 0 || target == config.systemId) return true
+        Log.d(TAG, "Ignoring a frame addressed to system $target; this vehicle is ${config.systemId}")
+        return false
+    }
+
+    /**
+     * Whether this frame is another aircraft announcing itself.
+     *
+     * A ground station, companion computer or antenna tracker heartbeats with
+     * MAV_AUTOPILOT_INVALID; anything that flies reports a real autopilot. Lyrebird itself reports
+     * PX4, so two Lyrebird aircraft recognise each other here.
+     */
+    private fun isVehicleHeartbeat(buffer: ByteArray, length: Int): Boolean {
+        val autopilot = MavlinkInbound.heartbeatAutopilot(buffer, length) ?: return false
+        return autopilot != MavlinkInbound.AUTOPILOT_INVALID
     }
 
     private fun notePeer(address: InetSocketAddress) {

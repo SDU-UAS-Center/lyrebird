@@ -330,6 +330,75 @@ internal object MavlinkInbound {
     }
 
     /** MAVLink 2 truncates trailing zeros, so pad before reading fixed offsets. */
+    /**
+     * Where `target_system` sits in each addressed message's payload.
+     *
+     * mavgen orders the wire by descending field size, then by declaration order within a size, so
+     * these offsets cannot be read off the XML and are not the same from one message to the next.
+     * Every entry here was taken from the generated `common` dialect rather than derived by hand,
+     * because a wrong offset does not fail loudly: it silently compares the wrong byte and either
+     * drops commands meant for this aircraft or accepts ones meant for another.
+     *
+     * Messages absent from this map are unaddressed. Telemetry and heartbeats are broadcast by
+     * nature and have no target to check.
+     */
+    private val TARGET_SYSTEM_OFFSETS: Map<Int, Int> = mapOf(
+        MavlinkMsgId.COMMAND_LONG to 30,
+        MavlinkMsgId.COMMAND_INT to 30,
+        MavlinkMsgId.SET_MODE to 4,
+        MavlinkMsgId.PARAM_SET to 4,
+        MavlinkMsgId.PARAM_REQUEST_LIST to 0,
+        MavlinkMsgId.PARAM_EXT_SET to 0,
+        MavlinkMsgId.PARAM_EXT_REQUEST_LIST to 0,
+        MavlinkMsgId.MISSION_REQUEST_LIST to 0,
+        MavlinkMsgId.MISSION_COUNT to 2,
+        MavlinkMsgId.MISSION_ITEM_INT to 32,
+        MavlinkMsgId.MISSION_REQUEST_INT to 2,
+        MavlinkMsgId.MISSION_CLEAR_ALL to 0,
+        MavlinkMsgId.MISSION_ACK to 0,
+        MavlinkMsgId.FILE_TRANSFER_PROTOCOL to 1,
+        // MANUAL_CONTROL names its addressee `target` rather than `target_system`, but it means
+        // the same thing and must be filtered the same way: it is stick input.
+        MavlinkMsgId.MANUAL_CONTROL to 10
+    )
+
+    /** HEARTBEAT carries custom_mode(u32) first, then type and autopilot. */
+    private const val HEARTBEAT_AUTOPILOT_OFFSET = 5
+
+    /**
+     * MAV_AUTOPILOT_INVALID. A ground station, companion computer or antenna tracker reports this;
+     * anything that actually flies reports a real autopilot.
+     */
+    const val AUTOPILOT_INVALID = 8
+
+    /**
+     * Which system a frame is addressed to, or null when the message has no addressee.
+     *
+     * Zero is MAVLink's broadcast address and is returned as such. A payload too short to contain
+     * the field also reads as zero, which is correct rather than a fallback: MAVLink 2 truncates
+     * trailing zero bytes, so an absent target_system was a zero when it was sent.
+     */
+    fun targetSystemOf(data: ByteArray, length: Int): Int? {
+        val frame = validate(data, length) ?: return null
+        val offset = TARGET_SYSTEM_OFFSETS[frame.messageId] ?: return null
+        if (offset >= frame.payloadLength) return 0
+        return data[HEADER_BYTES + offset].toInt() and 0xFF
+    }
+
+    /**
+     * The autopilot id a HEARTBEAT declares, or null when the frame is not a heartbeat.
+     *
+     * This is how a vehicle is told apart from a ground station. Both heartbeat at the same rate
+     * on the same port, and only this field distinguishes them: [AUTOPILOT_INVALID] means the
+     * sender does not fly.
+     */
+    fun heartbeatAutopilot(data: ByteArray, length: Int): Int? {
+        val frame = validate(data, length) ?: return null
+        if (frame.messageId != MavlinkMsgId.HEARTBEAT) return null
+        if (HEARTBEAT_AUTOPILOT_OFFSET >= frame.payloadLength) return AUTOPILOT_INVALID
+        return data[HEADER_BYTES + HEARTBEAT_AUTOPILOT_OFFSET].toInt() and 0xFF
+    }
+
     private fun paddedPayload(data: ByteArray, payloadLength: Int): ByteArray {
         val payload = ByteArray(MAX_PAYLOAD)
         System.arraycopy(data, HEADER_BYTES, payload, 0, payloadLength)

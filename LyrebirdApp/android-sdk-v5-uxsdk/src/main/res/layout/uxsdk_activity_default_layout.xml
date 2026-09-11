@@ -589,6 +589,24 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:uxsdk_djiMap_mapType="normal" />
 
+        <!--
+            Holder for the fleet strip: other Lyrebird aircraft on this network, one line each,
+            directly above the map that plots them. Hidden entirely while this device is alone, so
+            a single-aircraft flight looks exactly as it did before.
+
+            The strip itself is added at runtime by the app rather than named here. This layout
+            belongs to the :uxsdk module, whose data-binding classes are generated against the
+            uxsdk classpath alone; naming an app class in it makes that generated code reference a
+            package the module cannot see. A plain container keeps the module boundary intact.
+        -->
+        <FrameLayout
+            android:id="@+id/fleet_strip_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            app:layout_constraintBottom_toTopOf="@+id/widget_map"
+            app:layout_constraintEnd_toEndOf="@+id/widget_map" />
+
         <ToggleButton
             android:id="@+id/button_map_expand"
             android:layout_width="40dp"

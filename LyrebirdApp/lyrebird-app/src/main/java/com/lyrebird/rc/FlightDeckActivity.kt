@@ -13,6 +13,11 @@ import java.io.File
 import com.lyrebird.rc.settings.LyrebirdOnboarding
 import com.lyrebird.rc.settings.LyrebirdSettingsBackup
 import com.lyrebird.rc.settings.DroneSettingsProfiles
+import com.lyrebird.rc.fleet.FleetBeacon
+import com.lyrebird.rc.fleet.FleetDeckController
+import com.lyrebird.rc.fleet.FleetStripView
+import com.lyrebird.rc.perception.ObstacleBrake
+import com.lyrebird.rc.perception.ObstacleGuard
 import android.util.Log
 import android.util.TypedValue
 import android.widget.Toast
@@ -356,6 +361,19 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val PREF_EDGE_CONFIDENCE_THRESHOLD = "edge_confidence_threshold"
         private const val PREF_STREAMING_MODE = "streaming_mode"
 
+        /**
+         * Fallback fleet identity for a device with no aircraft bound.
+         *
+         * The aircraft serial is the right identity for a flying device and the one the settings
+         * profiles already key on, but it reads as "UNKNOWN" before an aircraft connects. Without
+         * a per-install fallback every unbound RC on the network would claim the same identity and
+         * collapse into one roster entry.
+         */
+        private const val PREF_FLEET_INSTALL_ID = "lb_fleet_install_id"
+
+        /** Enough UUID to make an accidental collision across a field team implausible. */
+        private const val FLEET_INSTALL_ID_LENGTH = 8
+
         /** Preferences that travel with the aircraft, swapped by [DroneSettingsProfiles] on serial change. */
         private val PER_DRONE_PROFILE_KEYS = setOf(
             PREF_DRONE_NAME,
@@ -498,7 +516,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     @Volatile private var lastClientIp: String? = null
     
     private var droneSerialNumber: String = "UNKNOWN"
-    
+
+    /**
+     * Awareness of the other Lyrebird aircraft on this network.
+     *
+     * Null until [startServers] brings it up, and left null entirely when the operator has turned
+     * the mesh off. Everything it does is read-only with respect to this aircraft: it publishes a
+     * state beacon, draws peers, and warns. No inbound message on its socket can command anything.
+     */
+    private var fleetController: FleetDeckController? = null
+
     // Drone Configuration
     private lateinit var sharedPreferences: SharedPreferences
     override var droneName: String = DEFAULT_DRONE_NAME
@@ -1261,6 +1288,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
         mapWidget.setMapCenterLock(if (expanded) MapWidget.MapCenterLock.NONE else MapWidget.MapCenterLock.AIRCRAFT)
         mapWidget.setAutoFrameMapEnabled(false)
+        // The expanded map is brought to the front over the whole screen, including the corner the
+        // fleet strip occupies. The peers are all still on the map itself, so the strip stands down.
+        fleetController?.setMapExpanded(expanded)
         mapWidget.bringToFront()
         button?.bringToFront()
         button?.visibility = if (expanded) View.VISIBLE else View.GONE
@@ -3047,6 +3077,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         } else {
             appStatus
         }
+        // The obstacle guard outranks the operational status while it is latched. It is the one
+        // state where the aircraft stopped itself, so it is what the pilot needs to read first —
+        // shown here in the indicator they already watch rather than as anything that pops up.
+        if (ObstacleGuard.isLatched) {
+            statusTv.text = "OBSTACLE"
+            statusTv.setTextColor(0xFFFF1744.toInt())
+            statusTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, DRONE_STATUS_ALERT_TEXT_SIZE_SP)
+            return
+        }
         val (label, color) = when (resolved) {
             DroneController.DroneStatus.IDLE            -> Pair("IDLE",       0xFFFF9800.toInt())
             DroneController.DroneStatus.TAKING_OFF      -> Pair("TAKEOFF",    0xFFFFC107.toInt())
@@ -3231,6 +3270,19 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             showBrandedRcPairingPage()
         }
         addCockpitRow(aircraftColumn, "HD frequency", DroneController.getHdFrequencyBand())
+
+        addCockpitSection(aircraftColumn, "FLEET")
+        val fleetPeers = fleetController?.peerCount() ?: 0
+        val fleetDetail = when {
+            fleetController == null -> "Off"
+            fleetPeers == 0 -> "No peers"
+            fleetPeers == 1 -> "1 aircraft"
+            else -> "$fleetPeers aircraft"
+        }
+        addCockpitRow(aircraftColumn, "Other aircraft", fleetDetail) {
+            fleetController?.showFleetDialog()
+                ?: Toast.makeText(this, "Fleet awareness is off", Toast.LENGTH_SHORT).show()
+        }
         addCockpitRow(
             aircraftColumn,
             "MAVLink flight",
@@ -3264,6 +3316,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
         val flightColumn = columns[2]
         addCockpitSection(flightColumn, "FLIGHT LIMITS")
+        addCockpitRow(flightColumn, "Obstacle guard", obstacleGuardSummary()) {
+            toggleObstacleGuard()
+        }
         addCockpitRow(flightColumn, "RTH altitude", formatCockpitLimit(DroneController.getRTHAltitude())) {
             showBrandedRthAltitudePage()
         }
@@ -5021,7 +5076,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         
         // Start Discovery Server (UDP broadcast/multicast fallback)
         discoveryManager.startDiscoveryServer()
-        
+
+        // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
+        // same question asked between aircraft, which nothing on the device could answer before.
+        startFleetMesh()
+
+        // Obstacle guard. Opt-in, and silent unless it fires.
+        startObstacleGuard()
+
         // Start HTTP Command Server
         if (!NetworkUtils.isPortInUse(HTTP_PORT)) {
             runCatching {
@@ -5180,6 +5242,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             webRTCStreamer?.listener = null
             stopActiveStreaming()
             WebRTCPeerFactory.reset()
+            // Before the discovery server: both hold multicast sockets, and the fleet link also
+            // holds a repeating main-thread callback that must not outlive the activity.
+            stopObstacleGuard()
+            stopFleetMesh()
             discoveryManager.stopDiscoveryServer()
             // Must stop the HTTP server, not just drop the reference: its accept thread and
             // worker pool hold this activity via the command handler. Without stop() the
@@ -5771,6 +5837,190 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         (latitude != 0.0 || longitude != 0.0) &&
             latitude in -90.0..90.0 &&
             longitude in -180.0..180.0
+
+    /**
+     * Stable identity for this device on the fleet mesh.
+     *
+     * Prefers the aircraft serial, which is immutable, already the key for per-drone settings
+     * profiles, and the same thing the MAVLink system id is derived from — so a peer's roster
+     * entry and its MAVLink vehicle refer to provably the same airframe.
+     */
+    private fun fleetDeviceId(): String {
+        val serial = droneSerialNumber.trim()
+        if (DroneSettingsProfiles.isUsableSerial(serial)) return serial
+        return sharedPreferences.getString(PREF_FLEET_INSTALL_ID, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: generateFleetInstallId()
+    }
+
+    private fun generateFleetInstallId(): String {
+        val generated = "rc-" + java.util.UUID.randomUUID().toString().take(FLEET_INSTALL_ID_LENGTH)
+        sharedPreferences.edit().putString(PREF_FLEET_INSTALL_ID, generated).apply()
+        Log.i(TAG, "Generated a fleet install id for a device with no aircraft bound: $generated")
+        return generated
+    }
+
+    /**
+     * This aircraft's state, in the shape the fleet mesh publishes.
+     *
+     * Reads the same accessors as [buildMavlinkSnapshot] rather than reusing its result, for the
+     * same reason that one reads accessors rather than the cached telemetry JSON: two surfaces
+     * reporting different numbers for the same instant is the defect worth designing out, and the
+     * accessors are the single source both sides agree on.
+     *
+     * Called from the mesh's sender thread, as the MAVLink stream loop calls its own builder.
+     */
+    private fun buildFleetBeacon(): FleetBeacon? {
+        if (!::sharedPreferences.isInitialized) return null
+        val location = getLocation3D()
+        val home = getHomeLocation()
+        val speed = getSpeed()
+        return FleetBeacon(
+            deviceId = fleetDeviceId(),
+            droneName = droneName,
+            systemId = currentMavlinkSystemId(),
+            latitudeDeg = location.latitude,
+            longitudeDeg = location.longitude,
+            altitudeAslM = location.altitude,
+            altitudeAglM = getAltitude(),
+            velocityNorthMps = speed.x,
+            velocityEastMps = speed.y,
+            velocityDownMps = speed.z,
+            headingDeg = getHeading(),
+            batteryPercent = getBatteryLevel(),
+            satelliteCount = getSatelliteCount(),
+            // KeyIsFlying, not the flight mode: the mode reads as flight-capable on the ground,
+            // and a peer wrongly advertised as airborne is what turns a parked fleet into a
+            // screen full of traffic warnings.
+            flying = isFlyingKey.get(false),
+            flightMode = getFlightMode().name,
+            homeLatitudeDeg = home.latitude,
+            homeLongitudeDeg = home.longitude,
+            homeSet = isHomeSet(),
+            // The MediaMTX path this aircraft publishes to, resolved exactly as buildWhipUrl
+            // resolves it, so a clash the dashboard would suffer is a clash the mesh can see.
+            videoPath = droneName.trim().ifEmpty { DEFAULT_DRONE_NAME },
+            videoServer = getMediamtxServer(),
+            // Both are stamped by the link as it sends, which owns the counters.
+            appUptimeMs = 0L,
+            sequence = 0L
+        )
+    }
+
+    /**
+     * Build the fleet strip and hang it in the placeholder the layout reserves above the map.
+     *
+     * Created here rather than named in the XML because that layout lives in the `:uxsdk` module,
+     * which cannot see app classes at compile time; the container is the seam between the two.
+     */
+    private fun attachFleetStrip(): FleetStripView? {
+        val container = findViewById<android.widget.FrameLayout>(R.id.fleet_strip_container)
+            ?: return null
+        container.findViewById<FleetStripView>(R.id.fleet_strip)?.let { return it }
+        return FleetStripView(this).apply {
+            id = R.id.fleet_strip
+            container.addView(this)
+        }
+    }
+
+    private fun startFleetMesh() {
+        if (fleetController != null) return
+        val controller = FleetDeckController(
+            activity = this,
+            prefs = sharedPreferences,
+            stripView = attachFleetStrip(),
+            mapWidget = mapWidget,
+            deviceIdProvider = ::fleetDeviceId,
+            beaconProvider = ::buildFleetBeacon
+        )
+        controller.start()
+        controller.setMapExpanded(sharedPreferences.getBoolean(PREF_MAP_EXPANDED, false))
+        fleetController = controller
+    }
+
+    private fun stopFleetMesh() {
+        fleetController?.stop()
+        fleetController = null
+    }
+
+    /**
+     * Arm the obstacle guard, if the operator has opted in.
+     *
+     * Off by default: it changes what the aircraft does in flight, and a feature that does that
+     * should be switched on deliberately rather than inherited from an app update.
+     */
+    private fun startObstacleGuard() {
+        ObstacleGuard.motionProvider = {
+            val speed = getSpeed()
+            ObstacleGuard.Motion(
+                velocityNorthMps = speed.x,
+                velocityEastMps = speed.y,
+                velocityDownMps = speed.z,
+                headingDeg = getHeading()
+            )
+        }
+        ObstacleGuard.onBrake = { event ->
+            LyrebirdFlightLogger.logStatus(
+                "OBSTACLE_STOP ${event.reason.name} " +
+                    "clearance=${"%.1f".format(event.clearanceM)}m " +
+                    "required=${"%.1f".format(event.requiredM)}m"
+            )
+            // Status only, on the readout the pilot already watches. Nothing pops up over the
+            // video: an aircraft that has just stopped itself needs the pilot looking outside,
+            // not reading a notification.
+            mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
+        }
+        ObstacleGuard.start(sharedPreferences)
+    }
+
+    private fun stopObstacleGuard() {
+        ObstacleGuard.stop()
+        ObstacleGuard.motionProvider = null
+        ObstacleGuard.onBrake = null
+    }
+
+    private fun obstacleGuardSummary(): String = when {
+        !ObstacleGuard.isEnabled(sharedPreferences) -> "Off"
+        ObstacleGuard.isRunning -> "On, ${ObstacleBrake.DEFAULT_MARGIN_M.toInt()}m standoff"
+        else -> "On, sensors unavailable"
+    }
+
+    /**
+     * Turn the obstacle guard on or off.
+     *
+     * The confirmation exists because this is the one Lyrebird setting that changes what the
+     * aircraft does without anyone commanding it, and because what it does not do matters as much
+     * as what it does. An operator who believes they have collision avoidance will fly differently
+     * from one who knows they have a backstop that cannot see wires.
+     */
+    private fun toggleObstacleGuard() {
+        val enabling = !ObstacleGuard.isEnabled(sharedPreferences)
+        if (!enabling) {
+            sharedPreferences.edit().putBoolean(ObstacleGuard.PREF_ENABLED, false).apply()
+            stopObstacleGuard()
+            showLyrebirdSettingsMenu()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Enable obstacle guard?")
+            .setMessage(
+                "While Lyrebird is flying a waypoint or trajectory itself, the aircraft's " +
+                    "obstacle sensors are watched along its direction of travel. If the stopping " +
+                    "distance is gone, Lyrebird cancels its own control loop and the aircraft " +
+                    "holds position.\n\n" +
+                    "It never steers around anything, and it never overrides you on the sticks.\n\n" +
+                    "It cannot see into the airframe's blind arcs, and these sensors do not " +
+                    "reliably detect wires, thin branches or netting. Treat it as a backstop, " +
+                    "not as a reason to fly closer to anything."
+            )
+            .setPositiveButton("Enable") { _, _ ->
+                sharedPreferences.edit().putBoolean(ObstacleGuard.PREF_ENABLED, true).apply()
+                startObstacleGuard()
+                showLyrebirdSettingsMenu()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
     private fun buildMavlinkSnapshot(): MavlinkSnapshot {
         val location = getLocation3D()
