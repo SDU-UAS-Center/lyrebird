@@ -2,10 +2,12 @@ package com.lyrebird.rc.controller
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.lyrebird.rc.DroneControlProfiles
 import com.lyrebird.rc.models.BasicAircraftControlVM
 import com.lyrebird.rc.models.VirtualStickVM
+import com.lyrebird.rc.perception.ObstacleGuard
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.manager.aircraft.virtualstick.Stick
@@ -210,6 +212,53 @@ object DroneController {
             return true
         }
         return false
+    }
+
+    /**
+     * Why a waypoint command was refused before it ever reached the control loop.
+     *
+     * The seq of a refused command is still published — the ground station's polling and the
+     * mission sequencer both key on seq — but no leg is flown and no reach latch arms for it.
+     */
+    enum class WaypointRejection {
+        /** Nothing refused it; the command may fly. */
+        NONE,
+
+        /**
+         * The leg starts inside the bearing arc the obstacle guard blocked after its most recent
+         * brake. A safe bearing is not rejected: the aircraft can be moved away without any
+         * operator intervention. Only the direction known to hold the obstacle is closed, and
+         * only while the lockout lasts.
+         */
+        OBSTACLE_BLOCKED
+    }
+
+    /**
+     * Pre-flight gate shared by the waypoint controllers.
+     *
+     * Asked before any leg is issued, including hot-swaps: a hot-swapped target flies as surely
+     * as a cold-started one, and the whole point of the blocked arc is that the retry that arrives
+     * twenty seconds after a brake is refused before it commands motion, not after.
+     *
+     * Returns [WaypointRejection.OBSTACLE_BLOCKED] when the bearing from the aircraft's current
+     * position to the requested waypoint falls inside the guard's blocked arc. Compass bearing to
+     * body frame uses the heading at the moment of the ask — the same instant the leg itself would
+     * be baselined from — so a yaw change between the brake and the retry is accounted for by
+     * construction.
+     */
+    private fun waypointRejection(targetLatitude: Double, targetLongitude: Double): WaypointRejection {
+        val arc = ObstacleGuard.blockedArc ?: return WaypointRejection.NONE
+        val position = getLocation3D()
+        val legBearing = calculateBearing(
+            position.latitude, position.longitude, targetLatitude, targetLongitude
+        ).toDouble()
+        val heading = getHeading()
+        val legBearingFromNose = legBearing - heading
+        return if (arc.contains(legBearingFromNose, SystemClock.elapsedRealtime())) {
+            WaypointRejection.OBSTACLE_BLOCKED
+        } else {
+            WaypointRejection.NONE
+        }
     }
     // ==================== End Manual Override ====================
 
@@ -905,6 +954,20 @@ object DroneController {
         val seq = _waypointSeq.incrementAndGet()
         _isWaypointReached = false
 
+        // Refuse legs that start into a bearing the obstacle guard just braked on. Checked before
+        // the hot-swap branch: a swapped target flies as surely as a restarted loop. The seq is
+        // published, so a caller correlating on it sees the rejection; no reach latch arms.
+        val rejection = waypointRejection(targetLatitude, targetLongitude)
+        if (rejection != WaypointRejection.NONE) {
+            lastWaypointRefusal = WaypointRefusal(seq, rejection)
+            Log.w(
+                "DroneWaypoint",
+                "Waypoint seq=$seq refused ($rejection): bearing into blocked arc"
+            )
+            return seq
+        }
+        lastWaypointRefusal = null
+
         // If a *waypoint* PID loop is already running, just hot-swap the target.
         // The running loop reads activeWaypointTarget each tick and will smoothly steer to the new
         // waypoint without a cold restart. We must check activeLoopIsWaypoint, not just
@@ -1072,7 +1135,7 @@ object DroneController {
                 controlLoop.postDelayed(this, updateInterval.toLong())
             }
         }
-        
+
         // Store references to allow cancellation
         activeControlLoopHandler = controlLoop
         activeControlLoopRunnable = runnable
@@ -1124,6 +1187,20 @@ object DroneController {
         // New target → new id, and the reached latch drops to false until this target is reached.
         val seq = _waypointSeq.incrementAndGet()
         _isWaypointReached = false
+
+        // Refuse legs that start into a bearing the obstacle guard just braked on. Checked before
+        // the hot-swap branch: a swapped target flies as surely as a restarted loop. The seq is
+        // published, so a caller correlating on it sees the rejection; no reach latch arms.
+        val rejection = waypointRejection(targetLatitude, targetLongitude)
+        if (rejection != WaypointRejection.NONE) {
+            lastWaypointRefusal = WaypointRefusal(seq, rejection)
+            Log.w(
+                "DroneWaypoint",
+                "Waypoint seq=$seq refused ($rejection): bearing into blocked arc"
+            )
+            return seq
+        }
+        lastWaypointRefusal = null
 
         // If a *waypoint* PID loop is already running, just hot-swap the target.
         // The running loop reads activeWaypointTarget each tick and will smoothly steer to the new
@@ -1409,9 +1486,9 @@ object DroneController {
                 // Arrival (position + final-yaw) is handled by the Phase 3 block above, which
                 // early-returns. Reaching here means we are still translating (Phase 2).
 
-                // DJI SDK V5 quirk: in BODY frame, the SDK's "pitch" field actually controls
-                // lateral (left/right) movement and "roll" controls forward/backward. This is
-                // the inverse of what the field names suggest. Confirmed empirically.
+                // DJI SDK V5 quirk: in BODY frame the SDK's "pitch" field controls lateral
+                // movement and "roll" controls forward/backward, the inverse of what the names
+                // suggest. Confirmed empirically, and shared with both waypoint controllers.
                 lastParam = VirtualStickFlightControlParam().apply {
                     this.pitch = lateralSpeed
                     this.roll = forwardSpeed
@@ -1712,6 +1789,22 @@ object DroneController {
     fun getWaypointSeq(): Long {
         return _waypointSeq.get()
     }
+
+    /**
+     * Why the most recent waypoint request was refused before flying, as its seq key.
+     *
+     * Null when the last request was accepted. The seq travels with the reason so a ground
+     * station can correlate the refusal to the command it just got a seq for: HTTP callers read
+     * this right after their flyTo call, and the MAVLink mission sequencer reads it after
+     * [flyLeg] to fail the leg rather than waiting on a reach latch that will never arm.
+     */
+    data class WaypointRefusal(val seq: Long, val reason: WaypointRejection)
+
+    @Volatile
+    private var lastWaypointRefusal: WaypointRefusal? = null
+
+    /** The most recent pre-flight waypoint refusal, or null when the last command flew. */
+    fun lastWaypointRefusal(): WaypointRefusal? = lastWaypointRefusal
 
     // Id of the most recently accepted gotoYaw request — pair with isYawReached().
     fun getYawSeq(): Long {

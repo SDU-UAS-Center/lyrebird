@@ -168,9 +168,17 @@ internal class LyrebirdHttpCommandHandler(
                             val seq = DroneController.flyToWaypointHoldHeading(
                                 wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed
                             )
-                            "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
-                                "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
-                                "Yaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            // A refusal is still a seq: report it as refused so a retry loop
+                            // stops iffing on "accepted, just flying" and waiting forever.
+                            val refusal = DroneController.lastWaypointRefusal()
+                            if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                                "WAYPOINT_REFUSED seq=$seq reason=${refusal.reason} " +
+                                    "Latitude=${wp.latitude}, Longitude=${wp.longitude}"
+                            } else {
+                                "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
+                                    "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
+                                    "Yaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            }
                         }
                     }
                 }
@@ -189,9 +197,15 @@ internal class LyrebirdHttpCommandHandler(
                             val seq = DroneController.flyToWaypointNoseForward(
                                 wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed
                             )
-                            "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
-                                "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
-                                "FinalYaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            val refusal = DroneController.lastWaypointRefusal()
+                            if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                                "WAYPOINT_REFUSED seq=$seq reason=${refusal.reason} " +
+                                    "Latitude=${wp.latitude}, Longitude=${wp.longitude}"
+                            } else {
+                                "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
+                                    "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
+                                    "FinalYaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            }
                         }
                     }
                 }
