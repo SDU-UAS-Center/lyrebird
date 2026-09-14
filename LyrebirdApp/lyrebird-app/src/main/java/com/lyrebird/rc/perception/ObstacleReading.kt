@@ -61,6 +61,30 @@ internal data class ObstacleReading(
     fun minimumHorizontal(): Double =
         horizontalM.filter { it.isFinite() }.minOrNull() ?: Double.NaN
 
+    /**
+     * The bearing from the nose of the closest known range inside [halfAngleDeg] either side of
+     * [bearingDeg], or NaN when every sector in the arc is unknown.
+     *
+     * One layer above [minimumInArc]: a brake event needs not only the measured clearance but
+     * where along the arc it was measured, so a locked-out bearing can be derived from the same
+     * sweep the brake came from rather than from the coarse arc centre.
+     */
+    fun closestKnownBearingInArc(bearingDeg: Double, halfAngleDeg: Double): Double {
+        if (horizontalM.isEmpty() || angleIntervalDeg <= 0.0) return Double.NaN
+        var closest = Double.NaN
+        var closestBearing = Double.NaN
+        horizontalM.forEachIndexed { index, rangeM ->
+            if (!rangeM.isFinite()) return@forEachIndexed
+            val sectorBearing = index * angleIntervalDeg
+            if (angularSeparationDeg(sectorBearing, bearingDeg) > halfAngleDeg) return@forEachIndexed
+            if (closest.isNaN() || rangeM < closest) {
+                closest = rangeM
+                closestBearing = sectorBearing
+            }
+        }
+        return closestBearing
+    }
+
     companion object {
 
         /** Below this a reading is a sensor dropout rather than a measurement. */

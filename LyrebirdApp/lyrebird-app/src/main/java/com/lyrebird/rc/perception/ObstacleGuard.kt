@@ -75,6 +75,13 @@ internal object ObstacleGuard {
     /** Supplies the aircraft's current velocity and heading. Set by the host before [start]. */
     var motionProvider: (() -> Motion)? = null
 
+    /**
+     * Half-angle searched around the direction of travel, mirroring [ObstacleBrake]'s
+     * [ObstacleBrake.TRAVEL_ARC_HALF_ANGLE_DEG] so the blocked arc is derived from the same arc
+     * the brake decision used rather than from a second constant that can drift.
+     */
+    private val TRAVEL_ARC_FOR_BLOCKED_DEG = ObstacleBrake.TRAVEL_ARC_HALF_ANGLE_DEG
+
     /** Velocity in the NED frame and heading in degrees, as the rest of the app reports them. */
     data class Motion(
         val velocityNorthMps: Double,
@@ -96,6 +103,21 @@ internal object ObstacleGuard {
     @Volatile
     var lastBrake: BrakeEvent? = null
         private set
+
+    /**
+     * The blocked bearing arc from the most recent horizontal brake, or null when none is active.
+     *
+     * Recorded when the guard brakes so consumers can ask whether a later leg points into the
+     * direction that was just measured as a hazard. Discriminated from [isLatched] deliberately:
+     * the latch answers "is the aircraft stopped by us right now" and lasts [BRAKE_LATCH_MS]; the
+     * arc answers "which direction is known bad" and lasts [BlockedArc.LOCKOUT_MS], which is
+     * longer because its purpose is to outrun a ground station's retry cadence.
+     */
+    val blockedArc: BlockedArc?
+        get() = _blockedArc?.takeIf { it.isActive(SystemClock.elapsedRealtime()) }
+
+    @Volatile
+    private var _blockedArc: BlockedArc? = null
 
     @Volatile
     private var latchedUntilElapsedMs: Long = 0L
@@ -191,10 +213,10 @@ internal object ObstacleGuard {
         )
         if (!decision.shouldBrake) return
 
-        applyBrake(decision)
+        applyBrake(decision, reading)
     }
 
-    private fun applyBrake(decision: BrakeDecision) {
+    private fun applyBrake(decision: BrakeDecision, reading: ObstacleReading) {
         latchedUntilElapsedMs = SystemClock.elapsedRealtime() + BRAKE_LATCH_MS
         val event = BrakeEvent(
             reason = decision.reason,
@@ -209,6 +231,19 @@ internal object ObstacleGuard {
             "Stopping: ${decision.reason} clearance=${"%.1f".format(decision.clearanceM)}m " +
                 "required=${"%.1f".format(decision.requiredM)}m"
         )
+        // Record which direction was measured as the hazard, centred on the closest sector in the
+        // arc that produced the brake rather than on the requested travel bearing: the ring is
+        // sector-quantised, and the sector bearing is what a later leg is actually compared
+        // against. Vertical brakes record nothing — a blocked climb says nothing about a leg.
+        _blockedArc = reading
+            .closestKnownBearingInArc(decision.bearingFromNoseDeg, TRAVEL_ARC_FOR_BLOCKED_DEG)
+            .takeIf { it.isFinite() }
+            ?.let { closest ->
+                BlockedArc.fromBrake(
+                    decision.copy(bearingFromNoseDeg = closest),
+                    SystemClock.elapsedRealtime()
+                )
+            } ?: BlockedArc.fromBrake(decision, SystemClock.elapsedRealtime())
         // Cancels the PID loop and zeroes the sticks, so the aircraft holds position. Virtual
         // stick is deliberately left enabled: dropping it would hand control back mid-air, and the
         // next command should be able to fly without re-arming anything.
