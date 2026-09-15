@@ -42,6 +42,7 @@ MAVLink concept for picking one — there is nothing to negotiate over the wire.
 | Per-item heading (`param4`) | Honoured, as a fixed wayline yaw | Honoured |
 | Per-leg speed (`DO_CHANGE_SPEED`) | Honoured, as a per-waypoint speed | Honoured |
 | Camera / gimbal actions | Translated to wayline actions, triggered on reaching the waypoint they sit after | Executed directly, in plan order |
+| Distance-triggered capture (`DO_SET_CAM_TRIGG_DIST`) | A `MULTIPLE_DISTANCE` trigger on a take-photo action group covering the span it applies to | Ground covered is accumulated while flying, and the shutter trips each time the distance is crossed |
 | Region of interest (`DO_SET_ROI*`) | Static target only — see below | Full continuous tracking |
 | Progress reporting | `MISSION_CURRENT` per waypoint reached; no per-item `MISSION_ITEM_REACHED` | Exact `MISSION_ITEM_REACHED` per item |
 | `MAV_CMD_SET_CAMERA_MODE` | No wayline equivalent — skipped | Honoured |
@@ -75,10 +76,27 @@ WPML construct has the matching meaning:
 | `DO_GIMBAL_MANAGER_PITCHYAW` | A `gimbalRotate` wayline action, absolute pitch/yaw |
 | `DO_SET_ROI_LOCATION` / `DO_SET_ROI` (location mode) | Waypoint yaw mode `towardPOI` + gimbal heading mode `towardPOI`, both pointed at the ROI coordinate — see below |
 | `DO_SET_ROI_NONE` / `DO_SET_ROI` (non-location mode) | Clears the active ROI for waypoints that follow |
+| `DO_SET_CAM_TRIGG_DIST` | A `MULTIPLE_DISTANCE` trigger whose `distanceInterval` is the item's distance, carrying one `takePhoto` action, attached to the waypoints it covers — see below |
 | `SET_CAMERA_MODE` | No wayline equivalent — skipped |
 
 An action item with no later waypoint to attach to (one that sits after the last leg, before a
 trailing land) rides along with the last waypoint instead of being lost.
+
+### Distance-triggered capture
+
+`DO_SET_CAM_TRIGG_DIST` says "photograph every N metres". MAVLink expresses that as a plan item and
+WPML as a trigger, so the two executors implement it differently and both, in each case, in the form
+their engine actually has:
+
+- **`onboard`** accumulates the ground covered between position fixes while a leg is being flown and
+  trips one shutter each time the triggered distance is completed, so a survey photographs a grid
+  without the plan carrying a photo item per frame.
+- **`dji_native`** compiles it into a WPML `MULTIPLE_DISTANCE` trigger on a `takePhoto` action group
+  covering the waypoints the item applies to, and DJI's own engine fires it along the span.
+
+Either way the item is modal, exactly like the ROI above: the distance stays in force for everything
+after it until another `DO_SET_CAM_TRIGG_DIST` changes it. A distance of zero or less is MAVLink's
+way of turning the trigger off again, and is treated as such rather than ignored.
 
 ### Region of interest, compiled rather than dropped
 

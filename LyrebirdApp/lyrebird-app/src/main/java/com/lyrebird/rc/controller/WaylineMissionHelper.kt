@@ -8,6 +8,7 @@ import com.lyrebird.rc.utils.wpml.WaypointInfoModel
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.sdk.wpmz.value.mission.ActionGimbalRotateParam
+import dji.sdk.wpmz.value.mission.ActionTakePhotoParam
 import dji.sdk.wpmz.value.mission.WaylineActionGroup
 import dji.sdk.wpmz.value.mission.WaylineActionInfo
 import dji.sdk.wpmz.value.mission.WaylineActionNodeList
@@ -222,7 +223,15 @@ object WaylineMissionHelper {
         val waypoints = waypointInfoModels.map { it.waylineWaypoint }
         val info = WaylineTemplateWaypointInfo()
         info.waypoints = waypoints
-        info.actionGroups = transformActionsToGroups(waypointInfoModels)  // Build proper action groups
+        // Reach-point groups for explicit per-waypoint actions, plus MULTIPLE_DISTANCE groups
+        // for distance-triggered photography; both sets get fresh contiguous group ids.
+        val reachPointGroups = transformActionsToGroups(waypointInfoModels)
+        val distanceGroups = distanceTriggerGroups(waypointInfoModels)
+        val allGroups = ArrayList<WaylineActionGroup>()
+        allGroups.addAll(reachPointGroups)
+        allGroups.addAll(distanceGroups)
+        allGroups.forEachIndexed { groupIndex, group -> group.groupId = groupIndex }
+        info.actionGroups = allGroups
         info.globalFlightHeight = 100.0
         info.isGlobalFlightHeightSet = true
         info.globalTurnMode = WaylineWaypointTurnMode.TO_POINT_AND_STOP_WITH_DISCONTINUITY_CURVATURE
@@ -302,6 +311,79 @@ object WaylineMissionHelper {
             }
         }
         
+        return actionGroups
+    }
+
+    /**
+     * Action groups for distance-triggered photography, WPML's own form of the same plan item.
+     *
+     * MAVLink expresses it as one DO_SET_CAM_TRIGG_DIST item; WPML as a trigger on an action
+     * group. A contiguous run of waypoints sharing the same interval becomes one group whose
+     * MULTIPLE_DISTANCE trigger fires a single TAKE_PHOTO action every `distanceInterval`
+     * metres along the span, so a survey photographed every N metres needs no photo item per
+     * frame. Waypoints with no interval (an unset or zero/negative value) get no group at all,
+     * which is how the trigger also turns off — the same reading the MAVLink command gives a
+     * zero interval.
+     */
+    private fun distanceTriggerGroups(waypointInfoModels: List<WaypointInfoModel>): ArrayList<WaylineActionGroup> {
+        val actionGroups = ArrayList<WaylineActionGroup>()
+        var index = 0
+        while (index < waypointInfoModels.size) {
+            val interval = waypointInfoModels[index].distanceIntervalMeters
+            if (interval == null || interval <= 0.0) {
+                index++
+                continue
+            }
+            // Extend the run while consecutive waypoints carry the same interval, using the
+            // first differing one as the exclusive end.
+            var endIndex = index
+            while (endIndex + 1 < waypointInfoModels.size &&
+                waypointInfoModels[endIndex + 1].distanceIntervalMeters == interval
+            ) {
+                endIndex++
+            }
+
+            val photoAction = WaylineActionInfo().apply {
+                actionType = WaylineActionType.TAKE_PHOTO
+                takePhotoParam = ActionTakePhotoParam().apply { payloadPositionIndex = 0 }
+            }
+            val trigger = WaylineActionTrigger().apply {
+                triggerType = WaylineActionTriggerType.MULTIPLE_DISTANCE
+                distanceInterval = interval
+            }
+            val actionGroup = WaylineActionGroup().apply {
+                groupId = -1 // assigned by the caller, once all groups are known
+                startIndex = index
+                endIndex = endIndex
+                setActions(listOf(photoAction))
+                setTrigger(trigger)
+            }
+
+            // Same tree shape the reach-point groups use: a SEQUENCE root over one LEAF.
+            val root = WaylineActionNodeList().apply {
+                setNodes(
+                    arrayListOf(
+                        WaylineActionTreeNode().apply {
+                            nodeType = WaylineActionsRelationType.SEQUENCE
+                            childrenNum = 1
+                        }
+                    )
+                )
+            }
+            val children = WaylineActionNodeList().apply {
+                setNodes(
+                    arrayListOf(
+                        WaylineActionTreeNode().apply {
+                            nodeType = WaylineActionsRelationType.LEAF
+                            actionIndex = 0
+                        }
+                    )
+                )
+            }
+            actionGroup.setNodeLists(arrayListOf(root, children))
+            actionGroups.add(actionGroup)
+            index = endIndex + 1
+        }
         return actionGroups
     }
 

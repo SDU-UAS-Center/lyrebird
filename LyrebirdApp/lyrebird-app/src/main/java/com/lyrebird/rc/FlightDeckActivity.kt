@@ -111,6 +111,7 @@ import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.mavlink.CommandProgress
 import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
+import com.lyrebird.rc.mavlink.DistanceTrigger
 import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MavlinkTelemetryEndpoint
 import com.lyrebird.rc.mavlink.MavlinkFtpServer
@@ -6508,15 +6509,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
          *
          * Uses the generic photo path, not the thermal one: a Mini 3 has a single lens and no
          * thermal file to find, so labelling the result thermal/wide/zoom would be meaningless.
+         *
+         * The endpoint is optional rather than required: the distance-triggered capture loop
+         * inside a flying mission trips this same shutter, and a mission must not stop
+         * photographing because the MAVLink endpoint happens to be mid-restart. Without an
+         * endpoint there is simply no CAMERA_IMAGE_CAPTURED to send, so the outcome is logged
+         * instead of reported — the shutter still fires.
          */
         override fun captureImage(): CommandResult {
-            val endpoint = mavlinkEndpoint ?: return CommandResult(MavlinkCommandOutcome.FAILED)
-            endpoint.reportCaptureStarted()
+            val endpoint = mavlinkEndpoint
+            endpoint?.reportCaptureStarted()
             captureExecutor.execute {
                 val file = runCatching { Payload.capturePhoto(mediaVM) }
                     .onFailure { Log.e(TAG, "Capture failed: ${it.message}", it) }
                     .getOrNull()
-                endpoint.reportImageCaptured(file != null, file?.fileName.orEmpty())
+                if (file == null) {
+                    Log.w(TAG, "Capture produced no file")
+                }
+                endpoint?.reportImageCaptured(file != null, file?.fileName.orEmpty())
             }
             return CommandResult(MavlinkCommandOutcome.ACCEPTED)
         }
@@ -7019,6 +7029,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         @Volatile
         private var running = false
 
+        /**
+         * Distance-triggered capture state for the plan being flown, or null when the plan set
+         * no trigger distance. [CMD_DO_SET_CAM_TRIGG_DIST] arms it; the accumulate-and-compare
+         * arithmetic lives in [DistanceTrigger], and the fix it last advanced from is the anchor
+         * below.
+         */
+        private var distanceTrigger: DistanceTrigger? = null
+
+        /** The fix [distanceTrigger] last measured from, so consecutive fixes make a path. */
+        private var triggerAnchorLat: Double? = null
+        private var triggerAnchorLon: Double? = null
+
         override val isRunning: Boolean get() = running
 
         override fun setProgressListener(listener: MissionProgressListener?) {
@@ -7070,6 +7092,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             var speed = items.firstNotNullOfOrNull { it.speedMps }
                 ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
             var currentRoi: WaylineLocationCoordinate3D? = null
+            // Modal, exactly like the ROI above: a trigger distance set by one item stays in
+            // force for every waypoint built after it, until another item changes or clears it.
+            var currentDistanceTriggerM: Double? = null
             val pendingActions = mutableListOf<WaylineActionInfo>()
             val waypointModels = mutableListOf<WaypointInfoModel>()
             for (item in items) {
@@ -7083,7 +7108,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                             speedMps = speed,
                             roiTarget = currentRoi,
                             extraActions = pendingActions.toList()
-                        )
+                        ).apply {
+                            distanceIntervalMeters = currentDistanceTriggerM
+                        }
                     )
                     pendingActions.clear()
                     continue
@@ -7098,6 +7125,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     } else {
                         null
                     }
+                    // A zero or negative distance is MAVLink's way of turning the trigger off;
+                    // WPML expresses the same thing by the waypoint carrying no interval.
+                    Mav.CMD_DO_SET_CAM_TRIGG_DIST ->
+                        currentDistanceTriggerM = item.param1.toDouble().takeIf { it > 0.0 }
                     else -> translatePlanActionToWaylineAction(item)?.let { pendingActions.add(it) }
                 }
             }
@@ -7201,6 +7232,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             var speed = items.firstNotNullOfOrNull { it.speedMps }
                 ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
 
+            // A fresh plan means a fresh trigger state: the armed distance and the accumulated
+            // ground both belong to whichever plan set them, not to a previously flown one.
+            distanceTrigger = null
+            triggerAnchorLat = null
+            triggerAnchorLon = null
             running = true
             missionThread = thread(name = "MavlinkMission", start = true) {
                 // Every item in order, not only the waypoints. Walking the waypoints alone meant
@@ -7278,10 +7314,19 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                         yawIgnored = !item.param3.isFinite()
                     )
                 )
-                // Distance-triggered capture has no executor yet — accepted at upload so the
-                // transfer does not fail (see Mav.CMD_DO_SET_CAM_TRIGG_DIST), not actioned here.
-                Mav.CMD_DO_SET_CAM_TRIGG_DIST -> Log.d(TAG, "Camera trigger distance not yet implemented, ignoring")
-                Mav.CMD_DO_SET_ROI_LOCATION -> mavlinkCommandSink.setRegionOfInterest(
+                // Arm the distance-triggered capture loop. A zero or negative distance is the
+                // MAVLink way of turning it off again, so it disarms rather than being ignored.
+                Mav.CMD_DO_SET_CAM_TRIGG_DIST -> {
+                    val intervalM = item.param1.toDouble()
+                    if (intervalM > 0.0) {
+                        distanceTrigger = DistanceTrigger(intervalM)
+                        Log.i(TAG, "Distance-triggered capture armed: one photo every ${intervalM}m")
+                    } else {
+                        distanceTrigger = null
+                        Log.i(TAG, "Distance-triggered capture disarmed")
+                    }
+                    Unit
+                }                Mav.CMD_DO_SET_ROI_LOCATION -> mavlinkCommandSink.setRegionOfInterest(
                     item.latitudeDeg, item.longitudeDeg, item.altitudeM
                 )
                 Mav.CMD_DO_SET_ROI_NONE -> mavlinkCommandSink.clearRegionOfInterest()
@@ -7382,12 +7427,49 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 if (DroneController.getWaypointSeq() == seq && DroneController.isWaypointReached()) {
                     return true
                 }
+                maybeCaptureByDistance()
                 runCatching { Thread.sleep(MISSION_POLL_MS) }.onFailure {
                     Thread.currentThread().interrupt()
                     return false
                 }
             }
             return false
+        }
+
+        /**
+         * Trip the shutter when the distance trigger's accumulated ground has crossed another
+         * interval.
+         *
+         * Called from the leg-wait poll, so it advances at that cadence (5 Hz) rather than
+         * exactly on the crossing; a survey's intervals are metres apart, so the error is well
+         * under a metre at the speeds a mapping flight flies. Ground truth is the aircraft's
+         * own reported position — the same source navigation uses, so a photo and a leg's
+         * arrival can never disagree about where the aircraft was.
+         *
+         * The first fix only anchors: there is nothing yet to have travelled from, and the
+         * SDK's unset (0, 0) is a real place in the Atlantic rather than a distance of zero.
+         */
+        private fun maybeCaptureByDistance() {
+            val trigger = distanceTrigger ?: return
+            val location = getLocation3D()
+            val lastLat = triggerAnchorLat
+            val lastLon = triggerAnchorLon
+            if (lastLat == null || lastLon == null ||
+                (location.latitude == 0.0 && location.longitude == 0.0)
+            ) {
+                triggerAnchorLat = location.latitude
+                triggerAnchorLon = location.longitude
+                return
+            }
+            val travelled = DroneController.calculateDistance(
+                lastLat, lastLon, location.latitude, location.longitude
+            )
+            triggerAnchorLat = location.latitude
+            triggerAnchorLon = location.longitude
+            if (trigger.addTravelled(travelled)) {
+                Log.i(TAG, "Distance trigger: capturing (${"%.1f".format(travelled)}m since last fix)")
+                mavlinkCommandSink.captureImage()
+            }
         }
 
         override fun stopMission(): CommandResult {

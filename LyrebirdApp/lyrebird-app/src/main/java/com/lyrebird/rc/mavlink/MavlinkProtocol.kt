@@ -213,10 +213,11 @@ internal object Mav {
      * Survey planner writes one of these as the plan's "Initial Camera Settings" item whenever
      * Survey mode is ticked.
      *
-     * Accepted so the upload does not fail, but not yet executed — Lyrebird has no
-     * distance-triggered capture loop, only [CMD_IMAGE_START_CAPTURE]'s one-shot trigger. See
-     * [CMD_SET_CAMERA_MODE] for why refusing an item QGC always writes fails the whole plan
-     * rather than just losing that one setting.
+     * Executed by both of Lyrebird's executors, each in the form its own engine has for it. The
+     * app-executed sequencer accumulates ground covered while it flies a leg and trips the
+     * shutter each time the distance is crossed; the DJI-native path compiles the same distance
+     * into a WPML `MULTIPLE_DISTANCE` trigger on a take-photo action group covering the span.
+     * A zero or negative distance turns the trigger off again, as MAVLink defines it.
      */
     const val CMD_DO_SET_CAM_TRIGG_DIST = 206
 
