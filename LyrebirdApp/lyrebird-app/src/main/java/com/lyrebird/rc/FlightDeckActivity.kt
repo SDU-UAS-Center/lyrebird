@@ -105,6 +105,7 @@ import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
 import com.lyrebird.rc.webrtc.StreamingTargetPolicy
 import com.lyrebird.rc.webrtc.TelemetryProvider
+import com.lyrebird.rc.webrtc.V5WebRtcStreamerFactory
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
 import com.lyrebird.rc.webrtc.WebRTCStreamer
@@ -281,11 +282,6 @@ class FlightDeckActivity :
         private const val SETTINGS_BACKUP_DEBOUNCE_MS = 1500L
         private const val FLIGHT_DECK_RESTART_DELAY_MS = 750L
 
-        // A manually configured mediamtxServer override that stops resolving (wrong network,
-        // stale address left over from a different deployment) fails silently -- every retry
-        // just repeats in Logcat. After this many consecutive WHIP failures with an override
-        // active, clear it so the next reconnect falls back to the auto-detected client IP.
-        private const val WHIP_OVERRIDE_FAILURE_THRESHOLD = 3
         private const val SAFETY_TOKEN = "98"
 
         private const val DJI_RTSP_STREAM_PATH = "/streaming/live/1"
@@ -537,9 +533,6 @@ class FlightDeckActivity :
     private var videoSettingRestartScheduled = false
 
     @Volatile private var lastWhipUrl: String? = null
-
-    // Remembered for FPS/Quality mode restarts
-    @Volatile private var whipConsecutiveFailures = 0
 
     // Reset on success; drives the override fallback below
     @Volatile private var lastClientIp: String? = null
@@ -3087,54 +3080,22 @@ class FlightDeckActivity :
         // WHIP publishing starts automatically when bridge connects to telemetry.
         runCatching {
             webRTCStreamer =
-                WebRTCStreamer(
+                V5WebRtcStreamerFactory(
                     context = applicationContext,
                     cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
                     droneName = droneName,
                     options = settings.buildWebRTCOptions(),
-                )
-            webRTCStreamer?.listener =
-                object : WebRTCStreamer.WebRTCStreamerListener {
-                    override fun onServerStarted(
-                        ip: String,
-                        port: Int,
-                    ) {
-                        Log.i(TAG, "WHIP publishing from $ip")
-                        whipConsecutiveFailures = 0
-                    }
-
-                    override fun onServerStopped() {
-                        Log.i(TAG, "WebRTC streamer stopped")
-                    }
-
-                    override fun onServerError(error: String) {
-                        Log.e(TAG, "WebRTC error: $error")
-                        whipConsecutiveFailures++
-                        if (whipConsecutiveFailures >= WHIP_OVERRIDE_FAILURE_THRESHOLD) {
-                            whipConsecutiveFailures = 0
-                            val configuredServer =
-                                sharedPreferences
-                                    .getString(LyrebirdSettings.PREF_MEDIAMTX_SERVER, "")
-                                    ?.trim()
-                                    .orEmpty()
-                            if (configuredServer.isNotEmpty()) {
-                                Log.w(
-                                    TAG,
-                                    "WHIP failed $WHIP_OVERRIDE_FAILURE_THRESHOLD times in a row against " +
-                                        "configured mediamtxServer '$configuredServer' -- clearing it so the " +
-                                        "next reconnect falls back to the auto-detected client IP",
-                                )
-                                sharedPreferences.edit().remove(LyrebirdSettings.PREF_MEDIAMTX_SERVER).apply()
-                            }
-                        }
-                    }
-
-                    override fun onMetrics(metrics: WebRTCStreamMetrics) {
+                    configuredServer = { settings.getMediamtxServer() },
+                    clearConfiguredServer = {
+                        sharedPreferences.edit().remove(LyrebirdSettings.PREF_MEDIAMTX_SERVER).apply()
+                    },
+                    onMetrics = { metrics ->
                         lastWebRTCMetrics = metrics
                         rebuildTelemetryCache()
                         mainHandler.post { updateWebRTCMetricsView(metrics) }
-                    }
-                }
+                    },
+                    onState = { state -> lastNativeStreamStatus = state },
+                ).create()
             Log.i(TAG, "WebRTC streamer ready (starts on first telemetry client)")
 
             // If the telemetry callback already fired before streamer was ready, start now
