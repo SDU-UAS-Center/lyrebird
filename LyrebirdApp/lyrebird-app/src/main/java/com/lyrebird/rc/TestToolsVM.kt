@@ -14,5 +14,4 @@ import com.lyrebird.rc.data.DJIToastResult
  */
 class TestToolsVM : ViewModel() {
     val djiToastResult = MutableLiveData<DJIToastResult>()
-
 }

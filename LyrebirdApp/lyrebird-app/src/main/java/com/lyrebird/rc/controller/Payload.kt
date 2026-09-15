@@ -308,10 +308,6 @@ object Payload {
             "\"wide\":${jsonName(capture.visual?.fileName)}," +
             "\"zoom\":${jsonName(capture.zoom?.fileName)}}"
     }
-    // Trip one shutter on the payload and return ALL media files it produced (thermal R-JPEG plus,
-    // when visible storage is enabled, the wide/zoom visual photo). Blocking, call from a worker
-    // thread. mediaVM must be init with SD card storage and the LEFT_OR_MAIN component index
-    // (done in the host activity's onCreate).
     /** What the camera's push events reported for one shutter. */
     private data class ShutterEvents(
         val indices: Set<Int>,
@@ -324,6 +320,10 @@ object Payload {
     // Fault barrier: the DJI SDK does not document an exception hierarchy for these calls, so a
     // narrower catch would let an unanticipated type escape. This boundary must degrade, not throw.
     @Suppress("TooGenericExceptionCaught")
+    // Trip one shutter on the payload and return ALL media files it produced (thermal R-JPEG plus,
+    // when visible storage is enabled, the wide/zoom visual photo). Blocking, call from a worker
+    // thread. mediaVM must be init with SD card storage and the LEFT_OR_MAIN component index
+    // (done in the host activity's onCreate).
     private fun captureNewMediaFiles(mediaVM: MediaVM): List<MediaFile> {
         try {
             setupNewMediaListener()

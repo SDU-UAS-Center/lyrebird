@@ -11,76 +11,85 @@ enum class DroneControlProfile(
     private val speedLimits: DroneSpeedLimits,
     private val distancePid: DronePidGains,
     private val yawControl: DroneYawControl,
-    private val payloadDrop: DronePayloadDrop? = null
+    private val payloadDrop: DronePayloadDrop? = null,
 ) {
     MAVIC_3_ENTERPRISE(
         displayName = "Mavic 3 Enterprise",
-        speedLimits = DroneSpeedLimits(
-            maxHorizontalSpeedMps = 20.0,
-            maxHorizontalAccelMps2 = 1.0,
-            defaultCruiseSpeedMps = 15.0
-        ),
+        speedLimits =
+            DroneSpeedLimits(
+                maxHorizontalSpeedMps = 20.0,
+                maxHorizontalAccelMps2 = 1.0,
+                defaultCruiseSpeedMps = 15.0,
+            ),
         distancePid = DronePidGains(kp = 0.65, ki = 0.0, kd = 0.001),
-        yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0)
+        yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0),
     ),
     MATRICE_300_RTK(
         displayName = "Matrice 300 RTK",
-        speedLimits = DroneSpeedLimits(
-            maxHorizontalSpeedMps = 20.0,
-            maxHorizontalAccelMps2 = 1.0,
-            defaultCruiseSpeedMps = 25.0
-        ),
+        speedLimits =
+            DroneSpeedLimits(
+                maxHorizontalSpeedMps = 20.0,
+                maxHorizontalAccelMps2 = 1.0,
+                defaultCruiseSpeedMps = 25.0,
+            ),
         distancePid = DronePidGains(kp = 0.35, ki = 0.0, kd = 0.001),
         yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0),
         // SkyPort release payload (TH4) sits on the RIGHT gimbal position; its drop is the
         // config-interface Unlock SWITCH (3) + All_Down BUTTON (5).
-        payloadDrop = DronePayloadDrop(
-            indexType = PayloadIndexType.RIGHT,
-            armSwitchIndex = 3,
-            releaseButtonIndex = 5
-        )
+        payloadDrop =
+            DronePayloadDrop(
+                indexType = PayloadIndexType.RIGHT,
+                armSwitchIndex = 3,
+                releaseButtonIndex = 5,
+            ),
     ),
     MATRICE_350_RTK(
         displayName = "Matrice 350 RTK",
-        speedLimits = DroneSpeedLimits(
-            maxHorizontalSpeedMps = 20.0,
-            maxHorizontalAccelMps2 = 1.0,
-            defaultCruiseSpeedMps = 3.0
-        ),
+        speedLimits =
+            DroneSpeedLimits(
+                maxHorizontalSpeedMps = 20.0,
+                maxHorizontalAccelMps2 = 1.0,
+                defaultCruiseSpeedMps = 3.0,
+            ),
         distancePid = DronePidGains(kp = 0.35, ki = 0.0, kd = 0.001),
         yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0),
         // Same SkyPort release payload as the M300: RIGHT + Unlock 3 / All_Down 5.
-        payloadDrop = DronePayloadDrop(
-            indexType = PayloadIndexType.RIGHT,
-            armSwitchIndex = 3,
-            releaseButtonIndex = 5
-        )
+        payloadDrop =
+            DronePayloadDrop(
+                indexType = PayloadIndexType.RIGHT,
+                armSwitchIndex = 3,
+                releaseButtonIndex = 5,
+            ),
     ),
     MATRICE_400(
         displayName = "Matrice 400",
-        speedLimits = DroneSpeedLimits(
-            maxHorizontalSpeedMps = 25.0,
-            maxHorizontalAccelMps2 = 1.0,
-            defaultCruiseSpeedMps = 25.0
-        ),
+        speedLimits =
+            DroneSpeedLimits(
+                maxHorizontalSpeedMps = 25.0,
+                maxHorizontalAccelMps2 = 1.0,
+                defaultCruiseSpeedMps = 25.0,
+            ),
         distancePid = DronePidGains(kp = 0.35, ki = 0.0, kd = 0.001),
         yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0),
-        payloadDrop = DronePayloadDrop(
-            indexType = PayloadIndexType.PORT_4,
-            armSwitchIndex = 3,
-            releaseButtonIndex = 5
-        )
+        payloadDrop =
+            DronePayloadDrop(
+                indexType = PayloadIndexType.PORT_4,
+                armSwitchIndex = 3,
+                releaseButtonIndex = 5,
+            ),
     ),
     MINI_4_PRO(
         displayName = "DJI Mini 4 Pro",
-        speedLimits = DroneSpeedLimits(
-            maxHorizontalSpeedMps = 15.0,
-            maxHorizontalAccelMps2 = 1.0,
-            defaultCruiseSpeedMps = 2.0
-        ),
+        speedLimits =
+            DroneSpeedLimits(
+                maxHorizontalSpeedMps = 15.0,
+                maxHorizontalAccelMps2 = 1.0,
+                defaultCruiseSpeedMps = 2.0,
+            ),
         distancePid = DronePidGains(kp = 0.65, ki = 0.0, kd = 0.001),
-        yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0)
-    );
+        yawControl = DroneYawControl(kp = 3.0, maxYawRateDegS = 30.0),
+    ),
+    ;
 
     val maxHorizontalSpeedMps: Double get() = speedLimits.maxHorizontalSpeedMps
     val maxHorizontalAccelMps2: Double get() = speedLimits.maxHorizontalAccelMps2
@@ -121,24 +130,24 @@ enum class DroneControlProfile(
 private data class DroneSpeedLimits(
     val maxHorizontalSpeedMps: Double,
     val maxHorizontalAccelMps2: Double,
-    val defaultCruiseSpeedMps: Double
+    val defaultCruiseSpeedMps: Double,
 )
 
 private data class DronePidGains(
     val kp: Double,
     val ki: Double,
-    val kd: Double
+    val kd: Double,
 )
 
 private data class DroneYawControl(
     val kp: Double,
-    val maxYawRateDegS: Double
+    val maxYawRateDegS: Double,
 )
 
 private data class DronePayloadDrop(
     val indexType: PayloadIndexType,
     val armSwitchIndex: Int,
-    val releaseButtonIndex: Int
+    val releaseButtonIndex: Int,
 )
 
 object DroneControlProfiles {
@@ -151,21 +160,21 @@ object DroneControlProfiles {
         val name = productType?.name.orEmpty()
         return when {
             name.contains("M400", ignoreCase = true) ||
-            name.contains("MATRICE_400", ignoreCase = true) -> DroneControlProfile.MATRICE_400
+                name.contains("MATRICE_400", ignoreCase = true) -> DroneControlProfile.MATRICE_400
 
             name.contains("M350", ignoreCase = true) ||
-            name.contains("MATRICE_350", ignoreCase = true) -> DroneControlProfile.MATRICE_350_RTK
+                name.contains("MATRICE_350", ignoreCase = true) -> DroneControlProfile.MATRICE_350_RTK
 
             name.contains("M300", ignoreCase = true) ||
-            name.contains("MATRICE_300", ignoreCase = true) -> DroneControlProfile.MATRICE_300_RTK
+                name.contains("MATRICE_300", ignoreCase = true) -> DroneControlProfile.MATRICE_300_RTK
 
             name.contains("MINI_4", ignoreCase = true) ||
-            name.contains("MINI4", ignoreCase = true) -> DroneControlProfile.MINI_4_PRO
+                name.contains("MINI4", ignoreCase = true) -> DroneControlProfile.MINI_4_PRO
 
             name.contains("MAVIC_3", ignoreCase = true) ||
-            name.contains("MAVIC3", ignoreCase = true) ||
-            name.contains("M3E", ignoreCase = true) ||
-            name.contains("WM265", ignoreCase = true) -> DroneControlProfile.MAVIC_3_ENTERPRISE
+                name.contains("MAVIC3", ignoreCase = true) ||
+                name.contains("M3E", ignoreCase = true) ||
+                name.contains("WM265", ignoreCase = true) -> DroneControlProfile.MAVIC_3_ENTERPRISE
 
             else -> DroneControlProfile.MAVIC_3_ENTERPRISE
         }

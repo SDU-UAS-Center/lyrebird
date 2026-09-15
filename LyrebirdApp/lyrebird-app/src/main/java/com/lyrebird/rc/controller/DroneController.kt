@@ -278,8 +278,9 @@ object DroneController {
         })
     }
 
-    // ==================== Drone Status ====================
     /**
+     * Drone status.
+     *
      * High-level operational state of the drone, derived from app-side command tracking.
      * The UI layer can also upgrade IDLE → HOVERING using FC telemetry (isFlying key).
      */
@@ -361,8 +362,6 @@ object DroneController {
     private val _altitudeSeq = java.util.concurrent.atomic.AtomicLong(0)
     @Volatile private var _isIntermediaryWaypointReached = false
 
-    // Hot-swappable waypoint target for smooth PID transitions.
-    // When a new waypoint arrives mid-flight, the target is swapped without restarting the loop.
     /**
      * What "arrived" means for one waypoint, as the plan defined it.
      *
@@ -407,6 +406,8 @@ object DroneController {
     )
 
     @Volatile
+    // Hot-swappable waypoint target for smooth PID transitions.
+    // When a new waypoint arrives mid-flight, the target is swapped without restarting the loop.
     private var activeWaypointTarget: WaypointTarget? = null
 
     // True only while the *waypoint* PID loop is the active control loop. controlLoopEnabled

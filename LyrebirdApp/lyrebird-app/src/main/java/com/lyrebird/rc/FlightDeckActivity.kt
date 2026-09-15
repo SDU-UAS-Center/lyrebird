@@ -1,39 +1,22 @@
 package com.lyrebird.rc
 
-import android.app.Dialog
-import android.content.Intent
-import android.content.ContentResolver
-import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
-import android.provider.DocumentsContract
-import java.io.File
-import com.lyrebird.rc.settings.LyrebirdOnboarding
-import com.lyrebird.rc.settings.LyrebirdSettingsBackup
-import com.lyrebird.rc.settings.DroneSettingsProfiles
-import com.lyrebird.rc.fleet.FleetBeacon
-import com.lyrebird.rc.fleet.FleetDeckController
-import com.lyrebird.rc.fleet.FleetStripView
-import com.lyrebird.rc.perception.ObstacleBrake
-import com.lyrebird.rc.perception.ObstacleGuard
-import android.util.Log
-import android.util.TypedValue
-import android.widget.Toast
-import android.widget.TextView
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.content.Context
 import android.Manifest
-import android.content.pm.PackageManager
+import android.app.Dialog
+import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.RectF
+import android.graphics.SurfaceTexture
+import android.graphics.drawable.ColorDrawable
 import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
@@ -41,82 +24,135 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
-import android.content.res.ColorStateList
-import android.graphics.ImageFormat
-import android.graphics.Matrix
-import android.graphics.RectF
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
-import android.graphics.SurfaceTexture
-import android.widget.CheckBox
-import android.media.MediaPlayer
-import android.media.Image
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.media.ImageReader
-import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.PopupMenu
-import android.widget.Switch
-import android.widget.ToggleButton
-import android.widget.EditText
-import android.widget.LinearLayout
+import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Uri
+import android.net.wifi.WifiManager
+import android.os.BatteryManager
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.DocumentsContract
+import android.util.Log
+import android.util.TypedValue
+import android.view.Choreographer
 import android.view.Menu
 import android.view.MenuItem
 import android.view.Surface
 import android.view.TextureView
-import android.view.Choreographer
 import android.view.View
 import android.view.ViewGroup
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.widget.SwitchCompat
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
-import android.net.wifi.WifiManager
-import android.net.Uri
-import android.os.BatteryManager
-import android.os.HandlerThread
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.PopupMenu
+import android.widget.Switch
+import android.widget.TextView
+import android.widget.Toast
+import android.widget.ToggleButton
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
+import androidx.lifecycle.ViewModelProvider
 import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
-import com.lyrebird.rc.edge.EdgeDetectionController
-import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
-import com.lyrebird.rc.edge.EdgeDetectionConfig
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.RoiControl
-import dji.v5.ux.detection.DetectedTarget
-import dji.v5.ux.detection.DetectionOverlayView
+import com.lyrebird.rc.controller.WaylineMissionHelper
+import com.lyrebird.rc.edge.EdgeDetectionConfig
+import com.lyrebird.rc.edge.EdgeDetectionController
+import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
+import com.lyrebird.rc.fleet.FleetBeacon
+import com.lyrebird.rc.fleet.FleetDeckController
+import com.lyrebird.rc.fleet.FleetStripView
 import com.lyrebird.rc.logger.LyrebirdFlightLogger
-import com.lyrebird.rc.models.BasicAircraftControlVM
-import com.lyrebird.rc.models.MediaVM
-import com.lyrebird.rc.models.PayloadWidgetVM
-import com.lyrebird.rc.models.VirtualStickVM
-import com.lyrebird.rc.mavlink.MavlinkEndpointConfig
-import com.lyrebird.rc.mavlink.MavlinkSnapshot
+import com.lyrebird.rc.mavlink.CommandProgress
 import com.lyrebird.rc.mavlink.CommandResult
+import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
+import com.lyrebird.rc.mavlink.DistanceTrigger
 import com.lyrebird.rc.mavlink.GimbalRotation
-import com.lyrebird.rc.mavlink.Mav
 import com.lyrebird.rc.mavlink.GimbalRotationMode
+import com.lyrebird.rc.mavlink.Mav
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
-import com.lyrebird.rc.mavlink.MavlinkMotionSink
-import com.lyrebird.rc.mavlink.MavlinkSystemId
+import com.lyrebird.rc.mavlink.MavlinkEndpointConfig
+import com.lyrebird.rc.mavlink.MavlinkFtpServer
 import com.lyrebird.rc.mavlink.MavlinkMissionSink
+import com.lyrebird.rc.mavlink.MavlinkMotionSink
+import com.lyrebird.rc.mavlink.MavlinkSnapshot
+import com.lyrebird.rc.mavlink.MavlinkSystemId
+import com.lyrebird.rc.mavlink.MavlinkTelemetryEndpoint
+import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.mavlink.MissionItem
 import com.lyrebird.rc.mavlink.MissionProgressListener
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
-import com.lyrebird.rc.mavlink.CommandProgress
-import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
-import com.lyrebird.rc.mavlink.DistanceTrigger
-import com.lyrebird.rc.mavlink.MavlinkVideoStream
-import com.lyrebird.rc.mavlink.MavlinkTelemetryEndpoint
-import com.lyrebird.rc.mavlink.MavlinkFtpServer
-import com.lyrebird.rc.controller.WaylineMissionHelper
+import com.lyrebird.rc.models.BasicAircraftControlVM
+import com.lyrebird.rc.models.LiveStreamVM
+import com.lyrebird.rc.models.MediaVM
+import com.lyrebird.rc.models.PayloadWidgetVM
+import com.lyrebird.rc.models.VirtualStickVM
+import com.lyrebird.rc.perception.ObstacleBrake
+import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.server.LyrebirdDiscoveryManager
+import com.lyrebird.rc.server.TelemetryServer
+import com.lyrebird.rc.settings.DroneSettingsProfiles
+import com.lyrebird.rc.settings.LyrebirdOnboarding
+import com.lyrebird.rc.settings.LyrebirdSettingsBackup
+import com.lyrebird.rc.telemetry.MockTelemetrySnapshot
+import com.lyrebird.rc.telemetry.TelemetryCoordinator
+import com.lyrebird.rc.util.NetworkUtils
+import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
+import com.lyrebird.rc.webrtc.SharedPhoneCameraFrameSource
+import com.lyrebird.rc.webrtc.TelemetryProvider
+import com.lyrebird.rc.webrtc.WebRTCMediaOptions
+import com.lyrebird.rc.webrtc.WebRTCPeerFactory
+import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
+import com.lyrebird.rc.webrtc.WebRTCStreamer
+import com.lyrebird.rc.webrtc.WebRTCStreamer.VideoSourceMode
+import dji.sdk.keyvalue.key.BatteryKey
+import dji.sdk.keyvalue.key.CameraKey
+import dji.sdk.keyvalue.key.DJIKey
+import dji.sdk.keyvalue.key.FlightControllerKey
+import dji.sdk.keyvalue.key.GimbalKey
+import dji.sdk.keyvalue.key.KeyTools
+import dji.sdk.keyvalue.key.ProductKey
+import dji.sdk.keyvalue.key.RemoteControllerKey
+import dji.sdk.keyvalue.value.camera.CameraMode
+import dji.sdk.keyvalue.value.camera.CameraStorageInfos
+import dji.sdk.keyvalue.value.camera.CameraStorageLocation
+import dji.sdk.keyvalue.value.camera.LaserMeasureState
+import dji.sdk.keyvalue.value.camera.SDCardLoadState
+import dji.sdk.keyvalue.value.camera.ThermalTemperatureMeasureMode
+import dji.sdk.keyvalue.value.common.Attitude
+import dji.sdk.keyvalue.value.common.CameraLensType
+import dji.sdk.keyvalue.value.common.ComponentIndexType
+import dji.sdk.keyvalue.value.common.DoubleRect
+import dji.sdk.keyvalue.value.common.EmptyMsg
+import dji.sdk.keyvalue.value.common.LocationCoordinate2D
+import dji.sdk.keyvalue.value.common.LocationCoordinate3D
+import dji.sdk.keyvalue.value.common.Velocity3D
+import dji.sdk.keyvalue.value.flightcontroller.FlightMode
+import dji.sdk.keyvalue.value.flightcontroller.LowBatteryRTHInfo
+import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
+import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotationMode
+import dji.sdk.keyvalue.value.gimbal.GimbalMode
+import dji.sdk.keyvalue.value.product.ProductType
 import dji.sdk.wpmz.value.mission.ActionGimbalRotateParam
 import dji.sdk.wpmz.value.mission.ActionStartRecordParam
 import dji.sdk.wpmz.value.mission.ActionStopRecordParam
@@ -126,123 +162,64 @@ import dji.sdk.wpmz.value.mission.WaylineActionType
 import dji.sdk.wpmz.value.mission.WaylineFinishedAction
 import dji.sdk.wpmz.value.mission.WaylineGimbalActuatorRotateMode
 import dji.sdk.wpmz.value.mission.WaylineLocationCoordinate3D
-import com.lyrebird.rc.server.TelemetryServer
-import com.lyrebird.rc.webrtc.WebRTCMediaOptions
-import com.lyrebird.rc.webrtc.WebRTCPeerFactory
-import com.lyrebird.rc.webrtc.WebRTCStreamer
-import com.lyrebird.rc.webrtc.WebRTCStreamer.VideoSourceMode
-import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
-import com.lyrebird.rc.webrtc.SharedPhoneCameraFrameSource
-import com.lyrebird.rc.webrtc.TelemetryProvider
-import com.lyrebird.rc.telemetry.TelemetryCoordinator
-import com.lyrebird.rc.telemetry.MockTelemetrySnapshot
-import com.lyrebird.rc.util.NetworkUtils
-import com.lyrebird.rc.util.ToastUtils
-import com.lyrebird.rc.server.LyrebirdDiscoveryManager
-import androidx.lifecycle.ViewModelProvider
-import com.lyrebird.rc.models.LiveStreamVM
-import dji.v5.manager.datacenter.livestream.LiveStreamSettings
-import dji.v5.manager.datacenter.livestream.LiveStreamType
-import dji.sdk.keyvalue.key.BatteryKey
-import dji.sdk.keyvalue.key.CameraKey
-import dji.sdk.keyvalue.key.DJIKey
-import dji.sdk.keyvalue.key.FlightControllerKey
-import dji.sdk.keyvalue.key.GimbalKey
-import dji.sdk.keyvalue.key.KeyTools
-import dji.sdk.keyvalue.key.ProductKey
-import dji.sdk.keyvalue.value.common.Attitude
-import dji.sdk.keyvalue.value.common.ComponentIndexType
-import dji.sdk.keyvalue.value.common.EmptyMsg
-import dji.sdk.keyvalue.value.common.LocationCoordinate2D
-import dji.sdk.keyvalue.value.common.LocationCoordinate3D
-import dji.sdk.keyvalue.value.common.Velocity3D
-import dji.sdk.keyvalue.value.camera.CameraMode
-import dji.sdk.keyvalue.value.camera.CameraStorageInfos
-import dji.sdk.keyvalue.value.camera.CameraStorageLocation
-import dji.sdk.keyvalue.value.camera.SDCardLoadState
-import dji.sdk.keyvalue.value.camera.LaserMeasureState
-import dji.sdk.keyvalue.value.camera.ThermalTemperatureMeasureMode
-import dji.sdk.keyvalue.value.common.CameraLensType
-import dji.sdk.keyvalue.value.flightcontroller.FlightMode
-import dji.sdk.keyvalue.value.flightcontroller.LowBatteryRTHInfo
-import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
-import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotationMode
-import dji.sdk.keyvalue.value.gimbal.GimbalMode
-import dji.sdk.keyvalue.key.RemoteControllerKey
-import dji.sdk.keyvalue.value.product.ProductType
-import dji.v5.manager.datacenter.MediaDataCenter
-import dji.v5.manager.interfaces.ICameraStreamManager
+import dji.v5.common.callback.CommonCallbacks
+import dji.v5.common.error.IDJIError
 import dji.v5.et.action
 import dji.v5.et.create
 import dji.v5.et.createCamera
 import dji.v5.et.get
 import dji.v5.et.set
 import dji.v5.manager.KeyManager
+import dji.v5.manager.datacenter.MediaDataCenter
 import dji.v5.manager.diagnostic.DJIDeviceStatus
 import dji.v5.manager.diagnostic.DeviceStatusManager
-import dji.v5.ux.core.util.DataProcessor
-import dji.v5.ux.map.MapWidget
-import dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity
 import dji.v5.manager.intelligent.AutoSensingInfo
 import dji.v5.manager.intelligent.AutoSensingInfoListener
 import dji.v5.manager.intelligent.AutoSensingTarget
 import dji.v5.manager.intelligent.IntelligentFlightManager
 import dji.v5.manager.intelligent.IntelligentModel
-import dji.v5.manager.intelligent.TargetType
-import dji.v5.manager.intelligent.smarttrack.SmartTrackTarget
-import dji.v5.manager.intelligent.spotlight.SpotLightTarget
-import dji.v5.common.callback.CommonCallbacks
-import dji.v5.common.error.IDJIError
-import dji.sdk.keyvalue.value.common.DoubleRect
-import java.io.BufferedReader
-import java.io.IOException
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.io.PrintWriter
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.Inet4Address
-import java.net.InetAddress
-import java.net.MulticastSocket
-import java.net.NetworkInterface
-import java.net.ServerSocket
-import java.net.Socket
-import java.net.SocketException
+import dji.v5.manager.interfaces.ICameraStreamManager
+import dji.v5.ux.core.util.DataProcessor
+import dji.v5.ux.detection.DetectedTarget
+import dji.v5.ux.detection.DetectionOverlayView
+import dji.v5.ux.map.MapWidget
+import dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity
+import java.io.File
 import java.lang.ref.WeakReference
-import java.util.Collections
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.abs
-import android.net.nsd.NsdManager
-import android.net.nsd.NsdServiceInfo
+
+/** Video delivery mode the bridge is currently publishing with. */
+enum class StreamingMode(
+    val menuLabel: String,
+    val prefValue: String,
+) {
+    WEBRTC("WebRTC (WHIP)", "webrtc"),
+    RTMP("RTMP Push", "rtmp"),
+    RTSP("RTSP Server Pull", "rtsp"),
+    AGORA("Agora.io WebRTC", "agora"),
+    GB28181("GB28181 Surveillance", "gb28181"),
+    ;
+
+    companion object {
+        fun fromPref(value: String?): StreamingMode = entries.firstOrNull { it.prefValue == value } ?: WEBRTC
+    }
+}
 
 /**
  * Lyrebird Default Layout Activity
- * 
+ *
  * Extends the DJI DefaultLayoutActivity to add:
  * - HTTP Command Server (port 8080) for drone control
  * - Telemetry Server (port 8081) for real-time telemetry data
  * - WHIP publishing for WebRTC video streaming through MediaMTX
  * - mDNS/Bonjour service advertising for automatic discovery
  */
-/** Video delivery mode the bridge is currently publishing with. */
-enum class StreamingMode(val menuLabel: String, val prefValue: String) {
-    WEBRTC("WebRTC (WHIP)", "webrtc"),
-    RTMP("RTMP Push", "rtmp"),
-    RTSP("RTSP Server Pull", "rtsp"),
-    AGORA("Agora.io WebRTC", "agora"),
-    GB28181("GB28181 Surveillance", "gb28181");
-
-    companion object {
-        fun fromPref(value: String?): StreamingMode {
-            return entries.firstOrNull { it.prefValue == value } ?: WEBRTC
-        }
-    }
-}
-
-class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
-
+class FlightDeckActivity :
+    DefaultLayoutActivity(),
+    LyrebirdCommandHost {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
 
@@ -297,7 +274,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val MIN_ORBIT_RADIUS_M = 5.0
         private const val MISSION_POLL_MS = 200L
 
-        /** The one parameter a ground station may write. See applyMavlinkParameter. */
+        /** Beyond this, a reported gimbal angle is DJI's unset marker rather than a direction. */
+        private const val MAX_PLAUSIBLE_GIMBAL_DEG = 200.0
+
         /**
          * The settings a ground station may write over MAVLink.
          *
@@ -306,9 +285,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
          * source, the MediaMTX address — have no honest float encoding. Those stay on HTTP until
          * they earn a proper home, rather than being smuggled through as magic numbers.
          */
-        /** Beyond this, a reported gimbal angle is DJI's unset marker rather than a direction. */
-        private const val MAX_PLAUSIBLE_GIMBAL_DEG = 200.0
-
         private const val PARAM_RTH_ALTITUDE = "LB_RTH_ALT"
         private const val PARAM_MAX_HEIGHT = "LB_MAX_HEIGHT"
         private const val PARAM_MAX_DISTANCE = "LB_MAX_DIST"
@@ -334,13 +310,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val PARAM_RTC_RESOLUTION = "LB_RTC_RES"
         private const val PARAM_STREAMING_MODE = "LB_STREAM_MODE"
         private const val TAG_THERMAL = "LyrebirdThermal"
-        private const val MEDIAMTX_WHIP_PORT = 8889  // mediamtx WebRTC port for WHIP publish
+        private const val MEDIAMTX_WHIP_PORT = 8889 // mediamtx WebRTC port for WHIP publish
         private const val PREF_DRONE_NAME = "drone_name"
         private const val PREF_DRONE_NAME_USER_SET = "drone_name_user_set"
         private const val PREF_MAVLINK_FLIGHT_DEFAULT_MIGRATED = "lb_mav_0_allow_flight_default_v2"
         private const val SETTINGS_BACKUP_DEBOUNCE_MS = 1500L
         private const val FLIGHT_DECK_RESTART_DELAY_MS = 750L
         private const val PREF_MEDIAMTX_SERVER = "mediamtx_server"
+
         // A manually configured mediamtxServer override that stops resolving (wrong network,
         // stale address left over from a different deployment) fails silently -- every retry
         // just repeats in Logcat. After this many consecutive WHIP failures with an override
@@ -376,20 +353,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val FLEET_INSTALL_ID_LENGTH = 8
 
         /** Preferences that travel with the aircraft, swapped by [DroneSettingsProfiles] on serial change. */
-        private val PER_DRONE_PROFILE_KEYS = setOf(
-            PREF_DRONE_NAME,
-            PREF_DRONE_NAME_USER_SET,
-            PREF_MEDIAMTX_SERVER,
-            PREF_WEBRTC_FPS,
-            PREF_WEBRTC_RESOLUTION,
-            PREF_DETECTIONS_ENABLED,
-            PREF_DETECTION_SOURCE,
-            PREF_VIDEO_SOURCE,
-            PREF_STREAMING_MODE,
-            // lb_mav_0_sysid: 0 (the default) derives the id from the serial, so it needs no
-            // stored value; an operator-pinned manual id is per-drone and travels with it.
-            MavlinkEndpointConfig.PREF_SYSTEM_ID
-        )
+        private val PER_DRONE_PROFILE_KEYS =
+            setOf(
+                PREF_DRONE_NAME,
+                PREF_DRONE_NAME_USER_SET,
+                PREF_MEDIAMTX_SERVER,
+                PREF_WEBRTC_FPS,
+                PREF_WEBRTC_RESOLUTION,
+                PREF_DETECTIONS_ENABLED,
+                PREF_DETECTION_SOURCE,
+                PREF_VIDEO_SOURCE,
+                PREF_STREAMING_MODE,
+                // lb_mav_0_sysid: 0 (the default) derives the id from the serial, so it needs no
+                // stored value; an operator-pinned manual id is per-drone and travels with it.
+                MavlinkEndpointConfig.PREF_SYSTEM_ID,
+            )
         private const val PREF_RTMP_URL = "rtmp_url"
         private const val PREF_RTSP_PORT = "rtsp_port"
         private const val PREF_RTSP_USER = "rtsp_user"
@@ -411,17 +389,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         private const val REQUEST_EDGE_MODEL_FILE = 3
         private const val REQUEST_EDGE_LABELS_FILE = 4
         private const val PHONE_EDGE_FRAME_INTERVAL_NS = 200_000_000L
-        private val EDGE_CONFIDENCE_OPTIONS = floatArrayOf(
-            0.10f,
-            0.15f,
-            0.20f,
-            0.25f,
-            0.30f,
-            0.40f,
-            0.50f,
-            0.60f,
-            0.70f
-        )
+        private val EDGE_CONFIDENCE_OPTIONS =
+            floatArrayOf(
+                0.10f,
+                0.15f,
+                0.20f,
+                0.25f,
+                0.30f,
+                0.40f,
+                0.50f,
+                0.60f,
+                0.70f,
+            )
         private const val DEFAULT_DRONE_NAME = "lb_unknown"
         private val WEBRTC_FPS_OPTIONS = intArrayOf(5, 10, 15, 20, 25, 30)
     }
@@ -431,35 +410,32 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val menuLabel: String,
         val width: Int,
         val height: Int,
-        val bitrate: Int
+        val bitrate: Int,
     ) {
         AUTO("auto", "Auto / native", 0, 0, 6_000_000),
         FULL_HD("1080p", "1080p", 1920, 1080, 8_000_000),
         HD("720p", "720p", 1280, 720, 2_000_000),
-        SD("480p", "480p", 640, 480, 1_500_000);
+        SD("480p", "480p", 640, 480, 1_500_000),
+        ;
 
         companion object {
-            fun fromPref(value: String?): StreamResolutionPreset {
-                return entries.firstOrNull { it.prefValue == value } ?: AUTO
-            }
+            fun fromPref(value: String?): StreamResolutionPreset = entries.firstOrNull { it.prefValue == value } ?: AUTO
         }
     }
 
     private enum class DetectionSource(
         val prefValue: String,
-        val menuLabel: String
+        val menuLabel: String,
     ) {
         NONE("none", "None"),
         DJI_ONBOARD("dji_onboard", "DJI onboard"),
-        YOLO_ON_PHONE("yolo_on_phone", "YOLO on phone");
+        YOLO_ON_PHONE("yolo_on_phone", "YOLO on phone"),
+        ;
 
         companion object {
-            fun fromPref(value: String?): DetectionSource {
-                return entries.firstOrNull { it.prefValue == value } ?: NONE
-            }
+            fun fromPref(value: String?): DetectionSource = entries.firstOrNull { it.prefValue == value } ?: NONE
         }
     }
-
 
     private val liveStreamVM by lazy {
         ViewModelProvider(this)[LiveStreamVM::class.java]
@@ -468,23 +444,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     override val mainHandler = Handler(Looper.getMainLooper())
 
     private var settingsBackupListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
-    //: The backup writes a file to Documents/Lyrebird; that I/O must not run on the main
-    //: thread (StrictMode flags it). Serialized so debounced writes never pile up.
-    private val settingsBackupExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val settingsBackupTask = Runnable {
-        settingsBackupExecutor.execute {
-            LyrebirdSettingsBackup.save(sharedPreferences, droneName)
+
+    // : The backup writes a file to Documents/Lyrebird; that I/O must not run on the main
+    // : thread (StrictMode flags it). Serialized so debounced writes never pile up.
+    private val settingsBackupExecutor =
+        java.util.concurrent.Executors
+            .newSingleThreadExecutor()
+    private val settingsBackupTask =
+        Runnable {
+            settingsBackupExecutor.execute {
+                LyrebirdSettingsBackup.save(sharedPreferences, droneName)
+            }
         }
-    }
     private val telemetryCoordinator = TelemetryCoordinator()
     private lateinit var discoveryManager: LyrebirdDiscoveryManager
-    
+
     // ViewModels for drone control
     private lateinit var basicAircraftControlVM: BasicAircraftControlVM
     private lateinit var virtualStickVM: VirtualStickVM
     override lateinit var mediaVM: MediaVM
     override lateinit var payloadWidgetVM: PayloadWidgetVM
-    
+
     // Servers
     private var httpServer: SimpleHttpServer? = null
     private var telemetryServer: TelemetryServer? = null
@@ -502,20 +482,29 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * than tripping the shutter concurrently — the DJI media pipeline resolves new files by index
      * and overlapping captures would confuse which file belongs to which command.
      */
-    private val captureExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val captureExecutor =
+        java.util.concurrent.Executors
+            .newSingleThreadExecutor()
 
     /**
      * MAVLink FTP worker. Two threads so a slow file download does not block a directory listing:
      * both pull the same DJI media pipeline, but the SDK serialises the pulls themselves.
      */
-    private val ftpExecutor = java.util.concurrent.Executors.newFixedThreadPool(2)
+    private val ftpExecutor =
+        java.util.concurrent.Executors
+            .newFixedThreadPool(2)
     private var webRTCStreamer: WebRTCStreamer? = null
     private var videoSettingRestartScheduled = false
     private var lyrebirdSettingsDialog: Dialog? = null
-    @Volatile private var lastWhipUrl: String? = null  // Remembered for FPS/Quality mode restarts
-    @Volatile private var whipConsecutiveFailures = 0  // Reset on success; drives the override fallback below
+
+    @Volatile private var lastWhipUrl: String? = null
+
+    // Remembered for FPS/Quality mode restarts
+    @Volatile private var whipConsecutiveFailures = 0
+
+    // Reset on success; drives the override fallback below
     @Volatile private var lastClientIp: String? = null
-    
+
     private var droneSerialNumber: String = "UNKNOWN"
 
     /**
@@ -534,6 +523,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     // Phone Location
     private var locationManager: LocationManager? = null
     private var phoneLocation: Location? = null
+
     // Static listener holding only a WeakReference to the activity. On some platforms the
     // framework LocationManager keeps its LocationListenerTransport in a native global even
     // after removeUpdates(); an anonymous listener's implicit outer reference would then pin
@@ -541,16 +531,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private val locationListener = PhoneLocationListener(this)
 
     private class PhoneLocationListener(
-        activity: FlightDeckActivity
+        activity: FlightDeckActivity,
     ) : LocationListener {
         private val activityRef = WeakReference(activity)
+
         override fun onLocationChanged(location: Location) {
             val activity = activityRef.get() ?: return
             activity.phoneLocation = location
             activity.refreshMockTelemetryMode()
         }
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+
+        override fun onStatusChanged(
+            provider: String?,
+            status: Int,
+            extras: Bundle?,
+        ) = Unit
+
         override fun onProviderEnabled(provider: String) = Unit
+
         override fun onProviderDisabled(provider: String) = Unit
     }
 
@@ -558,43 +556,52 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private var sensorManager: SensorManager? = null
     private var wifiManager: WifiManager? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+
     // Keeps the radio in low-latency mode while WHIP is publishing: flight 1 showed silent
     // frame stalls at the encoder with zero RTP loss, a signature of Wi-Fi power save on the
     // publishing device. Acquired when streaming starts, released in onDestroy.
     private var lowLatencyWifiLock: WifiManager.WifiLock? = null
     private var batteryManager: BatteryManager? = null
-        private var mockPreviewPlayer: MediaPlayer? = null
+    private var mockPreviewPlayer: MediaPlayer? = null
+
     @Volatile private var lastWebRTCMetrics = WebRTCStreamMetrics()
+
     @Volatile private var lastNativeStreamStatus: String = "idle"
-    
+
     private var phoneHeading: Double = 0.0
     private var phonePressure: Float = 0.0f
+
     @Volatile private var latestAltitudeMetres: Double = 0.0
+
     @Volatile private var latestGimbalPitchDegrees: Double = 0.0
-    
+
     private val accelerometerReading = FloatArray(3)
     private val magnetometerReading = FloatArray(3)
     private val rotationMatrix = FloatArray(9)
     private val orientationAngles = FloatArray(3)
-    
-    private val sensorListener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent) {
-            if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-                System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
-            } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-                System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
-            } else if (event.sensor.type == Sensor.TYPE_PRESSURE) {
-                phonePressure = event.values[0]
+
+    private val sensorListener =
+        object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                    System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
+                } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+                    System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
+                } else if (event.sensor.type == Sensor.TYPE_PRESSURE) {
+                    phonePressure = event.values[0]
+                }
+
+                updateOrientationAngles()
             }
-            
-            updateOrientationAngles()
+
+            override fun onAccuracyChanged(
+                sensor: Sensor?,
+                accuracy: Int,
+            ) {
+                // Do nothing
+            }
         }
 
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-            // Do nothing
-        }
-    }
-    
     // Home point tracking
     private var isHomePointSetLatch = false
 
@@ -602,7 +609,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     override var isAutoSensingActive = false
     private var isAutoSensingListenerRegistered = false
     private var edgeDetectionController: EdgeDetectionController? = null
+
     @Volatile private var lastEdgeMetrics = EdgeDetectionMetrics()
+
     @Volatile override var currentDetectedTargets: List<DetectedTarget> = emptyList()
     private var detectionOverlay: DetectionOverlayView? = null
     private var pendingVideoSourceAfterPermission: VideoSourceMode? = null
@@ -613,53 +622,57 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private var phonePreviewSurface: Surface? = null
     private var phoneImageReader: ImageReader? = null
     private val phoneInferenceBusy = AtomicBoolean(false)
+
     @Volatile private var lastPhoneEdgeFrameNs = 0L
     private var pendingEdgePickerRequestCode: Int? = null
     private val edgeFilePickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val requestCode = pendingEdgePickerRequestCode
-        pendingEdgePickerRequestCode = null
-        if (requestCode == null || result.resultCode != RESULT_OK) return@registerForActivityResult
-        val uri = result.data?.data ?: return@registerForActivityResult
-        when (requestCode) {
-            REQUEST_EDGE_MODEL_FILE -> storeEdgeModelSelection(uri)
-            REQUEST_EDGE_LABELS_FILE -> storeEdgeFileSelection(
-                uri,
-                PREF_EDGE_LABELS_URI,
-                PREF_EDGE_LABELS_NAME,
-                "Edge labels"
-            )
-        }
-    }
-
-    private val autoSensingInfoListener = object : AutoSensingInfoListener {
-        override fun onAutoSensingInfoUpdate(info: AutoSensingInfo) {
-            if (getDetectionSource() != DetectionSource.DJI_ONBOARD) return
-            val targets = info.targets?.mapIndexed { idx, t ->
-                val rect = t.rect
-                // DoubleRect is center-based: (x,y) = center, (width,height) = dimensions
-                val cx = rect?.x ?: 0.0
-                val cy = rect?.y ?: 0.0
-                val hw = (rect?.width ?: 0.0) / 2.0
-                val hh = (rect?.height ?: 0.0) / 2.0
-                DetectedTarget(
-                    index = t.targetIndex,
-                    type = t.targetType?.name ?: "UNKNOWN",
-                    left = cx - hw,
-                    top = cy - hh,
-                    right = cx + hw,
-                    bottom = cy + hh
-                )
-            } ?: emptyList()
-            applyDetectedTargets(targets)
+            val requestCode = pendingEdgePickerRequestCode
+            pendingEdgePickerRequestCode = null
+            if (requestCode == null || result.resultCode != RESULT_OK) return@registerForActivityResult
+            val uri = result.data?.data ?: return@registerForActivityResult
+            when (requestCode) {
+                REQUEST_EDGE_MODEL_FILE -> storeEdgeModelSelection(uri)
+                REQUEST_EDGE_LABELS_FILE ->
+                    storeEdgeFileSelection(
+                        uri,
+                        PREF_EDGE_LABELS_URI,
+                        PREF_EDGE_LABELS_NAME,
+                        "Edge labels",
+                    )
+            }
         }
 
-        override fun onTrackingTargetUpdate(target: AutoSensingTarget) = Unit
+    private val autoSensingInfoListener =
+        object : AutoSensingInfoListener {
+            override fun onAutoSensingInfoUpdate(info: AutoSensingInfo) {
+                if (getDetectionSource() != DetectionSource.DJI_ONBOARD) return
+                val targets =
+                    info.targets?.mapIndexed { idx, t ->
+                        val rect = t.rect
+                        // DoubleRect is center-based: (x,y) = center, (width,height) = dimensions
+                        val cx = rect?.x ?: 0.0
+                        val cy = rect?.y ?: 0.0
+                        val hw = (rect?.width ?: 0.0) / 2.0
+                        val hh = (rect?.height ?: 0.0) / 2.0
+                        DetectedTarget(
+                            index = t.targetIndex,
+                            type = t.targetType?.name ?: "UNKNOWN",
+                            left = cx - hw,
+                            top = cy - hh,
+                            right = cx + hw,
+                            bottom = cy + hh,
+                        )
+                    } ?: emptyList()
+                applyDetectedTargets(targets)
+            }
 
-        override fun onIntelligentModelUpdate(models: MutableList<IntelligentModel>) = Unit
+            override fun onTrackingTargetUpdate(target: AutoSensingTarget) = Unit
 
-        override fun onRunningIntelligentModelUpdate(modelId: Int) = Unit
-    }
+            override fun onIntelligentModelUpdate(models: MutableList<IntelligentModel>) = Unit
+
+            override fun onRunningIntelligentModelUpdate(modelId: Int) = Unit
+        }
     // ==================== End AutoSensing Fields ====================
 
     // Battery and flight time data processors
@@ -712,13 +725,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     // Short enough that the idle notice does not feel laggy, long enough that a transient
     // flight-mode blip does not flash it.
     private val idleDetectDebounceMs = 1_500L
+
     @Volatile private var cachedFlightMode: FlightMode = FlightMode.UNKNOWN
+
     @Volatile private var cachedSatelliteCount = -1
+
     @Volatile private var idleDetectArmed = false
+
     @Volatile private var idleOverlayVisible = false
     private val showIdleOverlayRunnable = Runnable { onIdleDetectDebounceElapsed() }
-
-
 
     @Volatile override var lrfTargetLocation: LocationCoordinate3D? = null
 
@@ -743,30 +758,34 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * component's own key has not flipped yet. See [logConnectionKeySnapshot].
      */
     private val productConnectionKey: DJIKey<Boolean> = ProductKey.KeyConnection.create()
-    private val cameraConnectionKey: DJIKey<Boolean> = KeyTools.createKey(
-        CameraKey.KeyConnection,
-        ComponentIndexType.LEFT_OR_MAIN
-    )
-    private val cameraModeKey: DJIKey<CameraMode> = KeyTools.createKey(
-        CameraKey.KeyCameraMode,
-        ComponentIndexType.LEFT_OR_MAIN
-    )
-    private val cameraStorageLocationKey: DJIKey<CameraStorageLocation> = KeyTools.createKey(
-        CameraKey.KeyCameraStorageLocation,
-        ComponentIndexType.LEFT_OR_MAIN
-    )
-    private val cameraStorageInfosKey: DJIKey<CameraStorageInfos> = KeyTools.createKey(
-        CameraKey.KeyCameraStorageInfos,
-        ComponentIndexType.LEFT_OR_MAIN
-    )
+    private val cameraConnectionKey: DJIKey<Boolean> =
+        KeyTools.createKey(
+            CameraKey.KeyConnection,
+            ComponentIndexType.LEFT_OR_MAIN,
+        )
+    private val cameraModeKey: DJIKey<CameraMode> =
+        KeyTools.createKey(
+            CameraKey.KeyCameraMode,
+            ComponentIndexType.LEFT_OR_MAIN,
+        )
+    private val cameraStorageLocationKey: DJIKey<CameraStorageLocation> =
+        KeyTools.createKey(
+            CameraKey.KeyCameraStorageLocation,
+            ComponentIndexType.LEFT_OR_MAIN,
+        )
+    private val cameraStorageInfosKey: DJIKey<CameraStorageInfos> =
+        KeyTools.createKey(
+            CameraKey.KeyCameraStorageInfos,
+            ComponentIndexType.LEFT_OR_MAIN,
+        )
     private var thermalArmed = false
 
     private data class DroneStorageStatus(
         val label: String,
-        val summary: String
+        val summary: String,
     ) {
         val menuLabel: String
-            get() = "$label (${summary})"
+            get() = "$label ($summary)"
 
         val dialogText: String
             get() = "$label: $summary"
@@ -775,7 +794,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private data class SettingsActionRow(
         val title: String,
         val detail: String? = null,
-        val enabled: Boolean = true
+        val enabled: Boolean = true,
     )
 
     @Volatile
@@ -791,11 +810,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private var loadingShownAtMs = 0L
 
-    private val hideLoadingOverlayRunnable = Runnable {
-        logConnectionKeySnapshot("20s fallback timeout — hiding overlay regardless")
-        mainHandler.removeCallbacks(loadingDiagnosticRunnable)
-        showLoadingOverlay(false)
-    }
+    private val hideLoadingOverlayRunnable =
+        Runnable {
+            logConnectionKeySnapshot("20s fallback timeout — hiding overlay regardless")
+            mainHandler.removeCallbacks(loadingDiagnosticRunnable)
+            showLoadingOverlay(false)
+        }
 
     /**
      * Diagnostic-only: while the loading overlay is up, print what each connection key actually
@@ -803,12 +823,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * shown, stopped the moment it is hidden (either path). Filter logcat for "Connection
      * snapshot" to watch it live.
      */
-    private val loadingDiagnosticRunnable: Runnable = object : Runnable {
-        override fun run() {
-            logConnectionKeySnapshot("loading overlay still up")
-            mainHandler.postDelayed(this, 2_000L)
+    private val loadingDiagnosticRunnable: Runnable =
+        object : Runnable {
+            override fun run() {
+                logConnectionKeySnapshot("loading overlay still up")
+                mainHandler.postDelayed(this, 2_000L)
+            }
         }
-    }
 
     private fun logConnectionKeySnapshot(context: String) {
         val overlayVisible = findViewById<View>(R.id.lyrebird_loading_overlay)?.visibility == View.VISIBLE
@@ -817,7 +838,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             "Connection snapshot ($context): flightController=${flightControllerConnectionKey.get(false)} " +
                 "product=${productConnectionKey.get(false)} camera=${cameraConnectionKey.get(false)} " +
                 "productType=${productTypeKey.get(ProductType.UNKNOWN)} aircraftConnected=$aircraftConnected " +
-                "overlayVisible=$overlayVisible"
+                "overlayVisible=$overlayVisible",
         )
     }
 
@@ -833,21 +854,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         mainHandler.post(loadingDiagnosticRunnable)
 
         discoveryManager = LyrebirdDiscoveryManager(this) { droneName }
-        
+
         // Initialize SharedPreferences
         sharedPreferences = getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
         migrateMavlinkFlightDefault()
-        
+
         // Load or prompt for drone name
         loadDroneName()
-        
+
         // Setup drone name display
         setupDroneNameDisplay()
-        
+
         // Initialize ViewModels
         basicAircraftControlVM = ViewModelProvider(this)[BasicAircraftControlVM::class.java]
         virtualStickVM = ViewModelProvider(this)[VirtualStickVM::class.java]
-        
+
         // Initialize DroneController
         DroneController.init(basicAircraftControlVM, virtualStickVM)
 
@@ -896,18 +917,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         // Initialize Phone Sensors & Managers
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        
+
         // Acquire Multicast Lock to allow receiving UDP broadcasts
         multicastLock = wifiManager?.createMulticastLock("LyrebirdMulticastLock")
         multicastLock?.setReferenceCounted(true)
         multicastLock?.acquire()
-        
+
         batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         startSensorUpdates()
-        
+
         // Get drone serial number
         fetchDroneSerialNumber()
-        
+
         // Setup key listeners for telemetry
         setupKeyListeners()
 
@@ -933,23 +954,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
         updateLoadingDetail("Waiting for the aircraft to connect…")
     }
-    
+
     // ==================== Mode Toggle (AUTO / MANUAL) ====================
 
     private fun setupManualOverrideCheckbox() {
         updateManualOverrideUI()
 
         findViewById<Switch>(R.id.cb_manual_override)?.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) DroneController.activateManualOverride()
-            else DroneController.deactivateManualOverride()
+            if (isChecked) {
+                DroneController.activateManualOverride()
+            } else {
+                DroneController.deactivateManualOverride()
+            }
             updateManualOverrideUI()
         }
 
-        DroneController.manualOverrideListener = object : DroneController.ManualOverrideListener {
-            override fun onManualOverrideActivated() {
-                mainHandler.post { updateManualOverrideUI() }
+        DroneController.manualOverrideListener =
+            object : DroneController.ManualOverrideListener {
+                override fun onManualOverrideActivated() {
+                    mainHandler.post { updateManualOverrideUI() }
+                }
             }
-        }
     }
 
     override fun updateManualOverrideUI() {
@@ -965,8 +990,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             sw.trackTintList = tint
             sw.thumbTintList = ColorStateList.valueOf(if (isManual) 0xFFB71C1C.toInt() else 0xFF1565C0.toInt())
             sw.setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked) DroneController.activateManualOverride()
-                else DroneController.deactivateManualOverride()
+                if (isChecked) {
+                    DroneController.activateManualOverride()
+                } else {
+                    DroneController.deactivateManualOverride()
+                }
                 updateManualOverrideUI()
             }
         }
@@ -981,19 +1009,20 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * A request is [ControlAuthority.Source.SAFETY] only when a safety token is configured AND
      * the request presents exactly that token; otherwise it is the Pilot Computer.
      */
-    override fun classifyCommandSource(presentedToken: String?): ControlAuthority.Source {
-        return if (presentedToken == SAFETY_TOKEN)
+    override fun classifyCommandSource(presentedToken: String?): ControlAuthority.Source =
+        if (presentedToken == SAFETY_TOKEN) {
             ControlAuthority.Source.SAFETY
-        else
+        } else {
             ControlAuthority.Source.PILOT
-    }
+        }
 
     private fun setupControlAuthorityBanner() {
-        ControlAuthority.listener = object : ControlAuthority.Listener {
-            override fun onAuthorityChanged(authority: ControlAuthority.Authority) {
-                mainHandler.post { updateControlAuthorityBanner(authority) }
+        ControlAuthority.listener =
+            object : ControlAuthority.Listener {
+                override fun onAuthorityChanged(authority: ControlAuthority.Authority) {
+                    mainHandler.post { updateControlAuthorityBanner(authority) }
+                }
             }
-        }
         updateControlAuthorityBanner(ControlAuthority.active)
     }
 
@@ -1004,7 +1033,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             ControlAuthority.Authority.PILOT -> tv.visibility = View.GONE
             ControlAuthority.Authority.SAFETY -> {
                 tv.text = "SAFETY COMPUTER IN CONTROL"
-                tv.setTextColor(0xFFF44336.toInt())  // red
+                tv.setTextColor(0xFFF44336.toInt()) // red
                 tv.visibility = View.VISIBLE
             }
         }
@@ -1022,7 +1051,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 videoResolutionHeight = preset.height,
                 fps = getWebRTCFps(),
                 videoBitrate = preset.bitrate,
-                videoCodec = "H264"
+                videoCodec = "H264",
             )
         }
     }
@@ -1032,37 +1061,37 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         return if (WEBRTC_FPS_OPTIONS.contains(storedFps)) storedFps else DEFAULT_WEBRTC_FPS
     }
 
-    private fun getWebRTCResolutionPreset(): StreamResolutionPreset {
-        return StreamResolutionPreset.fromPref(
-            sharedPreferences.getString(PREF_WEBRTC_RESOLUTION, StreamResolutionPreset.AUTO.prefValue)
+    private fun getWebRTCResolutionPreset(): StreamResolutionPreset =
+        StreamResolutionPreset.fromPref(
+            sharedPreferences.getString(PREF_WEBRTC_RESOLUTION, StreamResolutionPreset.AUTO.prefValue),
         )
-    }
 
-    private fun isDjiSurfaceH264EncoderEnabled(): Boolean = sharedPreferences.getBoolean(
-        WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER,
-        false
-    )
+    private fun isDjiSurfaceH264EncoderEnabled(): Boolean =
+        sharedPreferences.getBoolean(
+            WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER,
+            false,
+        )
 
     private fun toggleDjiSurfaceH264Encoder() {
         val enabled = !isDjiSurfaceH264EncoderEnabled()
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Restart Flight Deck to apply?")
             .setMessage(
                 "Changing the experimental surface H264 encoder will close Flight Deck, " +
                     "return to the main screen, and reopen Flight Deck. Video and telemetry " +
-                    "will briefly stop."
-            )
-            .setPositiveButton("Restart Flight Deck") { _, _ ->
+                    "will briefly stop.",
+            ).setPositiveButton("Restart Flight Deck") { _, _ ->
                 setDjiSurfaceH264Encoder(enabled)
                 Toast.makeText(this, "Restarting Flight Deck...", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     override fun setDjiSurfaceH264Encoder(enabled: Boolean) {
         if (isDjiSurfaceH264EncoderEnabled() == enabled) return
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, enabled)
             .apply()
         if (videoSettingRestartScheduled) return
@@ -1075,32 +1104,34 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun restartFlightDeckForVideoSetting() {
         if (isFinishing || isDestroyed) return
-        val intent = Intent(this, DJIAircraftMainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            putExtra(DJIAircraftMainActivity.EXTRA_REOPEN_FLIGHT_DECK, true)
-        }
+        val intent =
+            Intent(this, DJIAircraftMainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                putExtra(DJIAircraftMainActivity.EXTRA_REOPEN_FLIGHT_DECK, true)
+            }
         startActivity(intent)
         finish()
     }
 
-    private fun getVideoSourceMode(): VideoSourceMode {
-        return VideoSourceMode.fromPref(sharedPreferences.getString(PREF_VIDEO_SOURCE, VideoSourceMode.DJI.prefValue))
-    }
+    private fun getVideoSourceMode(): VideoSourceMode =
+        VideoSourceMode.fromPref(sharedPreferences.getString(PREF_VIDEO_SOURCE, VideoSourceMode.DJI.prefValue))
 
-    private fun getStreamingMode(): StreamingMode {
-        return StreamingMode.fromPref(sharedPreferences.getString(PREF_STREAMING_MODE, StreamingMode.WEBRTC.prefValue))
-    }
+    private fun getStreamingMode(): StreamingMode =
+        StreamingMode.fromPref(sharedPreferences.getString(PREF_STREAMING_MODE, StreamingMode.WEBRTC.prefValue))
 
     override fun setStreamingMode(mode: StreamingMode) {
         sharedPreferences.edit().putString(PREF_STREAMING_MODE, mode.prefValue).apply()
-        if (mode != StreamingMode.WEBRTC && isDetectionsEnabled()
-            && getDetectionSource() == DetectionSource.YOLO_ON_PHONE) {
+        if (mode != StreamingMode.WEBRTC &&
+            isDetectionsEnabled() &&
+            getDetectionSource() == DetectionSource.YOLO_ON_PHONE
+        ) {
             setDetectionsEnabled(false)
-            Toast.makeText(
-                this,
-                "YOLO edge detection deactivated (only supported in WebRTC mode)",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast
+                .makeText(
+                    this,
+                    "YOLO edge detection deactivated (only supported in WebRTC mode)",
+                    Toast.LENGTH_LONG,
+                ).show()
         }
         rebuildTelemetryCache()
         updateStreamingFooter()
@@ -1116,6 +1147,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     private fun getRtspPort(): Int = sharedPreferences.getInt(PREF_RTSP_PORT, 8554)
+
     private fun setRtspPort(port: Int) = sharedPreferences.edit().putInt(PREF_RTSP_PORT, port).apply()
 
     private fun resolveRtspPortForStart(): Int {
@@ -1128,50 +1160,62 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     private fun getRtspUsername(): String = sharedPreferences.getString(PREF_RTSP_USER, "admin") ?: "admin"
+
     private fun setRtspUsername(user: String) = sharedPreferences.edit().putString(PREF_RTSP_USER, user.trim()).apply()
 
     private fun getRtspPassword(): String = sharedPreferences.getString(PREF_RTSP_PWD, "lyrebird") ?: "lyrebird"
+
     private fun setRtspPassword(pwd: String) = sharedPreferences.edit().putString(PREF_RTSP_PWD, pwd).apply()
 
     private fun getAgoraChannel(): String = sharedPreferences.getString(PREF_AGORA_CHANNEL, "") ?: ""
+
     private fun setAgoraChannel(ch: String) = sharedPreferences.edit().putString(PREF_AGORA_CHANNEL, ch.trim()).apply()
 
     private fun getAgoraToken(): String = sharedPreferences.getString(PREF_AGORA_TOKEN, "") ?: ""
+
     private fun setAgoraToken(tok: String) = sharedPreferences.edit().putString(PREF_AGORA_TOKEN, tok.trim()).apply()
 
     private fun getAgoraUid(): String = sharedPreferences.getString(PREF_AGORA_UID, "") ?: ""
+
     private fun setAgoraUid(uid: String) = sharedPreferences.edit().putString(PREF_AGORA_UID, uid.trim()).apply()
 
     private fun getGbServerIp(): String = sharedPreferences.getString(PREF_GB_SERVER_IP, "") ?: ""
+
     private fun setGbServerIp(ip: String) = sharedPreferences.edit().putString(PREF_GB_SERVER_IP, ip.trim()).apply()
 
     private fun getGbServerPort(): Int = sharedPreferences.getInt(PREF_GB_SERVER_PORT, 5060)
+
     private fun setGbServerPort(port: Int) = sharedPreferences.edit().putInt(PREF_GB_SERVER_PORT, port).apply()
 
     private fun getGbServerId(): String = sharedPreferences.getString(PREF_GB_SERVER_ID, "") ?: ""
+
     private fun setGbServerId(id: String) = sharedPreferences.edit().putString(PREF_GB_SERVER_ID, id.trim()).apply()
 
     private fun getGbAgentId(): String = sharedPreferences.getString(PREF_GB_AGENT_ID, "") ?: ""
+
     private fun setGbAgentId(id: String) = sharedPreferences.edit().putString(PREF_GB_AGENT_ID, id.trim()).apply()
 
     private fun getGbChannel(): String = sharedPreferences.getString(PREF_GB_CHANNEL, "") ?: ""
+
     private fun setGbChannel(ch: String) = sharedPreferences.edit().putString(PREF_GB_CHANNEL, ch.trim()).apply()
 
     private fun getGbLocalPort(): Int = sharedPreferences.getInt(PREF_GB_LOCAL_PORT, 5061)
+
     private fun setGbLocalPort(port: Int) = sharedPreferences.edit().putInt(PREF_GB_LOCAL_PORT, port).apply()
 
     private fun getGbPassword(): String = sharedPreferences.getString(PREF_GB_PASSWORD, "") ?: ""
+
     private fun setGbPassword(pwd: String) = sharedPreferences.edit().putString(PREF_GB_PASSWORD, pwd).apply()
 
     private fun setupVideoSourceState() {
         if (!sharedPreferences.contains(PREF_VIDEO_SOURCE)) {
             val legacyMock = sharedPreferences.getBoolean(PREF_MOCK_VIDEO_ENABLED, false)
-            sharedPreferences.edit()
+            sharedPreferences
+                .edit()
                 .putString(
                     PREF_VIDEO_SOURCE,
-                    if (legacyMock) VideoSourceMode.MOCK.prefValue else VideoSourceMode.DJI.prefValue
-                )
-                .apply()
+                    if (legacyMock) VideoSourceMode.MOCK.prefValue else VideoSourceMode.DJI.prefValue,
+                ).apply()
         }
         updateMockVideoVisibility()
         updatePhonePreviewVisibility()
@@ -1180,7 +1224,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun setVideoSourceMode(mode: VideoSourceMode) {
         if (mode == VideoSourceMode.PHONE && !ensureCameraPermissionForPhoneSource(mode)) return
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putString(PREF_VIDEO_SOURCE, mode.prefValue)
             .putBoolean(PREF_MOCK_VIDEO_ENABLED, mode == VideoSourceMode.MOCK)
             .apply()
@@ -1208,20 +1253,26 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         return false
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_PHONE_CAMERA_SOURCE) {
             val pendingMode = pendingVideoSourceAfterPermission
             pendingVideoSourceAfterPermission = null
-            if (pendingMode == VideoSourceMode.PHONE
-                && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            if (pendingMode == VideoSourceMode.PHONE &&
+                grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+            ) {
                 setVideoSourceMode(VideoSourceMode.PHONE)
             } else {
-                Toast.makeText(
-                    this,
-                    "Phone camera source unavailable without camera permission",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast
+                    .makeText(
+                        this,
+                        "Phone camera source unavailable without camera permission",
+                        Toast.LENGTH_SHORT,
+                    ).show()
             }
         }
     }
@@ -1235,12 +1286,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private fun storeEdgeFileSelection(uri: Uri, uriPref: String, namePref: String, label: String): String {
+    private fun storeEdgeFileSelection(
+        uri: Uri,
+        uriPref: String,
+        namePref: String,
+        label: String,
+    ): String {
         runCatching {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }.onFailure { Log.d(TAG, "Could not persist $label URI permission: ${it.message}") }
         val displayName = uri.lastPathSegment?.substringAfterLast('/') ?: uri.toString().substringAfterLast('/')
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putString(uriPref, uri.toString())
             .putString(namePref, displayName)
             .apply()
@@ -1273,20 +1330,23 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val compactHeight = resources.getDimensionPixelSize(R.dimen.uxsdk_100_dp)
         val screenWidth = resources.displayMetrics.widthPixels
         val screenHeight = resources.displayMetrics.heightPixels
-        val width = if (expanded) {
-            (screenWidth - dpToPx(24)).coerceAtLeast(compactWidth)
-        } else {
-            compactWidth
-        }
-        val height = if (expanded) {
-            (screenHeight - dpToPx(96)).coerceAtLeast(compactHeight)
-        } else {
-            compactHeight
-        }
-        mapWidget.layoutParams = mapWidget.layoutParams.apply {
-            this.width = width
-            this.height = height
-        }
+        val width =
+            if (expanded) {
+                (screenWidth - dpToPx(24)).coerceAtLeast(compactWidth)
+            } else {
+                compactWidth
+            }
+        val height =
+            if (expanded) {
+                (screenHeight - dpToPx(96)).coerceAtLeast(compactHeight)
+            } else {
+                compactHeight
+            }
+        mapWidget.layoutParams =
+            mapWidget.layoutParams.apply {
+                this.width = width
+                this.height = height
+            }
         mapWidget.setMapCenterLock(if (expanded) MapWidget.MapCenterLock.NONE else MapWidget.MapCenterLock.AIRCRAFT)
         mapWidget.setAutoFrameMapEnabled(false)
         // The expanded map is brought to the front over the whole screen, including the corner the
@@ -1299,65 +1359,79 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         mapWidget.requestLayout()
     }
 
-    private fun dpToPx(value: Int): Int {
-        return (value * resources.displayMetrics.density).toInt()
-    }
+    private fun dpToPx(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun actionRowAdapter(rows: List<SettingsActionRow>): ArrayAdapter<SettingsActionRow> {
         return object : ArrayAdapter<SettingsActionRow>(this, 0, rows) {
             override fun isEnabled(position: Int): Boolean = getItem(position)?.enabled == true
 
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            override fun getView(
+                position: Int,
+                convertView: View?,
+                parent: ViewGroup,
+            ): View {
                 val row = getItem(position) ?: SettingsActionRow("")
-                val root = (convertView as? LinearLayout) ?: LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.CENTER_VERTICAL
-                    setPadding(dpToPx(18), dpToPx(12), dpToPx(14), dpToPx(12))
-                    minimumHeight = dpToPx(68)
-                }
+                val root =
+                    (convertView as? LinearLayout) ?: LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        setPadding(dpToPx(18), dpToPx(12), dpToPx(14), dpToPx(12))
+                        minimumHeight = dpToPx(68)
+                    }
                 root.removeAllViews()
                 root.alpha = if (row.enabled) 1.0f else 0.45f
-                root.background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(0xFFF7F9FC.toInt())
-                    setStroke(dpToPx(1), 0xFFE1E7EF.toInt())
-                }
+                root.background =
+                    android.graphics.drawable.GradientDrawable().apply {
+                        setColor(0xFFF7F9FC.toInt())
+                        setStroke(dpToPx(1), 0xFFE1E7EF.toInt())
+                    }
 
-                val textColumn = LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-                textColumn.addView(TextView(context).apply {
-                    text = row.title
-                    setTextColor(0xFF1F2937.toInt())
-                    textSize = 15f
-                    setTypeface(
-                        ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk),
-                        android.graphics.Typeface.BOLD
-                    )
-                })
+                val textColumn =
+                    LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                textColumn.addView(
+                    TextView(context).apply {
+                        text = row.title
+                        setTextColor(0xFF1F2937.toInt())
+                        textSize = 15f
+                        setTypeface(
+                            ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk),
+                            android.graphics.Typeface.BOLD,
+                        )
+                    },
+                )
                 row.detail?.takeIf { it.isNotBlank() }?.let { detail ->
-                    textColumn.addView(TextView(context).apply {
-                        text = detail
-                        setTextColor(0xFF5F6F82.toInt())
-                        textSize = 13f
-                        maxLines = 1
-                        ellipsize = android.text.TextUtils.TruncateAt.END
-                    })
+                    textColumn.addView(
+                        TextView(context).apply {
+                            text = detail
+                            setTextColor(0xFF5F6F82.toInt())
+                            textSize = 13f
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                        },
+                    )
                 }
                 root.addView(textColumn)
-                root.addView(TextView(context).apply {
-                    text = "›"
-                    setTextColor(0xFF78C7FF.toInt())
-                    textSize = 24f
-                    setPadding(dpToPx(12), 0, 0, 0)
-                    visibility = if (row.enabled) View.VISIBLE else View.INVISIBLE
-                })
+                root.addView(
+                    TextView(context).apply {
+                        text = "›"
+                        setTextColor(0xFF78C7FF.toInt())
+                        textSize = 24f
+                        setPadding(dpToPx(12), 0, 0, 0)
+                        visibility = if (row.enabled) View.VISIBLE else View.INVISIBLE
+                    },
+                )
                 return root
             }
         }
     }
 
-    private fun trySelectSiblingEdgeLabels(modelUri: Uri, modelName: String) {
+    private fun trySelectSiblingEdgeLabels(
+        modelUri: Uri,
+        modelName: String,
+    ) {
         val labelsUri = findSiblingLabelsUri(modelUri, modelName) ?: return
         val labelsName =
             labelsUri.lastPathSegment?.substringAfterLast('/') ?: labelsUri.toString().substringAfterLast('/')
@@ -1365,57 +1439,64 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         runCatching {
             contentResolver.takePersistableUriPermission(labelsUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }.onFailure { Log.d(TAG, "Could not persist auto edge labels URI permission: ${it.message}") }
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putString(PREF_EDGE_LABELS_URI, labelsUri.toString())
             .putString(PREF_EDGE_LABELS_NAME, labelsName)
             .apply()
         Toast.makeText(this, "Edge labels auto-selected: $labelsName", Toast.LENGTH_SHORT).show()
     }
 
-    private fun findSiblingLabelsUri(modelUri: Uri, modelName: String): Uri? {
-        val folderId = if (DocumentsContract.isDocumentUri(this, modelUri)) {
-            runCatching { DocumentsContract.getDocumentId(modelUri) }
-                .getOrNull()
-                ?.substringBeforeLast('/', missingDelimiterValue = "")
-                ?.takeIf { it.isNotBlank() }
-        } else {
-            null
-        }
+    private fun findSiblingLabelsUri(
+        modelUri: Uri,
+        modelName: String,
+    ): Uri? {
+        val folderId =
+            if (DocumentsContract.isDocumentUri(this, modelUri)) {
+                runCatching { DocumentsContract.getDocumentId(modelUri) }
+                    .getOrNull()
+                    ?.substringBeforeLast('/', missingDelimiterValue = "")
+                    ?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
 
         return folderId?.let { parentFolderId ->
             val candidateNames = candidateLabelNames(modelName)
-            val siblingMatch = candidateNames
-                .asSequence()
-                .map { DocumentsContract.buildDocumentUri(modelUri.authority, "$parentFolderId/$it") }
-                .firstOrNull { readEdgeLabels(it).isNotEmpty() }
+            val siblingMatch =
+                candidateNames
+                    .asSequence()
+                    .map { DocumentsContract.buildDocumentUri(modelUri.authority, "$parentFolderId/$it") }
+                    .firstOrNull { readEdgeLabels(it).isNotEmpty() }
 
             siblingMatch ?: run {
                 val candidateNameSet = candidateNames.map { it.lowercase(java.util.Locale.US) }.toSet()
                 val childrenUri = DocumentsContract.buildChildDocumentsUri(modelUri.authority, parentFolderId)
                 runCatching {
-                    contentResolver.query(
-                        childrenUri,
-                        arrayOf(
-                            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                            DocumentsContract.Document.COLUMN_DISPLAY_NAME
-                        ),
-                        null,
-                        null,
-                        null
-                    )?.use { cursor ->
-                        val idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                        val nameIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                        while (cursor.moveToNext()) {
-                            val name = cursor.getString(nameIndex) ?: continue
-                            if (candidateNameSet.contains(name.lowercase(java.util.Locale.US))) {
-                                return@use DocumentsContract.buildDocumentUri(
-                                    modelUri.authority,
-                                    cursor.getString(idIndex)
-                                )
+                    contentResolver
+                        .query(
+                            childrenUri,
+                            arrayOf(
+                                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                            ),
+                            null,
+                            null,
+                            null,
+                        )?.use { cursor ->
+                            val idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                            val nameIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                            while (cursor.moveToNext()) {
+                                val name = cursor.getString(nameIndex) ?: continue
+                                if (candidateNameSet.contains(name.lowercase(java.util.Locale.US))) {
+                                    return@use DocumentsContract.buildDocumentUri(
+                                        modelUri.authority,
+                                        cursor.getString(idIndex),
+                                    )
+                                }
                             }
+                            null
                         }
-                        null
-                    }
                 }.getOrElse { error ->
                     Log.d(TAG, "Could not scan model sibling labels: ${error.message}")
                     null
@@ -1426,66 +1507,70 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun candidateLabelNames(modelName: String): List<String> {
         val base = modelName.substringBeforeLast('.')
-        val simplified = base
-            .removeSuffix("_dynamic_range_quant")
-            .removeSuffix("_float32")
-            .removeSuffix("_float16")
-            .removeSuffix("_int8")
-            .replace(Regex("_320$"), "")
+        val simplified =
+            base
+                .removeSuffix("_dynamic_range_quant")
+                .removeSuffix("_float32")
+                .removeSuffix("_float16")
+                .removeSuffix("_int8")
+                .replace(Regex("_320$"), "")
         return listOf(
             "$base.txt",
             "${base}_labels.txt",
             "$simplified.txt",
-            "${simplified}_labels.txt"
+            "${simplified}_labels.txt",
         )
     }
 
-    private fun getEdgeModelUri(): Uri? {
-        return sharedPreferences.getString(PREF_EDGE_MODEL_URI, null)?.let(Uri::parse)
-    }
+    private fun getEdgeModelUri(): Uri? = sharedPreferences.getString(PREF_EDGE_MODEL_URI, null)?.let(Uri::parse)
 
     private fun getEdgeLabels(): List<String> {
-        val labelsUri = sharedPreferences.getString(
-            PREF_EDGE_LABELS_URI,
-            null
-        )?.let(Uri::parse) ?: return listOf("person")
+        val labelsUri =
+            sharedPreferences
+                .getString(
+                    PREF_EDGE_LABELS_URI,
+                    null,
+                )?.let(Uri::parse) ?: return listOf("person")
         return readEdgeLabels(labelsUri).ifEmpty { listOf("person") }
     }
 
-    private fun getEdgeConfidenceThreshold(): Float {
-        return sharedPreferences.getFloat(PREF_EDGE_CONFIDENCE_THRESHOLD, DEFAULT_EDGE_CONFIDENCE_THRESHOLD)
+    private fun getEdgeConfidenceThreshold(): Float =
+        sharedPreferences
+            .getFloat(PREF_EDGE_CONFIDENCE_THRESHOLD, DEFAULT_EDGE_CONFIDENCE_THRESHOLD)
             .coerceIn(0.01f, 0.99f)
-    }
 
-    private fun readEdgeLabels(labelsUri: Uri): List<String> {
-        return runCatching {
-            contentResolver.openInputStream(labelsUri)?.bufferedReader()?.useLines { lines ->
-                lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
-            }.orEmpty()
+    private fun readEdgeLabels(labelsUri: Uri): List<String> =
+        runCatching {
+            contentResolver
+                .openInputStream(labelsUri)
+                ?.bufferedReader()
+                ?.useLines { lines ->
+                    lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                }.orEmpty()
         }.getOrElse { error ->
             Log.e(TAG, "Failed to read edge labels: ${error.message}", error)
             emptyList()
         }
-    }
 
-    private fun showEdgeFilePicker(requestCode: Int, title: String) {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_TITLE, title)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        }
+    private fun showEdgeFilePicker(
+        requestCode: Int,
+        title: String,
+    ) {
+        val intent =
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(Intent.EXTRA_TITLE, title)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            }
         pendingEdgePickerRequestCode = requestCode
         edgeFilePickerLauncher.launch(intent)
     }
 
-    private fun isMockVideoEnabled(): Boolean {
-        return getVideoSourceMode() == VideoSourceMode.MOCK
-    }
+    private fun isMockVideoEnabled(): Boolean = getVideoSourceMode() == VideoSourceMode.MOCK
 
-    private fun shouldUseMockTelemetry(): Boolean {
-        return getVideoSourceMode() == VideoSourceMode.MOCK || getVideoSourceMode() == VideoSourceMode.PHONE
-    }
+    private fun shouldUseMockTelemetry(): Boolean =
+        getVideoSourceMode() == VideoSourceMode.MOCK || getVideoSourceMode() == VideoSourceMode.PHONE
 
     // ===== M400: rebind gimbal keys to PORT_3 once the PORT_3 camera video is up =====
     // The no-index gimbal keys can resolve to the wrong gimbal on the multi-port M400. We wait for
@@ -1493,6 +1578,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     // gimbal keys bound explicitly to PORT_3 and enable RC-stick gimbal control. One-shot per connection.
     @Volatile
     private var gimbalKeysReboundForM400 = false
+
     @Volatile
     private var mainCamFrameDetectorRegistered = false
 
@@ -1500,22 +1586,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         get() = MediaDataCenter.getInstance().cameraStreamManager
 
     @Volatile private var lastDetectedFrameWidth = 0
+
     @Volatile private var lastDetectedFrameHeight = 0
 
     // One-shot frame listener: the first frame on PORT_3 triggers the rebind, then detaches.
-    private val mainCamFirstFrameListener = object : ICameraStreamManager.CameraFrameListener {
-        override fun onFrame(
-            frameData: ByteArray, offset: Int, length: Int,
-            width: Int, height: Int, format: ICameraStreamManager.FrameFormat
-        ) {
-            lastDetectedFrameWidth = width
-            lastDetectedFrameHeight = height
-            mainHandler.post { onMainCameraFirstFrame() }
+    private val mainCamFirstFrameListener =
+        object : ICameraStreamManager.CameraFrameListener {
+            override fun onFrame(
+                frameData: ByteArray,
+                offset: Int,
+                length: Int,
+                width: Int,
+                height: Int,
+                format: ICameraStreamManager.FrameFormat,
+            ) {
+                lastDetectedFrameWidth = width
+                lastDetectedFrameHeight = height
+                mainHandler.post { onMainCameraFirstFrame() }
+            }
         }
-    }
 
-    private fun isMatrice400(): Boolean =
-        ProductKey.KeyProductType.create().get(ProductType.UNKNOWN) == ProductType.DJI_MATRICE_400
+    private fun isMatrice400(): Boolean = ProductKey.KeyProductType.create().get(ProductType.UNKNOWN) == ProductType.DJI_MATRICE_400
 
     private fun registerMainCamFrameDetector() {
         if (mainCamFrameDetectorRegistered || gimbalKeysReboundForM400) return
@@ -1526,7 +1617,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             cameraStreamManager.addFrameListener(
                 ComponentIndexType.PORT_3,
                 ICameraStreamManager.FrameFormat.NV21,
-                mainCamFirstFrameListener
+                mainCamFirstFrameListener,
             )
             mainCamFrameDetectorRegistered = true
             Log.i(TAG, "PORT_3 frame detector armed (stream enabled)")
@@ -1548,7 +1639,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         unregisterMainCamFrameDetector()
 
         val m400 = isMatrice400()
-        Log.i(TAG, "PORT_3 first frame ${lastDetectedFrameWidth}x${lastDetectedFrameHeight} (M400=$m400)")
+        Log.i(TAG, "PORT_3 first frame ${lastDetectedFrameWidth}x$lastDetectedFrameHeight (M400=$m400)")
 
         if (gimbalKeysReboundForM400 || !m400) return
         gimbalKeysReboundForM400 = true
@@ -1576,7 +1667,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         RemoteControllerKey.KeyControllingGimbal.create().set(
             ComponentIndexType.PORT_3,
             onSuccess = { Log.i(TAG, "M400: RC now controlling PORT_3 gimbal") },
-            onFailure = { error -> Log.e(TAG, "M400: set controllingGimbal failed: ${error.description()}") }
+            onFailure = { error -> Log.e(TAG, "M400: set controllingGimbal failed: ${error.description()}") },
         )
     }
 
@@ -1590,18 +1681,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val lens = CameraLensType.CAMERA_LENS_THERMAL
         Log.i(TAG_THERMAL, "Arming thermal measurement on camera index=$idx lens=THERMAL")
 
-        CameraKey.KeyThermalTemperatureDataEnabled.createCamera(idx, lens).set(true,
+        CameraKey.KeyThermalTemperatureDataEnabled.createCamera(idx, lens).set(
+            true,
             onSuccess = { Log.i(TAG_THERMAL, "ThermalTemperatureDataEnabled=true OK") },
-            onFailure = { e -> Log.e(TAG_THERMAL, "set TemperatureDataEnabled failed: ${e.description()}") })
+            onFailure = { e -> Log.e(TAG_THERMAL, "set TemperatureDataEnabled failed: ${e.description()}") },
+        )
 
-        CameraKey.KeyThermalTemperatureMeasureMode.createCamera(idx, lens).set(ThermalTemperatureMeasureMode.REGION,
+        CameraKey.KeyThermalTemperatureMeasureMode.createCamera(idx, lens).set(
+            ThermalTemperatureMeasureMode.REGION,
             onSuccess = {
                 Log.i(TAG_THERMAL, "MeasureMode=REGION OK; setting full-frame area")
-                CameraKey.KeyThermalRegionMetersureArea.createCamera(idx, lens).set(DoubleRect(0.0, 0.0, 1.0, 1.0),
+                CameraKey.KeyThermalRegionMetersureArea.createCamera(idx, lens).set(
+                    DoubleRect(0.0, 0.0, 1.0, 1.0),
                     onSuccess = { Log.i(TAG_THERMAL, "Region area=full-frame OK") },
-                    onFailure = { e -> Log.e(TAG_THERMAL, "set Region area failed: ${e.description()}") })
+                    onFailure = { e -> Log.e(TAG_THERMAL, "set Region area failed: ${e.description()}") },
+                )
             },
-            onFailure = { e -> Log.e(TAG_THERMAL, "set MeasureMode failed: ${e.description()}") })
+            onFailure = { e -> Log.e(TAG_THERMAL, "set MeasureMode failed: ${e.description()}") },
+        )
     }
 
     private fun disarmThermalMeasurement() {
@@ -1612,11 +1709,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         findViewById<Switch>(R.id.sw_auto_sensing)?.isChecked = checked
     }
 
-    private fun jsonEscape(value: String): String =
-        value.replace("\\", "\\\\").replace("\"", "\\\"")
+    private fun jsonEscape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
-    override fun readSettingsJson(): String {
-        return buildString {
+    override fun readSettingsJson(): String =
+        buildString {
             append("{")
             append("\"droneName\":\"${jsonEscape(droneName)}\",")
             append("\"aircraftSerialNumber\":\"${jsonEscape(droneSerialNumber)}\",")
@@ -1671,13 +1767,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             append("}")
             append("}")
         }
-    }
 
     override fun setDroneName(name: String): Boolean {
         val trimmed = name.trim()
         if (trimmed.isEmpty() || trimmed.length > 32) return false
         droneName = trimmed
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putString(PREF_DRONE_NAME, trimmed)
             .putBoolean(PREF_DRONE_NAME_USER_SET, true)
             .apply()
@@ -1694,15 +1790,17 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     override fun setMavlinkSystemId(value: Int): Boolean {
         if (value != MavlinkSystemId.AUTO && !MavlinkSystemId.isManual(value)) return false
-        val current = prefIntOrDefault(
-            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
-        )
+        val current =
+            prefIntOrDefault(
+                MavlinkEndpointConfig.PREF_SYSTEM_ID,
+                MavlinkEndpointConfig.DEFAULT_SYSTEM_ID,
+            )
         sharedPreferences.edit().putInt(MavlinkEndpointConfig.PREF_SYSTEM_ID, value).apply()
         if (current != value) restartMavlinkEndpoint()
         mainHandler.post { updateDroneNameDisplay() }
         Log.i(
             TAG,
-            "MAVLink vehicle ID set to ${if (value == MavlinkSystemId.AUTO) "automatic" else value}"
+            "MAVLink vehicle ID set to ${if (value == MavlinkSystemId.AUTO) "automatic" else value}",
         )
         return true
     }
@@ -1748,8 +1846,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         return true
     }
 
-    private fun getMediamtxServer(): String =
-        sharedPreferences.getString(PREF_MEDIAMTX_SERVER, "")?.trim().orEmpty()
+    private fun getMediamtxServer(): String = sharedPreferences.getString(PREF_MEDIAMTX_SERVER, "")?.trim().orEmpty()
 
     override fun readThermalMaxTempNow(): Double? {
         // Make sure the pipeline is armed even if capture is the very first thermal action.
@@ -1758,23 +1855,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             val idx = thermalCameraIndex()
             val lens = CameraLensType.CAMERA_LENS_THERMAL
             val globalMax = CameraKey.KeyThermalGlobalMaxTemperature.createCamera(idx, lens).get()
-            val regionMax = CameraKey.KeyThermalRegionMetersureTemperature.createCamera(
-                idx,
-                lens
-            ).get()?.maxAreaTemperature
+            val regionMax =
+                CameraKey.KeyThermalRegionMetersureTemperature
+                    .createCamera(
+                        idx,
+                        lens,
+                    ).get()
+                    ?.maxAreaTemperature
             val maxTemp = globalMax ?: regionMax
             Log.i(TAG_THERMAL, "[capture read] idx=$idx globalMax=$globalMax regionMax=$regionMax -> $maxTemp")
             maxTemp
         }.onFailure { Log.e(TAG_THERMAL, "[capture read] error: ${it.message}", it) }.getOrNull()
     }
 
-    override fun hasThermalCamera(): Boolean = runCatching {
-        // The same key the temperature read uses: it resolves only when a thermal lens is
-        // actually present, so this is the honest "would Temp/Thermal do anything" probe.
-        CameraKey.KeyThermalGlobalMaxTemperature
-            .createCamera(thermalCameraIndex(), CameraLensType.CAMERA_LENS_THERMAL)
-            .get() != null
-    }.getOrDefault(false)
+    override fun hasThermalCamera(): Boolean =
+        runCatching {
+            // The same key the temperature read uses: it resolves only when a thermal lens is
+            // actually present, so this is the honest "would Temp/Thermal do anything" probe.
+            CameraKey.KeyThermalGlobalMaxTemperature
+                .createCamera(thermalCameraIndex(), CameraLensType.CAMERA_LENS_THERMAL)
+                .get() != null
+        }.getOrDefault(false)
     // ==================== End Thermal max-temperature readout ====================
 
     private fun setupAircraftConnectionListener() {
@@ -1807,7 +1908,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun isAircraftPresent(): Boolean = flightControllerConnectionKey.get(false)
 
-    private fun applyAircraftConnectionState(isConnected: Boolean, forceDroneSourceDefault: Boolean = false) {
+    private fun applyAircraftConnectionState(
+        isConnected: Boolean,
+        forceDroneSourceDefault: Boolean = false,
+    ) {
         val wasConnected = aircraftConnected
         aircraftConnected = isConnected
         logConnectionKeySnapshot("flightController listener fired: $wasConnected -> $isConnected")
@@ -1818,7 +1922,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             fetchDroneSerialNumber()
         }
         if (shouldSwitchToDroneVideoSource(isConnected, wasConnected, forceDroneSourceDefault)) {
-            sharedPreferences.edit()
+            sharedPreferences
+                .edit()
                 .putString(PREF_VIDEO_SOURCE, VideoSourceMode.DJI.prefValue)
                 .putBoolean(PREF_MOCK_VIDEO_ENABLED, false)
                 .apply()
@@ -1871,7 +1976,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun shouldSwitchToDroneVideoSource(
         isConnected: Boolean,
         wasConnected: Boolean,
-        forceDroneSourceDefault: Boolean
+        forceDroneSourceDefault: Boolean,
     ): Boolean {
         val shouldSelectDroneSource = forceDroneSourceDefault || !wasConnected
         return isConnected && shouldSelectDroneSource && getVideoSourceMode() != VideoSourceMode.DJI
@@ -1889,19 +1994,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun setupPhoneVideoPreview() {
         findViewById<TextureView>(R.id.phone_camera_preview)?.surfaceTextureListener =
             object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                updatePhonePreviewVisibility()
+                override fun onSurfaceTextureAvailable(
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int,
+                ) {
+                    updatePhonePreviewVisibility()
+                }
+
+                override fun onSurfaceTextureSizeChanged(
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int,
+                ) = Unit
+
+                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                    stopPhoneCameraPreview()
+                    return true
+                }
+
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
             }
-
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
-
-            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                stopPhoneCameraPreview()
-                return true
-            }
-
-            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
-        }
         updatePhonePreviewVisibility()
     }
 
@@ -1919,7 +2032,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private fun configurePhonePreviewTransform(preview: TextureView, sourceWidth: Int, sourceHeight: Int) {
+    private fun configurePhonePreviewTransform(
+        preview: TextureView,
+        sourceWidth: Int,
+        sourceHeight: Int,
+    ) {
         val viewWidth = preview.width.toFloat().takeIf { it > 0f } ?: return
         val viewHeight = preview.height.toFloat().takeIf { it > 0f } ?: return
         // Context.getDisplay() is API 30+; ContextCompat.getDisplayOrDefault returns null
@@ -1930,9 +2047,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val centerX = viewRect.centerX()
         val centerY = viewRect.centerY()
         if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
-            val bufferRect = RectF(0f, 0f, sourceHeight.toFloat(), sourceWidth.toFloat()).apply {
-                offset(centerX - centerX(), centerY - centerY())
-            }
+            val bufferRect =
+                RectF(0f, 0f, sourceHeight.toFloat(), sourceWidth.toFloat()).apply {
+                    offset(centerX - centerX(), centerY - centerY())
+                }
             matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
             val scale = maxOf(viewHeight / sourceHeight.toFloat(), viewWidth / sourceWidth.toFloat())
             matrix.postScale(scale, scale, centerX, centerY)
@@ -1945,37 +2063,46 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     private fun startPhoneCameraPreview(surfaceTexture: SurfaceTexture) {
-        val canStart = getVideoSourceMode() == VideoSourceMode.PHONE &&
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-            phoneCameraDevice == null
+        val canStart =
+            getVideoSourceMode() == VideoSourceMode.PHONE &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+                phoneCameraDevice == null
         if (!canStart) return
 
         runCatching {
             val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
-                cameraManager.getCameraCharacteristics(id)
-                    .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-            } ?: cameraManager.cameraIdList.firstOrNull()
+            val cameraId =
+                cameraManager.cameraIdList.firstOrNull { id ->
+                    cameraManager
+                        .getCameraCharacteristics(id)
+                        .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+                } ?: cameraManager.cameraIdList.firstOrNull()
 
             if (cameraId == null) {
                 Log.e(TAG, "No phone camera available for preview")
                 stopPhoneCameraPreview()
             } else {
                 val characteristics = cameraManager.getCameraCharacteristics(cameraId)
-                val previewSize = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    ?.getOutputSizes(SurfaceTexture::class.java)
-                    ?.sortedWith(compareBy(
-                        { kotlin.math.abs(it.width - 1920) + kotlin.math.abs(it.height - 1080) },
-                        { it.width * it.height }
-                    ))
-                    ?.firstOrNull()
-                val phoneFrameSize = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    ?.getOutputSizes(ImageFormat.YUV_420_888)
-                    ?.sortedWith(compareBy(
-                        { kotlin.math.abs(it.width - 1280) + kotlin.math.abs(it.height - 720) },
-                        { it.width * it.height }
-                    ))
-                    ?.firstOrNull()
+                val previewSize =
+                    characteristics
+                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                        ?.getOutputSizes(SurfaceTexture::class.java)
+                        ?.sortedWith(
+                            compareBy(
+                                { kotlin.math.abs(it.width - 1920) + kotlin.math.abs(it.height - 1080) },
+                                { it.width * it.height },
+                            ),
+                        )?.firstOrNull()
+                val phoneFrameSize =
+                    characteristics
+                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                        ?.getOutputSizes(ImageFormat.YUV_420_888)
+                        ?.sortedWith(
+                            compareBy(
+                                { kotlin.math.abs(it.width - 1280) + kotlin.math.abs(it.height - 720) },
+                                { it.width * it.height },
+                            ),
+                        )?.firstOrNull()
 
                 val width = previewSize?.width ?: 1920
                 val height = previewSize?.height ?: 1080
@@ -1992,28 +2119,36 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 val frameWidth = phoneFrameSize?.width ?: 1280
                 val frameHeight = phoneFrameSize?.height ?: 720
                 detectionOverlay?.setSourceFrameSize(frameWidth, frameHeight)
-                phoneImageReader = ImageReader.newInstance(frameWidth, frameHeight, ImageFormat.YUV_420_888, 3).apply {
-                    setOnImageAvailableListener({ reader -> handlePhoneInferenceImage(reader) }, phoneCameraHandler)
-                }
-                Log.i(TAG, "Phone shared frame reader configured: ${frameWidth}x${frameHeight}")
-
-                cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
-                    override fun onOpened(camera: CameraDevice) {
-                        phoneCameraDevice = camera
-                        createPhonePreviewSession(camera, surface)
-                        Log.i(TAG, "Phone camera preview opened: $cameraId ${width}x${height}")
+                phoneImageReader =
+                    ImageReader.newInstance(frameWidth, frameHeight, ImageFormat.YUV_420_888, 3).apply {
+                        setOnImageAvailableListener({ reader -> handlePhoneInferenceImage(reader) }, phoneCameraHandler)
                     }
+                Log.i(TAG, "Phone shared frame reader configured: ${frameWidth}x$frameHeight")
 
-                    override fun onDisconnected(camera: CameraDevice) {
-                        Log.w(TAG, "Phone camera preview disconnected")
-                        stopPhoneCameraPreview()
-                    }
+                cameraManager.openCamera(
+                    cameraId,
+                    object : CameraDevice.StateCallback() {
+                        override fun onOpened(camera: CameraDevice) {
+                            phoneCameraDevice = camera
+                            createPhonePreviewSession(camera, surface)
+                            Log.i(TAG, "Phone camera preview opened: $cameraId ${width}x$height")
+                        }
 
-                    override fun onError(camera: CameraDevice, error: Int) {
-                        Log.e(TAG, "Phone camera preview error: $error")
-                        stopPhoneCameraPreview()
-                    }
-                }, phoneCameraHandler)
+                        override fun onDisconnected(camera: CameraDevice) {
+                            Log.w(TAG, "Phone camera preview disconnected")
+                            stopPhoneCameraPreview()
+                        }
+
+                        override fun onError(
+                            camera: CameraDevice,
+                            error: Int,
+                        ) {
+                            Log.e(TAG, "Phone camera preview error: $error")
+                            stopPhoneCameraPreview()
+                        }
+                    },
+                    phoneCameraHandler,
+                )
             }
         }.onFailure { error ->
             Log.e(TAG, "Failed to start phone camera preview: ${error.message}", error)
@@ -2021,37 +2156,44 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private fun createPhonePreviewSession(camera: CameraDevice, surface: Surface) {
+    private fun createPhonePreviewSession(
+        camera: CameraDevice,
+        surface: Surface,
+    ) {
         runCatching {
-            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
-                phoneImageReader?.surface?.let { addTarget(it) }
-                set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-            }
+            val request =
+                camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                    addTarget(surface)
+                    phoneImageReader?.surface?.let { addTarget(it) }
+                    set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                }
             val surfaces = listOfNotNull(surface, phoneImageReader?.surface)
-            val callback = object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    phoneCameraSession = session
-                    runCatching { session.setRepeatingRequest(request.build(), null, phoneCameraHandler) }
-                        .onFailure { Log.e(TAG, "Failed to start phone preview repeating request: ${it.message}", it) }
-                }
+            val callback =
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        phoneCameraSession = session
+                        runCatching { session.setRepeatingRequest(request.build(), null, phoneCameraHandler) }
+                            .onFailure { Log.e(TAG, "Failed to start phone preview repeating request: ${it.message}", it) }
+                    }
 
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.e(TAG, "Phone camera preview session configure failed")
-                    stopPhoneCameraPreview()
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        Log.e(TAG, "Phone camera preview session configure failed")
+                        stopPhoneCameraPreview()
+                    }
                 }
-            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val outputConfigs = surfaces.map { OutputConfiguration(it) }
-                val executor = phoneCameraHandler?.let { handler ->
-                    java.util.concurrent.Executor { command -> handler.post(command) }
-                } ?: mainExecutor
-                val sessionConfig = SessionConfiguration(
-                    SessionConfiguration.SESSION_REGULAR,
-                    outputConfigs,
-                    executor,
-                    callback
-                )
+                val executor =
+                    phoneCameraHandler?.let { handler ->
+                        java.util.concurrent.Executor { command -> handler.post(command) }
+                    } ?: mainExecutor
+                val sessionConfig =
+                    SessionConfiguration(
+                        SessionConfiguration.SESSION_REGULAR,
+                        outputConfigs,
+                        executor,
+                        callback,
+                    )
                 camera.createCaptureSession(sessionConfig)
             } else {
                 @Suppress("DEPRECATION")
@@ -2089,9 +2231,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         } else {
             SharedPhoneCameraFrameSource.offerImage(image, timestampNs)
             val controller = edgeDetectionController
-            val canRunInference = controller != null &&
-                timestampNs - lastPhoneEdgeFrameNs >= PHONE_EDGE_FRAME_INTERVAL_NS &&
-                phoneInferenceBusy.compareAndSet(false, true)
+            val canRunInference =
+                controller != null &&
+                    timestampNs - lastPhoneEdgeFrameNs >= PHONE_EDGE_FRAME_INTERVAL_NS &&
+                    phoneInferenceBusy.compareAndSet(false, true)
             if (!canRunInference) {
                 image.close()
             } else {
@@ -2106,19 +2249,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun setupMockVideoPreview() {
         findViewById<TextureView>(R.id.mock_video_preview)?.surfaceTextureListener =
             object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                updateMockPreviewVisibility()
+                override fun onSurfaceTextureAvailable(
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int,
+                ) {
+                    updateMockPreviewVisibility()
+                }
+
+                override fun onSurfaceTextureSizeChanged(
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int,
+                ) = Unit
+
+                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                    stopMockVideoPreview()
+                    return true
+                }
+
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
             }
-
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
-
-            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                stopMockVideoPreview()
-                return true
-            }
-
-            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
-        }
         updateMockPreviewVisibility()
     }
 
@@ -2145,17 +2296,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         runCatching {
             val descriptor = assets.openFd("mock_video/jellyfish_1080_10s_5mb.mp4")
             val surface = Surface(surfaceTexture)
-            mockPreviewPlayer = MediaPlayer().apply {
-                setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
-                setSurface(surface)
-                isLooping = true
-                setOnPreparedListener { player -> player.start() }
-                setOnErrorListener { _, what, extra ->
-                    Log.e(TAG, "Mock preview player error: what=$what extra=$extra")
-                    true
+            mockPreviewPlayer =
+                MediaPlayer().apply {
+                    setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
+                    setSurface(surface)
+                    isLooping = true
+                    setOnPreparedListener { player -> player.start() }
+                    setOnErrorListener { _, what, extra ->
+                        Log.e(TAG, "Mock preview player error: what=$what extra=$extra")
+                        true
+                    }
+                    prepareAsync()
                 }
-                prepareAsync()
-            }
             descriptor.close()
             surface.release()
         }.onFailure { error ->
@@ -2189,7 +2341,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             enabled = shouldUseMockTelemetry(),
             baseLatitude = phoneLocation?.latitude,
             baseLongitude = phoneLocation?.longitude,
-            baseAltitude = phoneLocation?.altitude
+            baseAltitude = phoneLocation?.altitude,
         )
         rebuildTelemetryCache()
     }
@@ -2205,13 +2357,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun applyDetectedDroneProfile(productType: ProductType) {
         val controlProfile = DroneControlProfiles.fromProductType(productType)
-        val controlLabel = when (controlProfile) {
-            DroneControlProfile.MATRICE_300_RTK -> "CTRL M300"
-            DroneControlProfile.MATRICE_350_RTK -> "CTRL M350"
-            DroneControlProfile.MATRICE_400 -> "CTRL M400"
-            DroneControlProfile.MINI_4_PRO -> "CTRL MINI4"
-            DroneControlProfile.MAVIC_3_ENTERPRISE -> "CTRL MAVIC3"
-        }
+        val controlLabel =
+            when (controlProfile) {
+                DroneControlProfile.MATRICE_300_RTK -> "CTRL M300"
+                DroneControlProfile.MATRICE_350_RTK -> "CTRL M350"
+                DroneControlProfile.MATRICE_400 -> "CTRL M400"
+                DroneControlProfile.MINI_4_PRO -> "CTRL MINI4"
+                DroneControlProfile.MAVIC_3_ENTERPRISE -> "CTRL MAVIC3"
+            }
         findViewById<TextView>(R.id.text_control_profile)?.text = controlLabel
         Log.i(TAG, "Detected product $productType -> using ${controlProfile.displayName} profile")
 
@@ -2240,31 +2393,34 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
         val footer = findViewById<TextView>(R.id.text_webrtc_metrics) ?: return
         val mode = getStreamingMode()
-        val message = when (mode) {
-            StreamingMode.WEBRTC -> lastWebRTCMetrics.compactLabel()
-            StreamingMode.RTMP -> {
-                val serverIp = lastClientIp ?: NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
-                val rtmpUrl = getRtmpUrl(serverIp)
-                "RTMP ${if (liveStreamVM.isStreaming()) "running" else "idle"} url $rtmpUrl $lastNativeStreamStatus"
+        val message =
+            when (mode) {
+                StreamingMode.WEBRTC -> lastWebRTCMetrics.compactLabel()
+                StreamingMode.RTMP -> {
+                    val serverIp = lastClientIp ?: NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
+                    val rtmpUrl = getRtmpUrl(serverIp)
+                    "RTMP ${if (liveStreamVM.isStreaming()) "running" else "idle"} url $rtmpUrl $lastNativeStreamStatus"
+                }
+                StreamingMode.RTSP -> {
+                    val port = getRtspPort()
+                    val user = getRtspUsername()
+                    val userPrefix = if (user.isNotEmpty()) "$user@" else ""
+                    "RTSP ${if (liveStreamVM.isStreaming()) "running" else "idle"} " +
+                        "${userPrefix}port $port path $DJI_RTSP_STREAM_PATH $lastNativeStreamStatus"
+                }
+                StreamingMode.AGORA -> {
+                    val channel = getAgoraChannel().ifBlank { "-" }
+                    "AGORA ${if (liveStreamVM.isStreaming()) "running" else "idle"} ch $channel $lastNativeStreamStatus"
+                }
+                StreamingMode.GB28181 -> {
+                    val server = "${getGbServerIp()}:${getGbServerPort()}"
+                    "GB28181 ${if (liveStreamVM.isStreaming()) "running" else "idle"} server $server $lastNativeStreamStatus"
+                }
             }
-            StreamingMode.RTSP -> {
-                val port = getRtspPort()
-                val user = getRtspUsername()
-                val userPrefix = if (user.isNotEmpty()) "$user@" else ""
-                "RTSP ${if (liveStreamVM.isStreaming()) "running" else "idle"} ${userPrefix}port $port path $DJI_RTSP_STREAM_PATH $lastNativeStreamStatus"
-            }
-            StreamingMode.AGORA -> {
-                val channel = getAgoraChannel().ifBlank { "-" }
-                "AGORA ${if (liveStreamVM.isStreaming()) "running" else "idle"} ch $channel $lastNativeStreamStatus"
-            }
-            StreamingMode.GB28181 -> {
-                val server = "${getGbServerIp()}:${getGbServerPort()}"
-                "GB28181 ${if (liveStreamVM.isStreaming()) "running" else "idle"} server $server $lastNativeStreamStatus"
-            }
-        }
         footer.text = message
     }
 
+    @Suppress("ktlint:standard:max-line-length")
     private fun WebRTCStreamMetrics.toTelemetryJson(): String {
         fun escapeJson(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
         val lastErrorJson = lastError?.let { "\"${escapeJson(it)}\"" } ?: "null"
@@ -2276,7 +2432,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val sendBitrateBpsJson = sendBitrateBps?.toString() ?: "null"
         val framesEncodedJson = framesEncoded?.toString() ?: "null"
         val framesSentJson = framesSent?.toString() ?: "null"
-        return """{"sourceWidth":$sourceWidth,"sourceHeight":$sourceHeight,"outputWidth":$outputWidth,"outputHeight":$outputHeight,"requestedWidth":$requestedWidth,"requestedHeight":$requestedHeight,"targetFps":$targetFps,"inputFps":$inputFps,"outputFps":$outputFps,"droppedFps":$droppedFps,"averageFrameProcessingMs":$averageFrameProcessingMs,"totalFrames":$totalFrames,"totalDroppedFrames":$totalDroppedFrames,"processingErrors":$processingErrors,"observerCount":$observerCount,"activeCamera":"${escapeJson(activeCamera)}","status":"${escapeJson(status)}","configuredFps":$configuredFps,"saturationState":"${escapeJson(saturationState)}","scaleMode":"${escapeJson(scaleMode)}","recoveryCount":$recoveryCount,"lastError":$lastErrorJson,"qualityLimitationReason":$qualityLimitationReasonJson,"framesEncodedNotSent":$framesEncodedNotSentJson,"sendBitrateBps":$sendBitrateBpsJson,"framesEncoded":$framesEncodedJson,"framesSent":$framesSentJson}"""
+        return """{"sourceWidth":$sourceWidth,"sourceHeight":$sourceHeight,"outputWidth":$outputWidth,"outputHeight":$outputHeight,"requestedWidth":$requestedWidth,"requestedHeight":$requestedHeight,"targetFps":$targetFps,"inputFps":$inputFps,"outputFps":$outputFps,"droppedFps":$droppedFps,"averageFrameProcessingMs":$averageFrameProcessingMs,"totalFrames":$totalFrames,"totalDroppedFrames":$totalDroppedFrames,"processingErrors":$processingErrors,"observerCount":$observerCount,"activeCamera":"${escapeJson(
+            activeCamera,
+        )}","status":"${escapeJson(
+            status,
+        )}","configuredFps":$configuredFps,"saturationState":"${escapeJson(
+            saturationState,
+        )}","scaleMode":"${escapeJson(
+            scaleMode,
+        )}","recoveryCount":$recoveryCount,"lastError":$lastErrorJson,"qualityLimitationReason":$qualityLimitationReasonJson,"framesEncodedNotSent":$framesEncodedNotSentJson,"sendBitrateBps":$sendBitrateBpsJson,"framesEncoded":$framesEncodedJson,"framesSent":$framesSentJson}"""
     }
 
     /**
@@ -2287,9 +2451,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun acquireLowLatencyWifiLock() {
         if (lowLatencyWifiLock?.isHeld == true) return
         runCatching {
-            lowLatencyWifiLock = wifiManager?.createWifiLock(
-                WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "LyrebirdStreamingWifiLock"
-            )
+            lowLatencyWifiLock =
+                wifiManager?.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY,
+                    "LyrebirdStreamingWifiLock",
+                )
             lowLatencyWifiLock?.acquire()
             Log.i(TAG, "Low-latency Wi-Fi lock acquired for streaming")
         }.onFailure { error ->
@@ -2340,6 +2506,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 }
                 StreamingMode.RTMP -> {
                     val rtmpUrl = getRtmpUrl(clientIp)
+
                     fun fallbackRtmpUrl(url: String): String? {
                         val match = Regex("^rtmp://([^/]+)/([^/]+)$").matchEntire(url.trim()) ?: return null
                         val hostPort = match.groupValues[1]
@@ -2347,38 +2514,43 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                         return "rtmp://$hostPort/live/$stream"
                     }
 
-                    fun startRtmp(url: String, fallbackAttempt: Boolean = false) {
+                    fun startRtmp(
+                        url: String,
+                        fallbackAttempt: Boolean = false,
+                    ) {
                         Log.i(TAG, "Starting native DJI RTMP streaming to: $url")
                         liveStreamVM.setRTMPConfig(url)
-                        liveStreamVM.startStream(object : CommonCallbacks.CompletionCallback {
-                            override fun onSuccess() {
-                                if (url != rtmpUrl) {
-                                    setRtmpUrl(url)
-                                }
-                                Log.i(TAG, "Native DJI RTMP streaming started successfully")
-                                lastNativeStreamStatus = "running"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("RTMP stream started")
-                            }
-
-                            override fun onFailure(error: IDJIError) {
-                                val message = error.description()
-                                if (!fallbackAttempt) {
-                                    val fallback = fallbackRtmpUrl(url)
-                                    if (fallback != null && fallback != url) {
-                                        Log.w(TAG, "RTMP failed for $url ($message), retrying with $fallback")
-                                        lastNativeStreamStatus = "retrying with $fallback"
-                                        mainHandler.post { updateStreamingFooter() }
-                                        startRtmp(fallback, true)
-                                        return
+                        liveStreamVM.startStream(
+                            object : CommonCallbacks.CompletionCallback {
+                                override fun onSuccess() {
+                                    if (url != rtmpUrl) {
+                                        setRtmpUrl(url)
                                     }
+                                    Log.i(TAG, "Native DJI RTMP streaming started successfully")
+                                    lastNativeStreamStatus = "running"
+                                    mainHandler.post { updateStreamingFooter() }
+                                    showStreamToast("RTMP stream started")
                                 }
-                                Log.e(TAG, "Failed to start native DJI RTMP stream: $message")
-                                lastNativeStreamStatus = "error: $message"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("RTMP failed: $message")
-                            }
-                        })
+
+                                override fun onFailure(error: IDJIError) {
+                                    val message = error.description()
+                                    if (!fallbackAttempt) {
+                                        val fallback = fallbackRtmpUrl(url)
+                                        if (fallback != null && fallback != url) {
+                                            Log.w(TAG, "RTMP failed for $url ($message), retrying with $fallback")
+                                            lastNativeStreamStatus = "retrying with $fallback"
+                                            mainHandler.post { updateStreamingFooter() }
+                                            startRtmp(fallback, true)
+                                            return
+                                        }
+                                    }
+                                    Log.e(TAG, "Failed to start native DJI RTMP stream: $message")
+                                    lastNativeStreamStatus = "error: $message"
+                                    mainHandler.post { updateStreamingFooter() }
+                                    showStreamToast("RTMP failed: $message")
+                                }
+                            },
+                        )
                     }
 
                     startRtmp(rtmpUrl)
@@ -2397,20 +2569,23 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     val pwd = getRtspPassword()
                     Log.i(TAG, "Starting native DJI RTSP server on port $port")
                     liveStreamVM.setRTSPConfig(user, pwd, port)
-                    liveStreamVM.startStream(object : CommonCallbacks.CompletionCallback {
-                        override fun onSuccess() {
-                            Log.i(TAG, "Native DJI RTSP server started successfully")
-                            lastNativeStreamStatus = "running"
-                            mainHandler.post { updateStreamingFooter() }
-                            showStreamToast("RTSP server started on port $port")
-                        }
-                        override fun onFailure(error: IDJIError) {
-                            Log.e(TAG, "Failed to start native DJI RTSP: ${error.description()}")
-                            lastNativeStreamStatus = "error: ${error.description()}"
-                            mainHandler.post { updateStreamingFooter() }
-                            showStreamToast("RTSP failed: ${error.description()}")
-                        }
-                    })
+                    liveStreamVM.startStream(
+                        object : CommonCallbacks.CompletionCallback {
+                            override fun onSuccess() {
+                                Log.i(TAG, "Native DJI RTSP server started successfully")
+                                lastNativeStreamStatus = "running"
+                                mainHandler.post { updateStreamingFooter() }
+                                showStreamToast("RTSP server started on port $port")
+                            }
+
+                            override fun onFailure(error: IDJIError) {
+                                Log.e(TAG, "Failed to start native DJI RTSP: ${error.description()}")
+                                lastNativeStreamStatus = "error: ${error.description()}"
+                                mainHandler.post { updateStreamingFooter() }
+                                showStreamToast("RTSP failed: ${error.description()}")
+                            }
+                        },
+                    )
                 }
                 StreamingMode.AGORA -> {
                     val channel = getAgoraChannel()
@@ -2418,20 +2593,23 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     val uid = getAgoraUid()
                     Log.i(TAG, "Starting Agora streaming on channel $channel")
                     liveStreamVM.setAgoraConfig(channel, token, uid)
-                    liveStreamVM.startStream(object : CommonCallbacks.CompletionCallback {
-                        override fun onSuccess() {
-                            Log.i(TAG, "Agora streaming started successfully")
-                            lastNativeStreamStatus = "running"
-                            mainHandler.post { updateStreamingFooter() }
-                            showStreamToast("Agora stream started")
-                        }
-                        override fun onFailure(error: IDJIError) {
-                            Log.e(TAG, "Failed to start Agora: ${error.description()}")
-                            lastNativeStreamStatus = "error: ${error.description()}"
-                            mainHandler.post { updateStreamingFooter() }
-                            showStreamToast("Agora failed: ${error.description()}")
-                        }
-                    })
+                    liveStreamVM.startStream(
+                        object : CommonCallbacks.CompletionCallback {
+                            override fun onSuccess() {
+                                Log.i(TAG, "Agora streaming started successfully")
+                                lastNativeStreamStatus = "running"
+                                mainHandler.post { updateStreamingFooter() }
+                                showStreamToast("Agora stream started")
+                            }
+
+                            override fun onFailure(error: IDJIError) {
+                                Log.e(TAG, "Failed to start Agora: ${error.description()}")
+                                lastNativeStreamStatus = "error: ${error.description()}"
+                                mainHandler.post { updateStreamingFooter() }
+                                showStreamToast("Agora failed: ${error.description()}")
+                            }
+                        },
+                    )
                 }
                 StreamingMode.GB28181 -> {
                     val ip = getGbServerIp()
@@ -2443,41 +2621,46 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     val pwd = getGbPassword()
                     Log.i(TAG, "Starting GB28181 streaming to $ip:$port")
                     liveStreamVM.setGB28181(ip, port, serverId, agentId, channel, localPort, pwd)
-                    liveStreamVM.startStream(object : CommonCallbacks.CompletionCallback {
-                        override fun onSuccess() {
-                            Log.i(TAG, "GB28181 streaming started successfully")
-                            lastNativeStreamStatus = "running"
-                            mainHandler.post { updateStreamingFooter() }
-                            showStreamToast("GB28181 stream started")
-                        }
-                        override fun onFailure(error: IDJIError) {
-                            Log.e(TAG, "Failed to start GB28181: ${error.description()}")
-                            lastNativeStreamStatus = "error: ${error.description()}"
-                            mainHandler.post { updateStreamingFooter() }
-                            showStreamToast("GB28181 failed: ${error.description()}")
-                        }
-                    })
+                    liveStreamVM.startStream(
+                        object : CommonCallbacks.CompletionCallback {
+                            override fun onSuccess() {
+                                Log.i(TAG, "GB28181 streaming started successfully")
+                                lastNativeStreamStatus = "running"
+                                mainHandler.post { updateStreamingFooter() }
+                                showStreamToast("GB28181 stream started")
+                            }
+
+                            override fun onFailure(error: IDJIError) {
+                                Log.e(TAG, "Failed to start GB28181: ${error.description()}")
+                                lastNativeStreamStatus = "error: ${error.description()}"
+                                mainHandler.post { updateStreamingFooter() }
+                                showStreamToast("GB28181 failed: ${error.description()}")
+                            }
+                        },
+                    )
                 }
             }
         }
 
         if (liveStreamVM.isStreaming()) {
             Log.i(TAG, "Stopping currently active native DJI livestream before restart")
-            liveStreamVM.stopStream(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    Log.i(TAG, "Native DJI livestream stopped successfully")
-                    lastNativeStreamStatus = "stopped"
-                    mainHandler.post { updateStreamingFooter() }
-                    startSelectedMode()
-                }
+            liveStreamVM.stopStream(
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        Log.i(TAG, "Native DJI livestream stopped successfully")
+                        lastNativeStreamStatus = "stopped"
+                        mainHandler.post { updateStreamingFooter() }
+                        startSelectedMode()
+                    }
 
-                override fun onFailure(error: IDJIError) {
-                    Log.w(TAG, "Failed to stop native DJI livestream before restart: ${error.description()}")
-                    lastNativeStreamStatus = "stop failed: ${error.description()}"
-                    mainHandler.post { updateStreamingFooter() }
-                    startSelectedMode()
-                }
-            })
+                    override fun onFailure(error: IDJIError) {
+                        Log.w(TAG, "Failed to stop native DJI livestream before restart: ${error.description()}")
+                        lastNativeStreamStatus = "stop failed: ${error.description()}"
+                        mainHandler.post { updateStreamingFooter() }
+                        startSelectedMode()
+                    }
+                },
+            )
         } else {
             startSelectedMode()
         }
@@ -2493,18 +2676,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         lastNativeStreamStatus = "stopping"
         mainHandler.post { updateStreamingFooter() }
         if (liveStreamVM.isStreaming()) {
-            liveStreamVM.stopStream(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    Log.i(TAG, "Native DJI livestream stopped successfully")
-                    lastNativeStreamStatus = "stopped"
-                    mainHandler.post { updateStreamingFooter() }
-                }
-                override fun onFailure(error: IDJIError) {
-                    Log.w(TAG, "Failed to stop native DJI livestream: ${error.description()}")
-                    lastNativeStreamStatus = "stop failed: ${error.description()}"
-                    mainHandler.post { updateStreamingFooter() }
-                }
-            })
+            liveStreamVM.stopStream(
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        Log.i(TAG, "Native DJI livestream stopped successfully")
+                        lastNativeStreamStatus = "stopped"
+                        mainHandler.post { updateStreamingFooter() }
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        Log.w(TAG, "Failed to stop native DJI livestream: ${error.description()}")
+                        lastNativeStreamStatus = "stop failed: ${error.description()}"
+                        mainHandler.post { updateStreamingFooter() }
+                    }
+                },
+            )
         } else {
             lastNativeStreamStatus = "stopped"
             mainHandler.post { updateStreamingFooter() }
@@ -2526,8 +2712,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * rebuild the identical publish would drop the picture for everyone watching it.
      */
     private fun startStreamingForClient(clientIp: String) {
-        val publisherHealthy = webRTCStreamer?.isRunning() == true &&
-            webRTCStreamer?.isPublishing() == true
+        val publisherHealthy =
+            webRTCStreamer?.isRunning() == true &&
+                webRTCStreamer?.isPublishing() == true
         if (lastClientIp == clientIp && lastWhipUrl != null) {
             if (publisherHealthy) return
             Log.w(TAG, "Restarting stale WHIP publisher for $clientIp")
@@ -2540,7 +2727,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         if (lastClientIp != null && lastClientIp != clientIp && publisherHealthy) {
             Log.w(
                 TAG,
-                "Ignoring telemetry client $clientIp while healthy publisher targets $lastClientIp"
+                "Ignoring telemetry client $clientIp while healthy publisher targets $lastClientIp",
             )
             return
         }
@@ -2551,8 +2738,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     override fun restartActiveStreaming() {
-        val lastIp = lastClientIp ?: lastWhipUrl?.let { runCatching { Uri.parse(it).host }.getOrNull() } ?: NetworkUtils
-            .getDeviceIpAddress() ?: "127.0.0.1"
+        val lastIp =
+            lastClientIp ?: lastWhipUrl?.let { runCatching { Uri.parse(it).host }.getOrNull() } ?: NetworkUtils
+                .getDeviceIpAddress() ?: "127.0.0.1"
         startActiveStreaming(lastIp)
     }
 
@@ -2569,35 +2757,31 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         sw.visibility = android.view.View.GONE
     }
 
-    private fun isDetectionsEnabled(): Boolean {
-        return sharedPreferences.getBoolean(
+    private fun isDetectionsEnabled(): Boolean =
+        sharedPreferences.getBoolean(
             PREF_DETECTIONS_ENABLED,
             sharedPreferences.getString(
                 PREF_DETECTION_SOURCE,
-                null
-            ) != null && getDetectionSource() != DetectionSource.NONE
+                null,
+            ) != null &&
+                getDetectionSource() != DetectionSource.NONE,
         )
-    }
 
-    private fun activeDetectionSource(): DetectionSource {
-        return if (isDetectionsEnabled()) getDetectionSource() else DetectionSource.NONE
-    }
+    private fun activeDetectionSource(): DetectionSource = if (isDetectionsEnabled()) getDetectionSource() else DetectionSource.NONE
 
-    private fun isDetectionActiveForUi(): Boolean {
-        return when (activeDetectionSource()) {
+    private fun isDetectionActiveForUi(): Boolean =
+        when (activeDetectionSource()) {
             DetectionSource.NONE -> false
             DetectionSource.DJI_ONBOARD -> isAutoSensingActive
             DetectionSource.YOLO_ON_PHONE -> edgeDetectionController != null
         }
-    }
 
-    private fun detectionMenuLabel(): String {
-        return if (isDetectionActiveForUi()) {
+    private fun detectionMenuLabel(): String =
+        if (isDetectionActiveForUi()) {
             "Detections On (${getDetectionSource().menuLabel})"
         } else {
             "Detections Off"
         }
-    }
 
     private fun getDetectionSource(): DetectionSource {
         val stored = sharedPreferences.getString(PREF_DETECTION_SOURCE, null)
@@ -2618,18 +2802,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         stopAutoSensing()
         stopEdgeDetection()
 
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putString(PREF_DETECTION_SOURCE, source.prefValue)
             .putBoolean(
                 PREF_EDGE_DETECTION_ENABLED,
-                isDetectionsEnabled() && source == DetectionSource.YOLO_ON_PHONE
-            )
-            .apply()
+                isDetectionsEnabled() && source == DetectionSource.YOLO_ON_PHONE,
+            ).apply()
 
-        findViewById<Switch>(R.id.sw_auto_sensing)?.isChecked = isDetectionsEnabled()
-            && source == DetectionSource.DJI_ONBOARD
-        findViewById<Switch>(R.id.sw_edge_detection)?.isChecked = isDetectionsEnabled()
-            && source == DetectionSource.YOLO_ON_PHONE
+        findViewById<Switch>(R.id.sw_auto_sensing)?.isChecked = isDetectionsEnabled() &&
+            source == DetectionSource.DJI_ONBOARD
+        findViewById<Switch>(R.id.sw_edge_detection)?.isChecked = isDetectionsEnabled() &&
+            source == DetectionSource.YOLO_ON_PHONE
 
         when (activeDetectionSource()) {
             DetectionSource.NONE -> updateEdgeMetricsView(EdgeDetectionMetrics(status = "off"))
@@ -2651,15 +2835,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         stopAutoSensing()
         stopEdgeDetection()
 
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putBoolean(PREF_DETECTIONS_ENABLED, enabled)
             .putBoolean(PREF_EDGE_DETECTION_ENABLED, enabled && getDetectionSource() == DetectionSource.YOLO_ON_PHONE)
             .apply()
 
-        findViewById<Switch>(R.id.sw_auto_sensing)?.isChecked = enabled
-            && getDetectionSource() == DetectionSource.DJI_ONBOARD
-        findViewById<Switch>(R.id.sw_edge_detection)?.isChecked = enabled
-            && getDetectionSource() == DetectionSource.YOLO_ON_PHONE
+        findViewById<Switch>(R.id.sw_auto_sensing)?.isChecked = enabled &&
+            getDetectionSource() == DetectionSource.DJI_ONBOARD
+        findViewById<Switch>(R.id.sw_edge_detection)?.isChecked = enabled &&
+            getDetectionSource() == DetectionSource.YOLO_ON_PHONE
 
         when (activeDetectionSource()) {
             DetectionSource.NONE -> {
@@ -2679,21 +2864,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val source = activeDetectionSource()
         val isMock = shouldUseMockTelemetry()
         val selectedSource = getDetectionSource()
-        
+
         TelemetryProvider.currentDetectionSource = source.prefValue
-        TelemetryProvider.currentDetectionActive = when (source) {
-            DetectionSource.NONE -> false
-            DetectionSource.DJI_ONBOARD -> isAutoSensingActive
-            DetectionSource.YOLO_ON_PHONE -> edgeDetectionController != null
-        }
-        TelemetryProvider.currentDetectionModel = when (source) {
-            DetectionSource.YOLO_ON_PHONE -> sharedPreferences.getString(PREF_EDGE_MODEL_NAME, null)
-            else -> null
-        }
-        TelemetryProvider.currentDetectionThreshold = when (source) {
-            DetectionSource.YOLO_ON_PHONE -> getEdgeConfidenceThreshold()
-            else -> null
-        }
+        TelemetryProvider.currentDetectionActive =
+            when (source) {
+                DetectionSource.NONE -> false
+                DetectionSource.DJI_ONBOARD -> isAutoSensingActive
+                DetectionSource.YOLO_ON_PHONE -> edgeDetectionController != null
+            }
+        TelemetryProvider.currentDetectionModel =
+            when (source) {
+                DetectionSource.YOLO_ON_PHONE -> sharedPreferences.getString(PREF_EDGE_MODEL_NAME, null)
+                else -> null
+            }
+        TelemetryProvider.currentDetectionThreshold =
+            when (source) {
+                DetectionSource.YOLO_ON_PHONE -> getEdgeConfidenceThreshold()
+                else -> null
+            }
 
         telemetryCoordinator.isMockEnabled = isMock
         telemetryCoordinator.isDetectionsEnabled = isDetectionsEnabled()
@@ -2711,22 +2899,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun showDetectionSourceDialog() {
         val allSources = arrayOf(DetectionSource.DJI_ONBOARD, DetectionSource.YOLO_ON_PHONE)
-        val labels = allSources.map { source ->
-            if (source == DetectionSource.DJI_ONBOARD && !aircraftConnected) {
-                "${source.menuLabel} (connect drone)"
-            } else {
-                source.menuLabel
-            }
-        }.toTypedArray()
+        val labels =
+            allSources
+                .map { source ->
+                    if (source == DetectionSource.DJI_ONBOARD && !aircraftConnected) {
+                        "${source.menuLabel} (connect drone)"
+                    } else {
+                        source.menuLabel
+                    }
+                }.toTypedArray()
         val checkedIndex = allSources.indexOf(getDetectionSource()).coerceAtLeast(0)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Detection source")
             .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
                 setDetectionSource(allSources[which])
                 dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -2734,14 +2924,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val modelName = sharedPreferences.getString(PREF_EDGE_MODEL_NAME, "Select...")
         val labelsName = sharedPreferences.getString(PREF_EDGE_LABELS_NAME, "Default person")
         val confidence = (getEdgeConfidenceThreshold() * 100).toInt()
-        val rows = listOf(
-            SettingsActionRow("Source", getDetectionSource().menuLabel),
-            SettingsActionRow("YOLO model", modelName),
-            SettingsActionRow("YOLO labels", labelsName),
-            SettingsActionRow("YOLO confidence", "$confidence%")
-        )
+        val rows =
+            listOf(
+                SettingsActionRow("Source", getDetectionSource().menuLabel),
+                SettingsActionRow("YOLO model", modelName),
+                SettingsActionRow("YOLO labels", labelsName),
+                SettingsActionRow("YOLO confidence", "$confidence%"),
+            )
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Detection Settings")
             .setAdapter(actionRowAdapter(rows)) { dialog, which ->
                 dialog.dismiss()
@@ -2751,8 +2943,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     2 -> showEdgeFilePicker(REQUEST_EDGE_LABELS_FILE, "Select model labels")
                     3 -> showEdgeConfidenceDialog()
                 }
-            }
-            .setNegativeButton("Close", null)
+            }.setNegativeButton("Close", null)
             .show()
     }
 
@@ -2772,21 +2963,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 manager.addAutoSensingInfoListener(autoSensingInfoListener)
                 isAutoSensingListenerRegistered = true
             }
-            manager.startAutoSensing(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    isAutoSensingActive = true
-                    updateDetectionTelemetryState()
-                    rebuildTelemetryCache()
-                    Log.i(TAG, "AutoSensing started")
-                }
-                override fun onFailure(error: IDJIError) {
-                    isAutoSensingActive = false
-                    removeAutoSensingListener()
-                    updateDetectionTelemetryState()
-                    rebuildTelemetryCache()
-                    Log.e(TAG, "AutoSensing start failed: ${error.description()}")
-                }
-            })
+            manager.startAutoSensing(
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        isAutoSensingActive = true
+                        updateDetectionTelemetryState()
+                        rebuildTelemetryCache()
+                        Log.i(TAG, "AutoSensing started")
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        isAutoSensingActive = false
+                        removeAutoSensingListener()
+                        updateDetectionTelemetryState()
+                        rebuildTelemetryCache()
+                        Log.e(TAG, "AutoSensing start failed: ${error.description()}")
+                    }
+                },
+            )
         }.onFailure { error ->
             updateDetectionTelemetryState()
             rebuildTelemetryCache()
@@ -2802,14 +2996,17 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             return
         }
         try {
-            IntelligentFlightManager.getInstance().stopAutoSensing(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    Log.i(TAG, "AutoSensing stopped")
-                }
-                override fun onFailure(error: IDJIError) {
-                    Log.e(TAG, "AutoSensing stop failed: ${error.description()}")
-                }
-            })
+            IntelligentFlightManager.getInstance().stopAutoSensing(
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        Log.i(TAG, "AutoSensing stopped")
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        Log.e(TAG, "AutoSensing stop failed: ${error.description()}")
+                    }
+                },
+            )
         } catch (error: Throwable) {
             Log.e(TAG, "AutoSensing stop exception: ${error.message}", error)
         } finally {
@@ -2852,15 +3049,26 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         updateEdgeDetectionToggleUi(isDetectionsEnabled() && getDetectionSource() == DetectionSource.YOLO_ON_PHONE)
     }
 
-    private fun isEdgeDetectionEnabled(): Boolean {
-        return isDetectionsEnabled() && getDetectionSource() == DetectionSource.YOLO_ON_PHONE
-    }
+    private fun isEdgeDetectionEnabled(): Boolean = isDetectionsEnabled() && getDetectionSource() == DetectionSource.YOLO_ON_PHONE
 
     private sealed interface EdgeDetectionStartCheck {
-        data class Ready(val sourceMode: VideoSourceMode, val modelUri: Uri) : EdgeDetectionStartCheck
-        data class UnsupportedSource(val sourceMode: VideoSourceMode) : EdgeDetectionStartCheck
-        data class UnsupportedStreamingMode(val streamingMode: StreamingMode) : EdgeDetectionStartCheck
-        data class MissingModel(val sourceMode: VideoSourceMode) : EdgeDetectionStartCheck
+        data class Ready(
+            val sourceMode: VideoSourceMode,
+            val modelUri: Uri,
+        ) : EdgeDetectionStartCheck
+
+        data class UnsupportedSource(
+            val sourceMode: VideoSourceMode,
+        ) : EdgeDetectionStartCheck
+
+        data class UnsupportedStreamingMode(
+            val streamingMode: StreamingMode,
+        ) : EdgeDetectionStartCheck
+
+        data class MissingModel(
+            val sourceMode: VideoSourceMode,
+        ) : EdgeDetectionStartCheck
+
         object WaitingForDjiVideo : EdgeDetectionStartCheck
     }
 
@@ -2890,9 +3098,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun edgeDetectionStartCheck(
         sourceMode: VideoSourceMode,
         modelUri: Uri?,
-        streamer: WebRTCStreamer?
-    ): EdgeDetectionStartCheck {
-        return when {
+        streamer: WebRTCStreamer?,
+    ): EdgeDetectionStartCheck =
+        when {
             getStreamingMode() != StreamingMode.WEBRTC -> {
                 EdgeDetectionStartCheck.UnsupportedStreamingMode(getStreamingMode())
             }
@@ -2909,33 +3117,34 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 EdgeDetectionStartCheck.Ready(sourceMode = sourceMode, modelUri = modelUri)
             }
         }
-    }
 
     private fun handleEdgeDetectionStartFailure(startCheck: EdgeDetectionStartCheck) {
         when (startCheck) {
             is EdgeDetectionStartCheck.UnsupportedStreamingMode -> {
                 setDetectionsEnabled(false)
-                Toast.makeText(
-                    this,
-                    "Edge detection with custom YOLO is not supported in ${startCheck.streamingMode.menuLabel} mode",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast
+                    .makeText(
+                        this,
+                        "Edge detection with custom YOLO is not supported in ${startCheck.streamingMode.menuLabel} mode",
+                        Toast.LENGTH_LONG,
+                    ).show()
             }
             is EdgeDetectionStartCheck.UnsupportedSource -> {
                 setDetectionsEnabled(false)
                 updateEdgeMetricsView(
-                    EdgeDetectionMetrics(status = "source", source = startCheck.sourceMode.prefValue)
+                    EdgeDetectionMetrics(status = "source", source = startCheck.sourceMode.prefValue),
                 )
-                Toast.makeText(
-                    this,
-                    "Edge detection supports drone and phone camera sources",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast
+                    .makeText(
+                        this,
+                        "Edge detection supports drone and phone camera sources",
+                        Toast.LENGTH_SHORT,
+                    ).show()
             }
             is EdgeDetectionStartCheck.MissingModel -> {
                 setDetectionsEnabled(false)
                 updateEdgeMetricsView(
-                    EdgeDetectionMetrics(status = "no-model", source = startCheck.sourceMode.prefValue)
+                    EdgeDetectionMetrics(status = "no-model", source = startCheck.sourceMode.prefValue),
                 )
                 showEdgeFilePicker(REQUEST_EDGE_MODEL_FILE, "Select YOLO TFLite model")
                 Toast.makeText(this, "Select a YOLO .tflite model first", Toast.LENGTH_SHORT).show()
@@ -2947,17 +3156,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private fun createEdgeDetectionController(
-        startCheck: EdgeDetectionStartCheck.Ready
-    ): EdgeDetectionController {
-        return EdgeDetectionController(
+    private fun createEdgeDetectionController(startCheck: EdgeDetectionStartCheck.Ready): EdgeDetectionController =
+        EdgeDetectionController(
             context = applicationContext,
-            config = EdgeDetectionConfig(
-                modelUri = startCheck.modelUri,
-                labels = getEdgeLabels(),
-                sourceLabel = startCheck.sourceMode.prefValue,
-                confidenceThreshold = getEdgeConfidenceThreshold()
-            ),
+            config =
+                EdgeDetectionConfig(
+                    modelUri = startCheck.modelUri,
+                    labels = getEdgeLabels(),
+                    sourceLabel = startCheck.sourceMode.prefValue,
+                    confidenceThreshold = getEdgeConfidenceThreshold(),
+                ),
             onTargets = { targets ->
                 if (activeDetectionSource() == DetectionSource.YOLO_ON_PHONE) {
                     applyDetectedTargets(targets)
@@ -2966,9 +3174,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             onMetrics = { metrics ->
                 lastEdgeMetrics = metrics
                 mainHandler.post { updateEdgeMetricsView(metrics) }
-            }
+            },
         )
-    }
 
     private fun configureDetectionOverlay(sourceMode: VideoSourceMode) {
         when (sourceMode) {
@@ -2976,7 +3183,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_INSIDE)
                 detectionOverlay?.setSourceFrameSize(
                     lastWebRTCMetrics.sourceWidth.takeIf { it > 0 } ?: 16,
-                    lastWebRTCMetrics.sourceHeight.takeIf { it > 0 } ?: 9
+                    lastWebRTCMetrics.sourceHeight.takeIf { it > 0 } ?: 9,
                 )
             }
             VideoSourceMode.PHONE -> {
@@ -2988,7 +3195,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun attachEdgeDetectionSource(
         sourceMode: VideoSourceMode,
-        controller: EdgeDetectionController
+        controller: EdgeDetectionController,
     ) {
         if (sourceMode == VideoSourceMode.DJI) {
             webRTCStreamer?.setEdgeDetectionFrameListener(controller)
@@ -3050,12 +3257,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     // ==================== Drone Status View ====================
 
     private fun setupDroneStatusView() {
-        DroneController.droneStatusListener = object : DroneController.DroneStatusListener {
-            override fun onDroneStatusChanged(status: DroneController.DroneStatus) {
-                LyrebirdFlightLogger.logStatus(status.name)
-                mainHandler.post { updateDroneStatusView(status) }
+        DroneController.droneStatusListener =
+            object : DroneController.DroneStatusListener {
+                override fun onDroneStatusChanged(status: DroneController.DroneStatus) {
+                    LyrebirdFlightLogger.logStatus(status.name)
+                    mainHandler.post { updateDroneStatusView(status) }
+                }
             }
-        }
         updateDroneStatusView(DroneController.droneStatus)
     }
 
@@ -3073,11 +3281,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             return
         }
         // Upgrade IDLE → HOVERING when the FC says the drone is airborne
-        val resolved = if (appStatus == DroneController.DroneStatus.IDLE && isFlyingKey.get(false)) {
-            DroneController.DroneStatus.HOVERING
-        } else {
-            appStatus
-        }
+        val resolved =
+            if (appStatus == DroneController.DroneStatus.IDLE && isFlyingKey.get(false)) {
+                DroneController.DroneStatus.HOVERING
+            } else {
+                appStatus
+            }
         // The obstacle guard outranks the operational status while it is latched. It is the one
         // state where the aircraft stopped itself, so it is what the pilot needs to read first —
         // shown here in the indicator they already watch rather than as anything that pops up.
@@ -3087,24 +3296,25 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             statusTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, DRONE_STATUS_ALERT_TEXT_SIZE_SP)
             return
         }
-        val (label, color) = when (resolved) {
-            DroneController.DroneStatus.IDLE            -> Pair("IDLE",       0xFFFF9800.toInt())
-            DroneController.DroneStatus.TAKING_OFF      -> Pair("TAKEOFF",    0xFFFFC107.toInt())
-            DroneController.DroneStatus.HOVERING        -> Pair("HOVER",      0xFF4CAF50.toInt())
-            DroneController.DroneStatus.NAVIGATING      -> Pair("NAV",        0xFF2196F3.toInt())
-            DroneController.DroneStatus.LANDING         -> Pair("LAND",       0xFFFF9800.toInt())
-            DroneController.DroneStatus.RETURNING_HOME  -> Pair("RTH",        0xFFFF9800.toInt())
-            DroneController.DroneStatus.MANUAL_OVERRIDE -> Pair("MANUAL",     0xFFF44336.toInt())
-            DroneController.DroneStatus.ABORTING        -> Pair("ABORT",      0xFFF44336.toInt())
-            DroneController.DroneStatus.MISSION         -> Pair("MISSION",    0xFF00BCD4.toInt())
-        }
+        val (label, color) =
+            when (resolved) {
+                DroneController.DroneStatus.IDLE -> Pair("IDLE", 0xFFFF9800.toInt())
+                DroneController.DroneStatus.TAKING_OFF -> Pair("TAKEOFF", 0xFFFFC107.toInt())
+                DroneController.DroneStatus.HOVERING -> Pair("HOVER", 0xFF4CAF50.toInt())
+                DroneController.DroneStatus.NAVIGATING -> Pair("NAV", 0xFF2196F3.toInt())
+                DroneController.DroneStatus.LANDING -> Pair("LAND", 0xFFFF9800.toInt())
+                DroneController.DroneStatus.RETURNING_HOME -> Pair("RTH", 0xFFFF9800.toInt())
+                DroneController.DroneStatus.MANUAL_OVERRIDE -> Pair("MANUAL", 0xFFF44336.toInt())
+                DroneController.DroneStatus.ABORTING -> Pair("ABORT", 0xFFF44336.toInt())
+                DroneController.DroneStatus.MISSION -> Pair("MISSION", 0xFF00BCD4.toInt())
+            }
         statusTv.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
             if (resolved == DroneController.DroneStatus.IDLE) {
                 DRONE_STATUS_ALERT_TEXT_SIZE_SP
             } else {
                 DRONE_STATUS_NORMAL_TEXT_SIZE_SP
-            }
+            },
         )
         statusTv.text = label
         statusTv.setTextColor(color)
@@ -3117,11 +3327,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * an uninstall. No-op without the optional storage permission.
      */
     private fun startSettingsBackup() {
-        settingsBackupListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, _ ->
-            mainHandler.removeCallbacks(settingsBackupTask)
-            // Settings arrive in bursts while a dialog is being filled in; coalesce them.
-            mainHandler.postDelayed(settingsBackupTask, SETTINGS_BACKUP_DEBOUNCE_MS)
-        }
+        settingsBackupListener =
+            SharedPreferences.OnSharedPreferenceChangeListener { prefs, _ ->
+                mainHandler.removeCallbacks(settingsBackupTask)
+                // Settings arrive in bursts while a dialog is being filled in; coalesce them.
+                mainHandler.postDelayed(settingsBackupTask, SETTINGS_BACKUP_DEBOUNCE_MS)
+            }
         sharedPreferences.registerOnSharedPreferenceChangeListener(settingsBackupListener)
         mainHandler.postDelayed(settingsBackupTask, SETTINGS_BACKUP_DEBOUNCE_MS)
     }
@@ -3137,11 +3348,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 val count = LyrebirdFlightLogger.syncDjiFlightLogs(djiPath)
                 if (count > 0) {
                     mainHandler.post {
-                        Toast.makeText(
-                            this,
-                            "Synced $count DJI flight log(s) to Lyrebird folder",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast
+                            .makeText(
+                                this,
+                                "Synced $count DJI flight log(s) to Lyrebird folder",
+                                Toast.LENGTH_SHORT,
+                            ).show()
                     }
                 }
             }.onFailure { error ->
@@ -3171,13 +3383,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val spannable = android.text.SpannableString(text)
         spannable.setSpan(
             android.text.style.ForegroundColorSpan(mavlinkColor),
-            0, "MAVLINK".length,
-            android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            0,
+            "MAVLINK".length,
+            android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
         spannable.setSpan(
             android.text.style.ForegroundColorSpan(httpColor),
-            "MAVLINK ".length, text.length,
-            android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            "MAVLINK ".length,
+            text.length,
+            android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
         statusTv.text = spannable
     }
@@ -3188,7 +3402,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         droneNameText?.let {
             // Set initial text
             it.text = "$droneName · V${currentMavlinkSystemId()}"
-            
+
             // Make it clickable to change drone name
             it.setOnClickListener {
                 showDroneNameDialog(isFirstTime = false)
@@ -3204,47 +3418,53 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val sdCardStatus = getDroneStorageStatus(CameraStorageLocation.SDCARD, "SD card")
         val internalStatus = getDroneStorageStatus(CameraStorageLocation.INTERNAL, "Internal")
         val previousDialog = lyrebirdSettingsDialog
-        val dialog = Dialog(this, R.style.LyrebirdSettingsDialog).apply {
-            setContentView(R.layout.dialog_lyrebird_settings_cockpit)
-            setCancelable(false)
-            setCanceledOnTouchOutside(false)
-            setOnDismissListener {
-                if (lyrebirdSettingsDialog === this) lyrebirdSettingsDialog = null
+        val dialog =
+            Dialog(this, R.style.LyrebirdSettingsDialog).apply {
+                setContentView(R.layout.dialog_lyrebird_settings_cockpit)
+                setCancelable(false)
+                setCanceledOnTouchOutside(false)
+                setOnDismissListener {
+                    if (lyrebirdSettingsDialog === this) lyrebirdSettingsDialog = null
+                }
             }
-        }
         lyrebirdSettingsDialog = dialog
 
         dialog.findViewById<TextView>(R.id.text_settings_hint)?.text =
             getString(R.string.lyrebird_settings_hint, droneName)
         dialog.findViewById<TextView>(R.id.text_settings_summary)?.text =
             "${getStreamingMode().menuLabel}  /  ${getWebRTCFps()} fps  /  " +
-                "${getWebRTCResolutionPreset().menuLabel}  /  " +
-                "MAVLink ${if (isMavlinkFlightAllowed()) "allowed" else "blocked"}"
+            "${getWebRTCResolutionPreset().menuLabel}  /  " +
+            "MAVLink ${if (isMavlinkFlightAllowed()) "allowed" else "blocked"}"
 
         val cockpit = dialog.findViewById<LinearLayout>(R.id.settings_cockpit_content)
-        val columns = listOf(
-            LinearLayout(this),
-            LinearLayout(this),
-            LinearLayout(this),
-            LinearLayout(this)
-        )
+        val columns =
+            listOf(
+                LinearLayout(this),
+                LinearLayout(this),
+                LinearLayout(this),
+                LinearLayout(this),
+            )
         columns.forEachIndexed { index, column ->
             column.orientation = LinearLayout.VERTICAL
-            column.layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            val columnScroll = android.widget.ScrollView(this).apply {
-                isFillViewport = true
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
+            column.layoutParams =
+                LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    1f
-                ).apply {
-                    if (index > 0) marginStart = dpToPx(5)
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            val columnScroll =
+                android.widget.ScrollView(this).apply {
+                    isFillViewport = true
+                    layoutParams =
+                        LinearLayout
+                            .LayoutParams(
+                                0,
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                1f,
+                            ).apply {
+                                if (index > 0) marginStart = dpToPx(5)
+                            }
+                    addView(column)
                 }
-                addView(column)
-            }
             cockpit?.addView(columnScroll)
         }
 
@@ -3259,13 +3479,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         addCockpitRow(
             aircraftColumn,
             "Control profile",
-            DroneControlProfiles.fromProductType(detectedProductType).displayName
+            DroneControlProfiles.fromProductType(detectedProductType).displayName,
         )
         addCockpitSection(aircraftColumn, "REMOTE CONTROLLER")
         addCockpitRow(
             aircraftColumn,
             "RC stick mode",
-            DroneController.getRcControlMode().uppercase()
+            DroneController.getRcControlMode().uppercase(),
         ) { showBrandedRcControlModePage() }
         addCockpitRow(aircraftColumn, "RC pairing", DroneController.getRcPairingStatus().replaceFirstChar { it.uppercase() }) {
             showBrandedRcPairingPage()
@@ -3274,12 +3494,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
         addCockpitSection(aircraftColumn, "FLEET")
         val fleetPeers = fleetController?.peerCount() ?: 0
-        val fleetDetail = when {
-            fleetController == null -> "Off"
-            fleetPeers == 0 -> "No peers"
-            fleetPeers == 1 -> "1 aircraft"
-            else -> "$fleetPeers aircraft"
-        }
+        val fleetDetail =
+            when {
+                fleetController == null -> "Off"
+                fleetPeers == 0 -> "No peers"
+                fleetPeers == 1 -> "1 aircraft"
+                else -> "$fleetPeers aircraft"
+            }
         addCockpitRow(aircraftColumn, "Other aircraft", fleetDetail) {
             fleetController?.showFleetDialog()
                 ?: Toast.makeText(this, "Fleet awareness is off", Toast.LENGTH_SHORT).show()
@@ -3287,7 +3508,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         addCockpitRow(
             aircraftColumn,
             "MAVLink flight",
-            if (isMavlinkFlightAllowed()) "Allowed" else "Blocked"
+            if (isMavlinkFlightAllowed()) "Allowed" else "Blocked",
         ) { showBrandedMavlinkPage() }
 
         val videoColumn = columns[1]
@@ -3310,7 +3531,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         addCockpitRow(
             videoColumn,
             "Surface H264",
-            if (isDjiSurfaceH264EncoderEnabled()) "Experimental / on" else "Default encoder"
+            if (isDjiSurfaceH264EncoderEnabled()) "Experimental / on" else "Default encoder",
         ) {
             toggleDjiSurfaceH264Encoder()
         }
@@ -3326,17 +3547,17 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         addCockpitRow(
             flightColumn,
             "Max flight height",
-            formatCockpitLimit(DroneController.getMaxFlightHeight())
+            formatCockpitLimit(DroneController.getMaxFlightHeight()),
         ) { showBrandedMaxFlightHeightPage() }
         addCockpitRow(
             flightColumn,
             "Max distance from home",
-            formatCockpitLimit(DroneController.getMaxFlightDistance())
+            formatCockpitLimit(DroneController.getMaxFlightDistance()),
         ) { showBrandedMaxFlightDistancePage() }
         addCockpitRow(
             flightColumn,
             "Distance limit",
-            if (DroneController.getDistanceLimitEnabled()) "Enabled" else "Disabled"
+            if (DroneController.getDistanceLimitEnabled()) "Enabled" else "Disabled",
         ) {
             DroneController.setDistanceLimitEnabled(!DroneController.getDistanceLimitEnabled())
             showLyrebirdSettingsMenu()
@@ -3347,7 +3568,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         addCockpitRow(
             detectionColumn,
             "Detections",
-            if (isDetectionActiveForUi()) "Enabled" else "Disabled"
+            if (isDetectionActiveForUi()) "Enabled" else "Disabled",
         ) {
             setDetectionsEnabled(!isDetectionActiveForUi())
             showLyrebirdSettingsMenu()
@@ -3358,7 +3579,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         addCockpitRow(
             detectionColumn,
             "Confidence",
-            "${(getEdgeConfidenceThreshold() * 100).toInt()}%"
+            "${(getEdgeConfidenceThreshold() * 100).toInt()}%",
         ) { showBrandedConfidencePage() }
         addCockpitSection(detectionColumn, "STORAGE")
         addCockpitStorageRow(detectionColumn, "SD card", sdCardStatus.summary, R.drawable.uxsdk_ic_sdcard) {
@@ -3391,65 +3612,78 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setLayout(
                 android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
             )
         }
         previousDialog?.dismiss()
     }
 
-    private fun addCockpitSection(container: LinearLayout, label: String) {
-        container.addView(TextView(this).apply {
-            text = label
-            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_orange))
-            textSize = 9f
-            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
-            letterSpacing = 0.12f
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(18)
-            )
-        })
+    private fun addCockpitSection(
+        container: LinearLayout,
+        label: String,
+    ) {
+        container.addView(
+            TextView(this).apply {
+                text = label
+                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_orange))
+                textSize = 9f
+                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
+                letterSpacing = 0.12f
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                layoutParams =
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(18),
+                    )
+            },
+        )
     }
 
     private fun addCockpitRow(
         container: LinearLayout,
         title: String,
         detail: String,
-        onClick: (() -> Unit)? = null
+        onClick: (() -> Unit)? = null,
     ) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(7), 0, dpToPx(7), 0)
-            setBackgroundResource(R.drawable.lyrebird_settings_row)
-            isClickable = onClick != null
-            isFocusable = onClick != null
-            onClick?.let { setOnClickListener { it() } }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(28)
-            ).apply { bottomMargin = dpToPx(3) }
-        }
-        row.addView(TextView(this).apply {
-            text = title
-            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-            textSize = 10.5f
-            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        row.addView(TextView(this).apply {
-            text = detail.ifBlank { "Unavailable" }
-            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-            textSize = 9.5f
-            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
-            gravity = android.view.Gravity.END
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        })
+        val row =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dpToPx(7), 0, dpToPx(7), 0)
+                setBackgroundResource(R.drawable.lyrebird_settings_row)
+                isClickable = onClick != null
+                isFocusable = onClick != null
+                onClick?.let { setOnClickListener { it() } }
+                layoutParams =
+                    LinearLayout
+                        .LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            dpToPx(28),
+                        ).apply { bottomMargin = dpToPx(3) }
+            }
+        row.addView(
+            TextView(this).apply {
+                text = title
+                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                textSize = 10.5f
+                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        row.addView(
+            TextView(this).apply {
+                text = detail.ifBlank { "Unavailable" }
+                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                textSize = 9.5f
+                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
+                gravity = android.view.Gravity.END
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
         container.addView(row)
     }
 
@@ -3458,57 +3692,70 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         title: String,
         detail: String,
         iconRes: Int,
-        onClick: () -> Unit
+        onClick: () -> Unit,
     ) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(8), dpToPx(3), dpToPx(8), dpToPx(3))
-            setBackgroundResource(R.drawable.lyrebird_settings_row)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onClick() }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(44)
-            ).apply { bottomMargin = dpToPx(4) }
-        }
-        row.addView(ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dpToPx(22), dpToPx(22))
-            setImageResource(iconRes)
-            imageTintList = ColorStateList.valueOf(
-                ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_orange)
-            )
-        })
-        row.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            ).apply { marginStart = dpToPx(8) }
-            addView(TextView(this@FlightDeckActivity).apply {
-                text = title
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-                textSize = 12f
-                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            addView(TextView(this@FlightDeckActivity).apply {
-                text = detail.ifBlank { "Status unavailable" }
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-                textSize = 10.5f
-                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-        })
+        val row =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dpToPx(8), dpToPx(3), dpToPx(8), dpToPx(3))
+                setBackgroundResource(R.drawable.lyrebird_settings_row)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+                layoutParams =
+                    LinearLayout
+                        .LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            dpToPx(44),
+                        ).apply { bottomMargin = dpToPx(4) }
+            }
+        row.addView(
+            ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dpToPx(22), dpToPx(22))
+                setImageResource(iconRes)
+                imageTintList =
+                    ColorStateList.valueOf(
+                        ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_orange),
+                    )
+            },
+        )
+        row.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams =
+                    LinearLayout
+                        .LayoutParams(
+                            0,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            1f,
+                        ).apply { marginStart = dpToPx(8) }
+                addView(
+                    TextView(this@FlightDeckActivity).apply {
+                        text = title
+                        setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                        textSize = 12f
+                        typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    },
+                )
+                addView(
+                    TextView(this@FlightDeckActivity).apply {
+                        text = detail.ifBlank { "Status unavailable" }
+                        setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                        textSize = 10.5f
+                        typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    },
+                )
+            },
+        )
         container.addView(row)
     }
 
-    private fun formatCockpitLimit(value: Int): String =
-        if (value >= 0) "$value m" else "Unavailable"
+    private fun formatCockpitLimit(value: Int): String = if (value >= 0) "$value m" else "Unavailable"
 
     private fun showLyrebirdSettingsOverflow(anchor: View) {
         PopupMenu(this, anchor).apply {
@@ -3545,14 +3792,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         title: String,
         subtitle: String,
         onBack: () -> Unit = ::showLyrebirdSettingsMenu,
-        configure: (LinearLayout, Dialog) -> Unit
+        configure: (LinearLayout, Dialog) -> Unit,
     ) {
         val previousDialog = lyrebirdSettingsDialog
-        val dialog = Dialog(this, R.style.LyrebirdSettingsDialog).apply {
-            setContentView(R.layout.dialog_lyrebird_settings_subpage)
-            setCancelable(false)
-            setCanceledOnTouchOutside(false)
-        }
+        val dialog =
+            Dialog(this, R.style.LyrebirdSettingsDialog).apply {
+                setContentView(R.layout.dialog_lyrebird_settings_subpage)
+                setCancelable(false)
+                setCanceledOnTouchOutside(false)
+            }
         lyrebirdSettingsDialog = dialog
         dialog.findViewById<TextView>(R.id.text_subpage_title)?.text = title
         dialog.findViewById<TextView>(R.id.text_subpage_hint)?.text = subtitle
@@ -3567,7 +3815,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
         dialog.setOnKeyListener { _, keyCode, event ->
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK &&
-                event.action == android.view.KeyEvent.ACTION_DOWN) {
+                event.action == android.view.KeyEvent.ACTION_DOWN
+            ) {
                 onBack()
                 true
             } else {
@@ -3581,7 +3830,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setLayout(
                 android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
             )
         }
         previousDialog?.dismiss()
@@ -3589,15 +3838,20 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         if (content != null) configure(content, dialog)
     }
 
-    private fun addBrandedSettingsSection(container: LinearLayout, label: String) {
-        container.addView(TextView(this).apply {
-            text = label
-            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_orange))
-            textSize = 11f
-            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
-            letterSpacing = 0.16f
-            setPadding(0, dpToPx(6), 0, dpToPx(8))
-        })
+    private fun addBrandedSettingsSection(
+        container: LinearLayout,
+        label: String,
+    ) {
+        container.addView(
+            TextView(this).apply {
+                text = label
+                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_orange))
+                textSize = 11f
+                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
+                letterSpacing = 0.16f
+                setPadding(0, dpToPx(6), 0, dpToPx(8))
+            },
+        )
     }
 
     private fun addBrandedSettingsRow(
@@ -3605,59 +3859,78 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         title: String,
         detail: String,
         icon: Int? = null,
-        onClick: (() -> Unit)? = null
+        onClick: (() -> Unit)? = null,
     ) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            minimumHeight = dpToPx(70)
-            setPadding(dpToPx(16), dpToPx(10), dpToPx(14), dpToPx(10))
-            setBackgroundResource(R.drawable.lyrebird_settings_row)
-            isClickable = onClick != null
-            isFocusable = onClick != null
-            onClick?.let { setOnClickListener { it() } }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dpToPx(10)
+        val row =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                minimumHeight = dpToPx(70)
+                setPadding(dpToPx(16), dpToPx(10), dpToPx(14), dpToPx(10))
+                setBackgroundResource(R.drawable.lyrebird_settings_row)
+                isClickable = onClick != null
+                isFocusable = onClick != null
+                onClick?.let { setOnClickListener { it() } }
+                layoutParams =
+                    LinearLayout
+                        .LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            bottomMargin = dpToPx(10)
+                        }
             }
-        }
         icon?.let { iconRes ->
-            row.addView(android.widget.ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dpToPx(28), dpToPx(28))
-                setImageResource(iconRes)
-                imageTintList = ColorStateList.valueOf(
-                    ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_teal)
-                )
-            })
+            row.addView(
+                android.widget.ImageView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(28), dpToPx(28))
+                    setImageResource(iconRes)
+                    imageTintList =
+                        ColorStateList.valueOf(
+                            ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_teal),
+                        )
+                },
+            )
         }
-        row.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (icon != null) marginStart = dpToPx(14)
-            }
-            addView(TextView(this@FlightDeckActivity).apply {
-                text = title
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-                textSize = 15f
-                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
-            })
-            if (detail.isNotBlank()) addView(TextView(this@FlightDeckActivity).apply {
-                text = detail
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-                textSize = 12f
-                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(0, dpToPx(2), 0, 0)
-            })
-        })
-        if (onClick != null) row.addView(TextView(this).apply {
-            text = "›"
-            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_teal))
-            textSize = 26f
-        })
+        row.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams =
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        if (icon != null) marginStart = dpToPx(14)
+                    }
+                addView(
+                    TextView(this@FlightDeckActivity).apply {
+                        text = title
+                        setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                        textSize = 15f
+                        typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
+                    },
+                )
+                if (detail.isNotBlank()) {
+                    addView(
+                        TextView(this@FlightDeckActivity).apply {
+                            text = detail
+                            setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                            textSize = 12f
+                            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            setPadding(0, dpToPx(2), 0, 0)
+                        },
+                    )
+                }
+            },
+        )
+        if (onClick != null) {
+            row.addView(
+                TextView(this).apply {
+                    text = "›"
+                    setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_teal))
+                    textSize = 26f
+                },
+            )
+        }
         container.addView(row)
     }
 
@@ -3665,29 +3938,34 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         container: LinearLayout,
         label: String,
         onClick: () -> Unit,
-        destructive: Boolean = false
+        destructive: Boolean = false,
     ) {
-        container.addView(Button(this).apply {
-            text = label
-            isAllCaps = false
-            textSize = 14f
-            typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
-            setTextColor(
-                ContextCompat.getColor(
-                    this@FlightDeckActivity,
-                    if (destructive) R.color.lyrebird_text else R.color.lyrebird_background
+        container.addView(
+            Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 14f
+                typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.space_grotesk)
+                setTextColor(
+                    ContextCompat.getColor(
+                        this@FlightDeckActivity,
+                        if (destructive) R.color.lyrebird_text else R.color.lyrebird_background,
+                    ),
                 )
-            )
-            background = ContextCompat.getDrawable(
-                this@FlightDeckActivity,
-                if (destructive) R.drawable.lyrebird_settings_row else R.drawable.lyrebird_settings_action
-            )
-            setOnClickListener { onClick() }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(52)
-            ).apply { bottomMargin = dpToPx(12) }
-        })
+                background =
+                    ContextCompat.getDrawable(
+                        this@FlightDeckActivity,
+                        if (destructive) R.drawable.lyrebird_settings_row else R.drawable.lyrebird_settings_action,
+                    )
+                setOnClickListener { onClick() }
+                layoutParams =
+                    LinearLayout
+                        .LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            dpToPx(52),
+                        ).apply { bottomMargin = dpToPx(12) }
+            },
+        )
     }
 
     private fun showBrandedChoicePage(
@@ -3697,7 +3975,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         selectedIndex: Int,
         onSelected: (Int) -> Unit,
         returnPage: () -> Unit,
-        onBack: () -> Unit = returnPage
+        onBack: () -> Unit = returnPage,
     ) {
         showBrandedSettingsSubpage(title, subtitle, onBack) { container, dialog ->
             labels.forEachIndexed { index, label ->
@@ -3708,7 +3986,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     onClick = {
                         onSelected(index)
                         returnPage()
-                    }
+                    },
                 )
             }
         }
@@ -3722,22 +4000,25 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         saveLabel: String = "Save",
         onSave: (String) -> Unit,
         returnPage: () -> Unit,
-        onBack: () -> Unit = returnPage
+        onBack: () -> Unit = returnPage,
     ) {
         showBrandedSettingsSubpage(title, subtitle, onBack) { container, dialog ->
-            val input = EditText(this).apply {
-                setText(currentValue)
-                this.hint = hint
-                setSingleLine(true)
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-                setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
-                setBackgroundResource(R.drawable.lyrebird_settings_row)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    dpToPx(58)
-                ).apply { bottomMargin = dpToPx(18) }
-            }
+            val input =
+                EditText(this).apply {
+                    setText(currentValue)
+                    this.hint = hint
+                    setSingleLine(true)
+                    setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                    setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                    setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                    setBackgroundResource(R.drawable.lyrebird_settings_row)
+                    layoutParams =
+                        LinearLayout
+                            .LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                dpToPx(58),
+                            ).apply { bottomMargin = dpToPx(18) }
+                }
             container.addView(input)
             addBrandedSettingsButton(container, saveLabel, {
                 onSave(input.text.toString().trim())
@@ -3757,32 +4038,40 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         onReset: (() -> Unit)? = null,
         onSave: (Int) -> Unit,
         returnPage: () -> Unit = ::showLyrebirdSettingsMenu,
-        onBack: () -> Unit = returnPage
+        onBack: () -> Unit = returnPage,
     ) {
         showBrandedSettingsSubpage(title, subtitle, onBack) { container, dialog ->
-            val input = EditText(this).apply {
-                setText(if (currentValue >= 0) currentValue.toString() else "")
-                this.hint = hint
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setSingleLine(true)
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-                setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
-                setBackgroundResource(R.drawable.lyrebird_settings_row)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    dpToPx(58)
-                ).apply { bottomMargin = dpToPx(18) }
-            }
+            val input =
+                EditText(this).apply {
+                    setText(if (currentValue >= 0) currentValue.toString() else "")
+                    this.hint = hint
+                    inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    setSingleLine(true)
+                    setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                    setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                    setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                    setBackgroundResource(R.drawable.lyrebird_settings_row)
+                    layoutParams =
+                        LinearLayout
+                            .LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                dpToPx(58),
+                            ).apply { bottomMargin = dpToPx(18) }
+                }
             container.addView(input)
             addBrandedSettingsButton(container, "Save", {
-                val value = input.text.toString().trim().toIntOrNull()
+                val value =
+                    input.text
+                        .toString()
+                        .trim()
+                        .toIntOrNull()
                 if (value == null || value < minimum || value > maximum) {
-                    Toast.makeText(
-                        this,
-                        "Enter a whole number from $minimum to $maximum",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast
+                        .makeText(
+                            this,
+                            "Enter a whole number from $minimum to $maximum",
+                            Toast.LENGTH_SHORT,
+                        ).show()
                 } else {
                     onSave(value)
                     returnPage()
@@ -3806,7 +4095,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             modes.indexOf(DroneController.getRcControlMode()).coerceAtLeast(0),
             onSelected = { index -> DroneController.setRcControlMode(modes[index]) },
             returnPage = ::showLyrebirdSettingsMenu,
-            onBack = ::showLyrebirdSettingsMenu
+            onBack = ::showLyrebirdSettingsMenu,
         )
     }
 
@@ -3831,7 +4120,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             "Height used when return-to-home is commanded",
             DroneController.getRTHAltitude(),
             "Altitude in metres",
-            onSave = { DroneController.setRTHAltitude(it) }
+            onSave = { DroneController.setRTHAltitude(it) },
         )
     }
 
@@ -3841,7 +4130,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             "Upper altitude limit reported by the aircraft",
             DroneController.getMaxFlightHeight(),
             "Height in metres",
-            onSave = { DroneController.setMaxFlightHeight(it) }
+            onSave = { DroneController.setMaxFlightHeight(it) },
         )
     }
 
@@ -3851,7 +4140,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             "Horizontal distance limit from the recorded home point",
             DroneController.getMaxFlightDistance(),
             "Distance in metres",
-            onSave = { DroneController.setMaxFlightDistance(it) }
+            onSave = { DroneController.setMaxFlightDistance(it) },
         )
     }
 
@@ -3865,44 +4154,54 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     /** Combined editor for the drone name and MAVLink vehicle ID, with a short help line for each. */
     private fun showBrandedIdentitiesPage() {
-        val configuredSysId = prefIntOrDefault(
-            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
-        )
+        val configuredSysId =
+            prefIntOrDefault(
+                MavlinkEndpointConfig.PREF_SYSTEM_ID,
+                MavlinkEndpointConfig.DEFAULT_SYSTEM_ID,
+            )
         showBrandedSettingsSubpage(
             "DRONE IDENTITY",
             getString(R.string.lyrebird_identity_subtitle),
-            onBack = ::showLyrebirdSettingsMenu
+            onBack = ::showLyrebirdSettingsMenu,
         ) { container, _ ->
             addBrandedSettingsSection(container, "DRONE NAME")
-            val nameInput = EditText(this).apply {
-                setText(droneName)
-                hint = "e.g. mini3, alpha, scout (blank = automatic)"
-                setSingleLine(true)
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-                setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
-                setBackgroundResource(R.drawable.lyrebird_settings_row)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(58)
-                ).apply { bottomMargin = dpToPx(0) }
-            }
+            val nameInput =
+                EditText(this).apply {
+                    setText(droneName)
+                    hint = "e.g. mini3, alpha, scout (blank = automatic)"
+                    setSingleLine(true)
+                    setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                    setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                    setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                    setBackgroundResource(R.drawable.lyrebird_settings_row)
+                    layoutParams =
+                        LinearLayout
+                            .LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                dpToPx(58),
+                            ).apply { bottomMargin = dpToPx(0) }
+                }
             container.addView(nameInput)
             container.addView(identityHelpText(getString(R.string.drone_name_help)))
 
             addBrandedSettingsSection(container, "MAVLINK VEHICLE ID")
-            val idInput = EditText(this).apply {
-                setText(if (MavlinkSystemId.isManual(configuredSysId)) configuredSysId.toString() else "")
-                hint = "0 = automatic, 1-99 = manual"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setSingleLine(true)
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
-                setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
-                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
-                setBackgroundResource(R.drawable.lyrebird_settings_row)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(58)
-                ).apply { bottomMargin = dpToPx(0) }
-            }
+            val idInput =
+                EditText(this).apply {
+                    setText(if (MavlinkSystemId.isManual(configuredSysId)) configuredSysId.toString() else "")
+                    hint = "0 = automatic, 1-99 = manual"
+                    inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    setSingleLine(true)
+                    setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_text))
+                    setHintTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
+                    setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                    setBackgroundResource(R.drawable.lyrebird_settings_row)
+                    layoutParams =
+                        LinearLayout
+                            .LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                dpToPx(58),
+                            ).apply { bottomMargin = dpToPx(0) }
+                }
             container.addView(idInput)
             container.addView(identityHelpText(getString(R.string.vehicle_id_help)))
 
@@ -3928,15 +4227,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private fun identityHelpText(text: String): TextView {
-        return TextView(this).apply {
+    private fun identityHelpText(text: String): TextView =
+        TextView(this).apply {
             this.text = text
             setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_muted))
             textSize = 12f
             typeface = ResourcesCompat.getFont(this@FlightDeckActivity, R.font.dm_sans)
             setPadding(0, dpToPx(4), 0, dpToPx(10))
         }
-    }
 
     private fun showBrandedStreamSettingsPage() {
         val mode = getStreamingMode()
@@ -3964,23 +4262,31 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     addBrandedSettingsRow(
                         container,
                         "Surface H264 encoder",
-                        if (isDjiSurfaceH264EncoderEnabled()) "Experimental / enabled" else "Default WebRTC encoder"
+                        if (isDjiSurfaceH264EncoderEnabled()) "Experimental / enabled" else "Default WebRTC encoder",
                     ) {
                         toggleDjiSurfaceH264Encoder()
                     }
                 }
-                StreamingMode.RTMP -> addBrandedSettingsRow(container, "RTMP server", getRtmpUrl(NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1")) {
-                    showRtmpConfigDialog()
-                }
-                StreamingMode.RTSP -> addBrandedSettingsRow(container, "RTSP configuration", "Port ${getRtspPort()}") {
-                    showRtspConfigDialog()
-                }
-                StreamingMode.AGORA -> addBrandedSettingsRow(container, "Agora configuration", getAgoraChannel().ifEmpty { "None" }) {
-                    showAgoraConfigDialog()
-                }
-                StreamingMode.GB28181 -> addBrandedSettingsRow(container, "GB28181 configuration", getGbServerIp().ifEmpty { "None" }) {
-                    showGb28181ConfigDialog()
-                }
+                StreamingMode.RTMP ->
+                    addBrandedSettingsRow(
+                        container,
+                        "RTMP server",
+                        getRtmpUrl(NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"),
+                    ) {
+                        showRtmpConfigDialog()
+                    }
+                StreamingMode.RTSP ->
+                    addBrandedSettingsRow(container, "RTSP configuration", "Port ${getRtspPort()}") {
+                        showRtspConfigDialog()
+                    }
+                StreamingMode.AGORA ->
+                    addBrandedSettingsRow(container, "Agora configuration", getAgoraChannel().ifEmpty { "None" }) {
+                        showAgoraConfigDialog()
+                    }
+                StreamingMode.GB28181 ->
+                    addBrandedSettingsRow(container, "GB28181 configuration", getGbServerIp().ifEmpty { "None" }) {
+                        showGb28181ConfigDialog()
+                    }
             }
         }
     }
@@ -3997,7 +4303,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 if (telemetryServer?.hasClients() == true || lastWhipUrl != null) restartActiveStreaming()
             },
             returnPage = ::showBrandedStreamSettingsPage,
-            onBack = ::showBrandedStreamSettingsPage
+            onBack = ::showBrandedStreamSettingsPage,
         )
     }
 
@@ -4011,7 +4317,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 sharedPreferences.edit().putString(PREF_MEDIAMTX_SERVER, value).apply()
             },
             returnPage = ::showBrandedStreamSettingsPage,
-            onBack = ::showBrandedStreamSettingsPage
+            onBack = ::showBrandedStreamSettingsPage,
         )
     }
 
@@ -4027,7 +4333,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 webRTCStreamer?.changeMediaOptions(buildWebRTCOptions())
             },
             returnPage = ::showBrandedStreamSettingsPage,
-            onBack = ::showBrandedStreamSettingsPage
+            onBack = ::showBrandedStreamSettingsPage,
         )
     }
 
@@ -4043,7 +4349,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 webRTCStreamer?.changeMediaOptions(buildWebRTCOptions())
             },
             returnPage = ::showBrandedStreamSettingsPage,
-            onBack = ::showBrandedStreamSettingsPage
+            onBack = ::showBrandedStreamSettingsPage,
         )
     }
 
@@ -4056,7 +4362,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             sources.indexOf(getVideoSourceMode()).coerceAtLeast(0),
             onSelected = { index -> setVideoSourceMode(sources[index]) },
             returnPage = ::showBrandedStreamSettingsPage,
-            onBack = ::showBrandedStreamSettingsPage
+            onBack = ::showBrandedStreamSettingsPage,
         )
     }
 
@@ -4069,7 +4375,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             addBrandedSettingsRow(container, "YOLO model", sharedPreferences.getString(PREF_EDGE_MODEL_NAME, "Select...").orEmpty()) {
                 showEdgeFilePicker(REQUEST_EDGE_MODEL_FILE, "Select YOLO TFLite model")
             }
-            addBrandedSettingsRow(container, "YOLO labels", sharedPreferences.getString(PREF_EDGE_LABELS_NAME, "Default person").orEmpty()) {
+            addBrandedSettingsRow(
+                container,
+                "YOLO labels",
+                sharedPreferences.getString(PREF_EDGE_LABELS_NAME, "Default person").orEmpty(),
+            ) {
                 showEdgeFilePicker(REQUEST_EDGE_LABELS_FILE, "Select model labels")
             }
             addBrandedSettingsRow(container, "Confidence threshold", "${(getEdgeConfidenceThreshold() * 100).toInt()}%") {
@@ -4087,7 +4397,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             sources.indexOf(getDetectionSource()).coerceAtLeast(0),
             onSelected = { index -> setDetectionSource(sources[index]) },
             returnPage = ::showBrandedDetectionSettingsPage,
-            onBack = ::showBrandedDetectionSettingsPage
+            onBack = ::showBrandedDetectionSettingsPage,
         )
     }
 
@@ -4096,7 +4406,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             "CONFIDENCE THRESHOLD",
             "Minimum confidence for reported targets",
             EDGE_CONFIDENCE_OPTIONS.map { "${(it * 100).toInt()}%" },
-            EDGE_CONFIDENCE_OPTIONS.indexOfFirst { kotlin.math.abs(it - getEdgeConfidenceThreshold()) < 0.001f }
+            EDGE_CONFIDENCE_OPTIONS
+                .indexOfFirst { kotlin.math.abs(it - getEdgeConfidenceThreshold()) < 0.001f }
                 .coerceAtLeast(0),
             onSelected = { index ->
                 val threshold = EDGE_CONFIDENCE_OPTIONS[index]
@@ -4109,7 +4420,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 }
             },
             returnPage = ::showBrandedDetectionSettingsPage,
-            onBack = ::showBrandedDetectionSettingsPage
+            onBack = ::showBrandedDetectionSettingsPage,
         )
     }
 
@@ -4119,13 +4430,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             showLyrebirdSettingsMenu()
             return
         }
-        showBrandedSettingsSubpage("MAVLINK FLIGHT CONTROL", "This grants command authority to connected ground stations") { container, dialog ->
+        showBrandedSettingsSubpage(
+            "MAVLINK FLIGHT CONTROL",
+            "This grants command authority to connected ground stations",
+        ) { container, dialog ->
             addBrandedSettingsSection(container, "SAFETY")
             addBrandedSettingsRow(
                 container,
                 "Allow flight commands",
                 "Takeoff, landing, RTH and missions will be accepted",
-                R.drawable.uxsdk_ic_drone
+                R.drawable.uxsdk_ic_drone,
             )
             addBrandedSettingsButton(container, "Allow flight control", {
                 setMavlinkFlightAllowed(true)
@@ -4134,24 +4448,29 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private fun showBrandedFormatStoragePage(location: CameraStorageLocation, label: String) {
+    private fun showBrandedFormatStoragePage(
+        location: CameraStorageLocation,
+        label: String,
+    ) {
         val status = getDroneStorageStatus(location, label)
         showBrandedSettingsSubpage("FORMAT $label".uppercase(), "Destructive media operation") { container, dialog ->
             addBrandedSettingsSection(container, "CURRENT STATUS")
             addBrandedSettingsRow(container, status.label, status.summary, R.drawable.uxsdk_ic_sdcard)
-            container.addView(TextView(this).apply {
-                text = "This deletes all media on the drone $label. Stop recording first, then continue only if you are sure."
-                setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_danger))
-                textSize = 14f
-                setPadding(0, dpToPx(8), 0, dpToPx(18))
-            })
+            container.addView(
+                TextView(this).apply {
+                    text = "This deletes all media on the drone $label. Stop recording first, then continue only if you are sure."
+                    setTextColor(ContextCompat.getColor(this@FlightDeckActivity, R.color.lyrebird_danger))
+                    textSize = 14f
+                    setPadding(0, dpToPx(8), 0, dpToPx(18))
+                },
+            )
             addBrandedSettingsButton(container, "Format $label", {
                 dialog.dismiss()
                 formatDroneStorage(location, label)
             }, destructive = true)
         }
     }
-    
+
     private fun updateDroneNameDisplay() {
         val droneNameText = findViewById<TextView>(R.id.text_drone_name)
         droneNameText?.text = "$droneName · V${currentMavlinkSystemId()}"
@@ -4234,7 +4553,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 reevaluateAircraftIdle()
             }
             if (newValue == FlightMode.GO_HOME &&
-                DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME) {
+                DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME
+            ) {
                 mainHandler.post { DroneController.activateManualOverride() }
             }
         }
@@ -4305,11 +4625,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     /**
-     * @param detail a smaller status line under [message] naming the startup phase under way
-     *   (registering with the DJI SDK, starting servers, waiting for the aircraft) — otherwise
-     *   the overlay is just a spinner with no indication of what it is actually doing.
-     */
-    /**
      * Update the loading overlay's status line without touching its visibility.
      *
      * Narrating a startup phase must never force the overlay back on: the aircraft can (and
@@ -4324,7 +4639,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         findViewById<TextView>(R.id.lyrebird_loading_detail)?.text = detail
     }
 
-    private fun showLoadingOverlay(visible: Boolean, message: String? = null, detail: String? = null) {
+    /**
+     * @param detail a smaller status line under [message] naming the startup phase under way
+     *   (registering with the DJI SDK, starting servers, waiting for the aircraft) — otherwise
+     *   the overlay is just a spinner with no indication of what it is actually doing.
+     */
+    private fun showLoadingOverlay(
+        visible: Boolean,
+        message: String? = null,
+        detail: String? = null,
+    ) {
         findViewById<View>(R.id.lyrebird_loading_overlay)?.let { overlay ->
             overlay.visibility = if (visible) View.VISIBLE else View.GONE
             if (!visible) {
@@ -4371,12 +4695,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         KeyManager.getInstance().listen(flightSpeedKey, this) { _, _ -> rebuildTelemetryCache() }
         KeyManager.getInstance().listen(batteryKey, this) { _, _ -> rebuildTelemetryCache() }
     }
-    
+
     private fun loadDroneName() {
         val storedName = sharedPreferences.getString(PREF_DRONE_NAME, "")?.trim().orEmpty()
         val explicit = sharedPreferences.getBoolean(PREF_DRONE_NAME_USER_SET, false)
         droneName = if (explicit) storedName else defaultDroneName()
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putString(PREF_DRONE_NAME, droneName)
             .putBoolean(PREF_DRONE_NAME_USER_SET, explicit)
             .apply()
@@ -4385,12 +4710,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     }
 
     private fun defaultDroneName(): String {
-        val suffix = droneSerialNumber
-            .trim()
-            .takeLast(8)
-            .ifEmpty { "unknown" }
-            .replace(Regex("[^a-zA-Z0-9_]"), "_")
-            .lowercase()
+        val suffix =
+            droneSerialNumber
+                .trim()
+                .takeLast(8)
+                .ifEmpty { "unknown" }
+                .replace(Regex("[^a-zA-Z0-9_]"), "_")
+                .lowercase()
         return "lb_$suffix"
     }
 
@@ -4403,50 +4729,57 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         LyrebirdFlightLogger.setDroneName(generated)
         mainHandler.post { updateDroneNameDisplay() }
     }
-    
+
     private fun showDroneNameDialog(isFirstTime: Boolean = false) {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
-        }
-        val nameInput = EditText(this).apply {
-            hint = "e.g., lb_01, alpha, scout (blank = automatic)"
-            if (!isFirstTime) setText(droneName)
-        }
+        val container =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+            }
+        val nameInput =
+            EditText(this).apply {
+                hint = "e.g., lb_01, alpha, scout (blank = automatic)"
+                if (!isFirstTime) setText(droneName)
+            }
         container.addView(nameInput)
         container.addView(identityHelpText(getString(R.string.drone_name_help)))
 
-        val configuredSysId = prefIntOrDefault(
-            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
-        )
-        val idInput = EditText(this).apply {
-            hint = "0 = automatic, 1-99 = manual"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(if (MavlinkSystemId.isManual(configuredSysId)) configuredSysId.toString() else "")
-        }
+        val configuredSysId =
+            prefIntOrDefault(
+                MavlinkEndpointConfig.PREF_SYSTEM_ID,
+                MavlinkEndpointConfig.DEFAULT_SYSTEM_ID,
+            )
+        val idInput =
+            EditText(this).apply {
+                hint = "0 = automatic, 1-99 = manual"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText(if (MavlinkSystemId.isManual(configuredSysId)) configuredSysId.toString() else "")
+            }
         container.addView(idInput)
         container.addView(identityHelpText(getString(R.string.vehicle_id_help)))
 
-        val builder = AlertDialog.Builder(this)
-            .setTitle(if (isFirstTime) "Drone Identity" else "Change Drone Identity")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val name = nameInput.text.toString().trim()
-                if (name.isNotEmpty()) {
-                    if (setDroneName(name)) {
-                        Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
+        val builder =
+            AlertDialog
+                .Builder(this)
+                .setTitle(if (isFirstTime) "Drone Identity" else "Change Drone Identity")
+                .setView(container)
+                .setPositiveButton("Save") { _, _ ->
+                    val name = nameInput.text.toString().trim()
+                    if (name.isNotEmpty()) {
+                        if (setDroneName(name)) {
+                            Toast.makeText(this, "Drone name saved: $droneName", Toast.LENGTH_SHORT).show()
+                        }
+                    } else if (!isFirstTime) {
+                        setAutomaticDroneName()
                     }
-                } else if (!isFirstTime) {
-                    setAutomaticDroneName()
+                    val idText = idInput.text.toString().trim()
+                    val id = if (idText.isBlank()) MavlinkSystemId.AUTO else idText.toIntOrNull()
+                    if (id != null && (id == MavlinkSystemId.AUTO || MavlinkSystemId.isManual(id))) {
+                        setMavlinkSystemId(id)
+                    } else {
+                        Toast.makeText(this, "Enter 0 for automatic, or 1-99 for a manual ID", Toast.LENGTH_SHORT).show()
+                    }
                 }
-                val idText = idInput.text.toString().trim()
-                val id = if (idText.isBlank()) MavlinkSystemId.AUTO else idText.toIntOrNull()
-                if (id != null && (id == MavlinkSystemId.AUTO || MavlinkSystemId.isManual(id))) {
-                    setMavlinkSystemId(id)
-                } else {
-                    Toast.makeText(this, "Enter 0 for automatic, or 1-99 for a manual ID", Toast.LENGTH_SHORT).show()
-                }
-            }
 
         if (isFirstTime) {
             builder.setCancelable(false)
@@ -4463,7 +4796,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         input.hint = "host o host:puerto (ej: 10.233.132.21:8889)"
         input.setText(current)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("WHIP / mediamtx server")
             .setMessage("Opcional: si se deja vacío, se usa la IP del primer cliente de telemetría.")
             .setView(input)
@@ -4473,8 +4807,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 val shown = if (value.isEmpty()) "auto (client IP)" else value
                 Log.i(TAG, "Mediamtx server set to: $shown")
                 Toast.makeText(this, "WHIP server: $shown", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -4483,7 +4816,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val labels = WEBRTC_FPS_OPTIONS.map { "$it fps" }.toTypedArray()
         val checkedIndex = WEBRTC_FPS_OPTIONS.indexOf(currentFps).coerceAtLeast(0)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("WebRTC frame rate")
             .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
                 val selectedFps = WEBRTC_FPS_OPTIONS[which]
@@ -4492,19 +4826,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 Toast.makeText(this, "WebRTC FPS: $selectedFps", Toast.LENGTH_SHORT).show()
                 Log.i(TAG, "WebRTC frame rate set to $selectedFps fps")
                 dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun showWebRTCResolutionDialog() {
         val presets = StreamResolutionPreset.entries.toTypedArray()
-        val labels = presets.map {
-            if (it.width > 0 && it.height > 0) "${it.menuLabel} (${it.width}x${it.height})" else it.menuLabel
-        }.toTypedArray()
+        val labels =
+            presets
+                .map {
+                    if (it.width > 0 && it.height > 0) "${it.menuLabel} (${it.width}x${it.height})" else it.menuLabel
+                }.toTypedArray()
         val checkedIndex = presets.indexOf(getWebRTCResolutionPreset()).coerceAtLeast(0)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("WebRTC resolution")
             .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
                 val selectedPreset = presets[which]
@@ -4513,32 +4849,39 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 Toast.makeText(this, "WebRTC resolution: ${selectedPreset.menuLabel}", Toast.LENGTH_SHORT).show()
                 Log.i(
                     TAG,
-                    "WebRTC resolution set to ${if (selectedPreset.width > 0 && selectedPreset.height > 0) "${selectedPreset.width}x${selectedPreset.height}" else "native source"}"
+                    "WebRTC resolution set to ${if (
+                        selectedPreset.width > 0 && selectedPreset.height > 0
+                    ) {
+                        "${selectedPreset.width}x${selectedPreset.height}"
+                    } else {
+                        "native source"
+                    }}",
                 )
                 dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun showVideoSourceDialog() {
         val sources = VideoSourceMode.entries.toTypedArray()
-        val labels = sources.map { source ->
-            when (source) {
-                VideoSourceMode.DJI -> "Drone camera"
-                VideoSourceMode.PHONE -> "Phone back camera"
-                VideoSourceMode.MOCK -> "Mock MP4"
-            }
-        }.toTypedArray()
+        val labels =
+            sources
+                .map { source ->
+                    when (source) {
+                        VideoSourceMode.DJI -> "Drone camera"
+                        VideoSourceMode.PHONE -> "Phone back camera"
+                        VideoSourceMode.MOCK -> "Mock MP4"
+                    }
+                }.toTypedArray()
         val checkedIndex = sources.indexOf(getVideoSourceMode()).coerceAtLeast(0)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Video source")
             .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
                 setVideoSourceMode(sources[which])
                 dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -4562,8 +4905,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                             "Experimental / enabled (restart required)"
                         } else {
                             "Default WebRTC encoder"
-                        }
-                    )
+                        },
+                    ),
                 )
             }
             StreamingMode.RTMP -> {
@@ -4584,7 +4927,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             }
         }
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Video Streaming Configuration")
             .setAdapter(actionRowAdapter(rows)) { dialog, which ->
                 dialog.dismiss()
@@ -4607,8 +4951,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                         StreamingMode.GB28181 -> showGb28181ConfigDialog()
                     }
                 }
-            }
-            .setNegativeButton("Close", null)
+            }.setNegativeButton("Close", null)
             .show()
     }
 
@@ -4617,7 +4960,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val labels = modes.map { it.menuLabel }.toTypedArray()
         val checkedIndex = modes.indexOf(getStreamingMode()).coerceAtLeast(0)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Select Streaming Protocol")
             .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
                 val selectedMode = modes[which]
@@ -4627,17 +4971,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun showRtmpConfigDialog() {
-        val input = EditText(this).apply {
-            setText(getRtmpUrl(NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"))
-            hint = "rtmp://<host>:<port>/live/stream_id"
-        }
-        AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                setText(getRtmpUrl(NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"))
+                hint = "rtmp://<host>:<port>/live/stream_id"
+            }
+        AlertDialog
+            .Builder(this)
             .setTitle("Configure RTMP URL")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
@@ -4647,31 +4992,34 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
-            }
-            .setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
+            }.setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
             .show()
     }
 
     private fun showRtspConfigDialog() {
         val context = this
-        val layout = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(40, 20, 40, 20)
-        }
-        val portInput = EditText(context).apply {
-            setText(getRtspPort().toString())
-            hint = "RTSP Server Port (e.g. 8554)"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        val userInput = EditText(context).apply {
-            setText(getRtspUsername())
-            hint = "Username (Optional)"
-        }
-        val pwdInput = EditText(context).apply {
-            setText(getRtspPassword())
-            hint = "Password (Optional)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
+        val layout =
+            LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(40, 20, 40, 20)
+            }
+        val portInput =
+            EditText(context).apply {
+                setText(getRtspPort().toString())
+                hint = "RTSP Server Port (e.g. 8554)"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+        val userInput =
+            EditText(context).apply {
+                setText(getRtspUsername())
+                hint = "Username (Optional)"
+            }
+        val pwdInput =
+            EditText(context).apply {
+                setText(getRtspPassword())
+                hint = "Password (Optional)"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
         layout.addView(TextView(context).apply { text = "RTSP Server Port" })
         layout.addView(portInput)
         layout.addView(TextView(context).apply { text = "Username" })
@@ -4679,7 +5027,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         layout.addView(TextView(context).apply { text = "Password" })
         layout.addView(pwdInput)
 
-        AlertDialog.Builder(context)
+        AlertDialog
+            .Builder(context)
             .setTitle("RTSP Server Configuration")
             .setView(layout)
             .setPositiveButton("Save") { _, _ ->
@@ -4691,29 +5040,32 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
-            }
-            .setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
+            }.setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
             .show()
     }
 
     private fun showAgoraConfigDialog() {
         val context = this
-        val layout = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(40, 20, 40, 20)
-        }
-        val channelInput = EditText(context).apply {
-            setText(getAgoraChannel())
-            hint = "Agora Channel Name"
-        }
-        val tokenInput = EditText(context).apply {
-            setText(getAgoraToken())
-            hint = "Agora Token (Optional)"
-        }
-        val uidInput = EditText(context).apply {
-            setText(getAgoraUid())
-            hint = "Agora User ID (UID, e.g. 0)"
-        }
+        val layout =
+            LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(40, 20, 40, 20)
+            }
+        val channelInput =
+            EditText(context).apply {
+                setText(getAgoraChannel())
+                hint = "Agora Channel Name"
+            }
+        val tokenInput =
+            EditText(context).apply {
+                setText(getAgoraToken())
+                hint = "Agora Token (Optional)"
+            }
+        val uidInput =
+            EditText(context).apply {
+                setText(getAgoraUid())
+                hint = "Agora User ID (UID, e.g. 0)"
+            }
         layout.addView(TextView(context).apply { text = "Channel ID" })
         layout.addView(channelInput)
         layout.addView(TextView(context).apply { text = "Token" })
@@ -4721,7 +5073,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         layout.addView(TextView(context).apply { text = "User ID (UID)" })
         layout.addView(uidInput)
 
-        AlertDialog.Builder(context)
+        AlertDialog
+            .Builder(context)
             .setTitle("Agora.io Configuration")
             .setView(layout)
             .setPositiveButton("Save") { _, _ ->
@@ -4732,52 +5085,60 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
-            }
-            .setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
+            }.setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
             .show()
     }
 
     private fun showGb28181ConfigDialog() {
         val context = this
-        val layout = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(40, 20, 40, 20)
-        }
-        val ipInput = EditText(context).apply {
-            setText(getGbServerIp())
-            hint = "SIP Server IP"
-        }
-        val portInput = EditText(context).apply {
-            setText(getGbServerPort().toString())
-            hint = "SIP Server Port (e.g. 5060)"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        val serverIdInput = EditText(context).apply {
-            setText(getGbServerId())
-            hint = "SIP Server ID (20 characters)"
-        }
-        val agentIdInput = EditText(context).apply {
-            setText(getGbAgentId())
-            hint = "SIP Agent ID (20 characters)"
-        }
-        val channelInput = EditText(context).apply {
-            setText(getGbChannel())
-            hint = "Video Channel ID (20 characters)"
-        }
-        val localPortInput = EditText(context).apply {
-            setText(getGbLocalPort().toString())
-            hint = "Local SIP Port (e.g. 5061)"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        val pwdInput = EditText(context).apply {
-            setText(getGbPassword())
-            hint = "Password"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
+        val layout =
+            LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(40, 20, 40, 20)
+            }
+        val ipInput =
+            EditText(context).apply {
+                setText(getGbServerIp())
+                hint = "SIP Server IP"
+            }
+        val portInput =
+            EditText(context).apply {
+                setText(getGbServerPort().toString())
+                hint = "SIP Server Port (e.g. 5060)"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+        val serverIdInput =
+            EditText(context).apply {
+                setText(getGbServerId())
+                hint = "SIP Server ID (20 characters)"
+            }
+        val agentIdInput =
+            EditText(context).apply {
+                setText(getGbAgentId())
+                hint = "SIP Agent ID (20 characters)"
+            }
+        val channelInput =
+            EditText(context).apply {
+                setText(getGbChannel())
+                hint = "Video Channel ID (20 characters)"
+            }
+        val localPortInput =
+            EditText(context).apply {
+                setText(getGbLocalPort().toString())
+                hint = "Local SIP Port (e.g. 5061)"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+        val pwdInput =
+            EditText(context).apply {
+                setText(getGbPassword())
+                hint = "Password"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
 
-        val scroll = android.widget.ScrollView(context).apply {
-            addView(layout)
-        }
+        val scroll =
+            android.widget.ScrollView(context).apply {
+                addView(layout)
+            }
 
         layout.addView(TextView(context).apply { text = "SIP Server IP" })
         layout.addView(ipInput)
@@ -4794,7 +5155,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         layout.addView(TextView(context).apply { text = "Password" })
         layout.addView(pwdInput)
 
-        AlertDialog.Builder(context)
+        AlertDialog
+            .Builder(context)
             .setTitle("GB28181 Configuration")
             .setView(scroll)
             .setPositiveButton("Save") { _, _ ->
@@ -4809,20 +5171,23 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
-            }
-            .setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
+            }.setNegativeButton("Cancel") { _, _ -> showStreamSettingsDialog() }
             .show()
     }
 
     private fun showEdgeConfidenceDialog() {
         val currentThreshold = getEdgeConfidenceThreshold()
         val labels = EDGE_CONFIDENCE_OPTIONS.map { "${(it * 100).toInt()}%" }.toTypedArray()
-        val checkedIndex = EDGE_CONFIDENCE_OPTIONS.indexOfFirst { kotlin.math.abs(it - currentThreshold) < 0.001f }
-            .takeIf { it >= 0 }
-            ?: EDGE_CONFIDENCE_OPTIONS.indexOfFirst { kotlin.math.abs(it - DEFAULT_EDGE_CONFIDENCE_THRESHOLD) < 0.001f }
-                .coerceAtLeast(0)
+        val checkedIndex =
+            EDGE_CONFIDENCE_OPTIONS
+                .indexOfFirst { kotlin.math.abs(it - currentThreshold) < 0.001f }
+                .takeIf { it >= 0 }
+                ?: EDGE_CONFIDENCE_OPTIONS
+                    .indexOfFirst { kotlin.math.abs(it - DEFAULT_EDGE_CONFIDENCE_THRESHOLD) < 0.001f }
+                    .coerceAtLeast(0)
 
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Edge confidence threshold")
             .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
                 val selectedThreshold = EDGE_CONFIDENCE_OPTIONS[which]
@@ -4834,27 +5199,32 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     updateEdgeMetricsView(lastEdgeMetrics.copy(confidenceThreshold = selectedThreshold))
                 }
                 invalidateOptionsMenu()
-                Toast.makeText(
-                    this,
-                    "Edge confidence: ${(selectedThreshold * 100).toInt()}%",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast
+                    .makeText(
+                        this,
+                        "Edge confidence: ${(selectedThreshold * 100).toInt()}%",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 Log.i(TAG, "Edge confidence threshold set to $selectedThreshold")
                 dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun showFormatStorageDialog(location: CameraStorageLocation, label: String) {
+    private fun showFormatStorageDialog(
+        location: CameraStorageLocation,
+        label: String,
+    ) {
         val status = getDroneStorageStatus(location, label)
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Format $label")
-            .setMessage("${status.dialogText}\n\nThis deletes all media on the drone $label. Stop recording first, then continue only if you are sure.")
-            .setPositiveButton("Format") { _, _ ->
+            .setMessage(
+                "${status.dialogText}\n\nThis deletes all media on the drone $label. " +
+                    "Stop recording first, then continue only if you are sure.",
+            ).setPositiveButton("Format") { _, _ ->
                 formatDroneStorage(location, label)
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -4877,14 +5247,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * rather than of the camera, so DJI has nothing separate to put it in and it maps to stills.
      */
     private fun setCameraMode(mavCameraMode: Int) {
-        val mode = when (mavCameraMode) {
-            Mav.CAMERA_MODE_VIDEO -> CameraMode.VIDEO_NORMAL
-            Mav.CAMERA_MODE_IMAGE, Mav.CAMERA_MODE_IMAGE_SURVEY -> CameraMode.PHOTO_NORMAL
-            else -> {
-                Log.w(TAG, "Unknown MAV_CAMERA_MODE $mavCameraMode; camera left as it is")
-                return
+        val mode =
+            when (mavCameraMode) {
+                Mav.CAMERA_MODE_VIDEO -> CameraMode.VIDEO_NORMAL
+                Mav.CAMERA_MODE_IMAGE, Mav.CAMERA_MODE_IMAGE_SURVEY -> CameraMode.PHOTO_NORMAL
+                else -> {
+                    Log.w(TAG, "Unknown MAV_CAMERA_MODE $mavCameraMode; camera left as it is")
+                    return
+                }
             }
-        }
         if (KeyManager.getInstance().getValue(cameraModeKey) == mode) return
         KeyManager.getInstance().setValue(
             cameraModeKey,
@@ -4897,7 +5268,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 override fun onFailure(error: IDJIError) {
                     Log.w(TAG, "Plan could not set camera mode: ${error.description()}")
                 }
-            }
+            },
         )
     }
 
@@ -4907,16 +5278,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             return
         }
 
-        KeyManager.getInstance()
-            .setValue(cameraModeKey, CameraMode.VIDEO_NORMAL, object : CommonCallbacks.CompletionCallback {
-            override fun onSuccess() {
-                Log.i(TAG, "Default camera mode set to video")
-            }
+        KeyManager
+            .getInstance()
+            .setValue(
+                cameraModeKey,
+                CameraMode.VIDEO_NORMAL,
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        Log.i(TAG, "Default camera mode set to video")
+                    }
 
-            override fun onFailure(error: IDJIError) {
-                Log.w(TAG, "Could not set default camera mode to video: ${error.description()}")
-            }
-        })
+                    override fun onFailure(error: IDJIError) {
+                        Log.w(TAG, "Could not set default camera mode to video: ${error.description()}")
+                    }
+                },
+            )
     }
 
     private fun preferSdCardStorage(storageInfos: CameraStorageInfos?) {
@@ -4930,42 +5306,48 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             return
         }
 
-        KeyManager.getInstance().setValue(cameraStorageLocationKey, CameraStorageLocation.SDCARD, object : CommonCallbacks.CompletionCallback {
-            override fun onSuccess() {
-                Log.i(TAG, "Default camera storage set to SD card")
-            }
+        KeyManager.getInstance().setValue(
+            cameraStorageLocationKey,
+            CameraStorageLocation.SDCARD,
+            object : CommonCallbacks.CompletionCallback {
+                override fun onSuccess() {
+                    Log.i(TAG, "Default camera storage set to SD card")
+                }
 
-            override fun onFailure(error: IDJIError) {
-                Log.w(TAG, "Could not set default camera storage to SD card: ${error.description()}")
-            }
-        })
+                override fun onFailure(error: IDJIError) {
+                    Log.w(TAG, "Could not set default camera storage to SD card: ${error.description()}")
+                }
+            },
+        )
     }
 
-    private fun isSdCardInserted(storageInfos: CameraStorageInfos?): Boolean {
-        return storageInfos
+    private fun isSdCardInserted(storageInfos: CameraStorageInfos?): Boolean =
+        storageInfos
             ?.cameraStorageInfoList
             ?.firstOrNull { it.storageType == CameraStorageLocation.SDCARD }
             ?.storageState == SDCardLoadState.INSERTED
-    }
 
-    private fun getDroneStorageStatus(location: CameraStorageLocation, label: String): DroneStorageStatus {
+    private fun getDroneStorageStatus(
+        location: CameraStorageLocation,
+        label: String,
+    ): DroneStorageStatus {
         val storageInfos: CameraStorageInfos? = KeyManager.getInstance().getValue(cameraStorageInfosKey)
         val info = storageInfos?.cameraStorageInfoList?.firstOrNull { it.storageType == location }
-        val parts = listOfNotNull(
-            info?.getStorageLeftCapacity()?.takeIf { it >= 0 }?.let { "${formatCapacity(it)} free" },
-            info?.getStorageState()?.name?.takeIf { it.isNotBlank() && it != "UNKNOWN" },
-            info?.getAvailableVideoDuration()?.takeIf { it >= 0 }?.let { "video ${formatDuration(it)}" }
-        )
+        val parts =
+            listOfNotNull(
+                info?.getStorageLeftCapacity()?.takeIf { it >= 0 }?.let { "${formatCapacity(it)} free" },
+                info?.getStorageState()?.name?.takeIf { it.isNotBlank() && it != "UNKNOWN" },
+                info?.getAvailableVideoDuration()?.takeIf { it >= 0 }?.let { "video ${formatDuration(it)}" },
+            )
         return DroneStorageStatus(label, parts.ifEmpty { listOf("status unavailable") }.joinToString(", "))
     }
 
-    private fun formatCapacity(megabytes: Int): String {
-        return if (megabytes >= 1024) {
+    private fun formatCapacity(megabytes: Int): String =
+        if (megabytes >= 1024) {
             String.format(java.util.Locale.US, "%.1f GB", megabytes / 1024.0)
         } else {
             "$megabytes MB"
         }
-    }
 
     private fun formatDuration(seconds: Int): String {
         val hours = seconds / 3600
@@ -4973,62 +5355,76 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
     }
 
-    private fun formatDroneStorage(location: CameraStorageLocation, label: String) {
+    private fun formatDroneStorage(
+        location: CameraStorageLocation,
+        label: String,
+    ) {
         Toast.makeText(this, "Formatting $label...", Toast.LENGTH_SHORT).show()
         val key = KeyTools.createKey(CameraKey.KeyFormatStorage, ComponentIndexType.LEFT_OR_MAIN)
-        KeyManager.getInstance()
-            .performAction(key, location, object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
-            override fun onSuccess(result: EmptyMsg?) {
-                mainHandler.post {
-                    Toast.makeText(this@FlightDeckActivity, "$label formatted", Toast.LENGTH_LONG).show()
-                }
-                Log.i(TAG, "Formatted drone $label")
-            }
+        KeyManager
+            .getInstance()
+            .performAction(
+                key,
+                location,
+                object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
+                    override fun onSuccess(result: EmptyMsg?) {
+                        mainHandler.post {
+                            Toast.makeText(this@FlightDeckActivity, "$label formatted", Toast.LENGTH_LONG).show()
+                        }
+                        Log.i(TAG, "Formatted drone $label")
+                    }
 
-            override fun onFailure(error: IDJIError) {
-                val message = "Failed to format $label: ${error.description()}"
-                mainHandler.post {
-                    Toast.makeText(this@FlightDeckActivity, message, Toast.LENGTH_LONG).show()
-                }
-                Log.e(TAG, message)
-            }
-        })
+                    override fun onFailure(error: IDJIError) {
+                        val message = "Failed to format $label: ${error.description()}"
+                        mainHandler.post {
+                            Toast.makeText(this@FlightDeckActivity, message, Toast.LENGTH_LONG).show()
+                        }
+                        Log.e(TAG, message)
+                    }
+                },
+            )
     }
 
     private fun buildWhipUrl(clientIp: String): String {
-        val safeDroneName = droneName.trim().ifEmpty {
-            DEFAULT_DRONE_NAME
-        }
-
-        val configuredServer = sharedPreferences.getString(PREF_MEDIAMTX_SERVER, "")
-            ?.trim()
-            .orEmpty()
-
-        val hostAndPort = if (configuredServer.isEmpty()) {
-            "$clientIp:$MEDIAMTX_WHIP_PORT"
-        } else {
-            var normalized = configuredServer
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .trimEnd('/')
-            if (!normalized.contains(':')) {
-                normalized = "$normalized:$MEDIAMTX_WHIP_PORT"
+        val safeDroneName =
+            droneName.trim().ifEmpty {
+                DEFAULT_DRONE_NAME
             }
-            normalized
-        }
+
+        val configuredServer =
+            sharedPreferences
+                .getString(PREF_MEDIAMTX_SERVER, "")
+                ?.trim()
+                .orEmpty()
+
+        val hostAndPort =
+            if (configuredServer.isEmpty()) {
+                "$clientIp:$MEDIAMTX_WHIP_PORT"
+            } else {
+                var normalized =
+                    configuredServer
+                        .removePrefix("http://")
+                        .removePrefix("https://")
+                        .trimEnd('/')
+                if (!normalized.contains(':')) {
+                    normalized = "$normalized:$MEDIAMTX_WHIP_PORT"
+                }
+                normalized
+            }
 
         return "http://$hostAndPort/$safeDroneName/whip"
     }
 
     private fun startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED &&
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) != PackageManager.PERMISSION_GRANTED &&
             ActivityCompat.checkSelfPermission(
                 this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED) {
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
             // Request permissions if not granted
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
             return
@@ -5052,7 +5448,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             sensorManager?.registerListener(sensorListener, pressure, SensorManager.SENSOR_DELAY_NORMAL)
         }
     }
-    
+
     private fun updateOrientationAngles() {
         // Update rotation matrix, which is needed to update orientation angles.
         SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
@@ -5060,7 +5456,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
         SensorManager.getOrientation(rotationMatrix, orientationAngles)
         // "orientationAngles" now has up-to-date information.
-        
+
         // Convert azimuth to degrees (0-360)
         var azimuth = Math.toDegrees(orientationAngles[0].toDouble())
         if (azimuth < 0) {
@@ -5071,10 +5467,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun startServers() {
         val deviceIp = NetworkUtils.getDeviceIpAddress()
-        
+
         // Start mDNS/Zeroconf service registration (RECOMMENDED for discovery)
         discoveryManager.registerMdnsService(droneSerialNumber, HTTP_PORT, TELEMETRY_PORT)
-        
+
         // Start Discovery Server (UDP broadcast/multicast fallback)
         discoveryManager.startDiscoveryServer()
 
@@ -5127,46 +5523,57 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         // WebRTC video via WHIP — create the shared frame source/publisher.
         // WHIP publishing starts automatically when bridge connects to telemetry.
         runCatching {
-            webRTCStreamer = WebRTCStreamer(
-                context = applicationContext,
-                cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
-                droneName = droneName,
-                options = buildWebRTCOptions(),
-                mockVideoEnabled = isMockVideoEnabled()
-            )
+            webRTCStreamer =
+                WebRTCStreamer(
+                    context = applicationContext,
+                    cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
+                    droneName = droneName,
+                    options = buildWebRTCOptions(),
+                    mockVideoEnabled = isMockVideoEnabled(),
+                )
             webRTCStreamer?.setVideoSourceMode(getVideoSourceMode())
-            webRTCStreamer?.listener = object : WebRTCStreamer.WebRTCStreamerListener {
-                override fun onServerStarted(ip: String, port: Int) {
-                    Log.i(TAG, "WHIP publishing from $ip")
-                    whipConsecutiveFailures = 0
-                }
-                override fun onServerStopped() {
-                    Log.i(TAG, "WebRTC streamer stopped")
-                }
-                override fun onServerError(error: String) {
-                    Log.e(TAG, "WebRTC error: $error")
-                    whipConsecutiveFailures++
-                    if (whipConsecutiveFailures >= WHIP_OVERRIDE_FAILURE_THRESHOLD) {
+            webRTCStreamer?.listener =
+                object : WebRTCStreamer.WebRTCStreamerListener {
+                    override fun onServerStarted(
+                        ip: String,
+                        port: Int,
+                    ) {
+                        Log.i(TAG, "WHIP publishing from $ip")
                         whipConsecutiveFailures = 0
-                        val configuredServer = sharedPreferences.getString(PREF_MEDIAMTX_SERVER, "")
-                            ?.trim().orEmpty()
-                        if (configuredServer.isNotEmpty()) {
-                            Log.w(
-                                TAG,
-                                "WHIP failed $WHIP_OVERRIDE_FAILURE_THRESHOLD times in a row against " +
-                                    "configured mediamtxServer '$configuredServer' -- clearing it so the " +
-                                    "next reconnect falls back to the auto-detected client IP"
-                            )
-                            sharedPreferences.edit().remove(PREF_MEDIAMTX_SERVER).apply()
+                    }
+
+                    override fun onServerStopped() {
+                        Log.i(TAG, "WebRTC streamer stopped")
+                    }
+
+                    override fun onServerError(error: String) {
+                        Log.e(TAG, "WebRTC error: $error")
+                        whipConsecutiveFailures++
+                        if (whipConsecutiveFailures >= WHIP_OVERRIDE_FAILURE_THRESHOLD) {
+                            whipConsecutiveFailures = 0
+                            val configuredServer =
+                                sharedPreferences
+                                    .getString(PREF_MEDIAMTX_SERVER, "")
+                                    ?.trim()
+                                    .orEmpty()
+                            if (configuredServer.isNotEmpty()) {
+                                Log.w(
+                                    TAG,
+                                    "WHIP failed $WHIP_OVERRIDE_FAILURE_THRESHOLD times in a row against " +
+                                        "configured mediamtxServer '$configuredServer' -- clearing it so the " +
+                                        "next reconnect falls back to the auto-detected client IP",
+                                )
+                                sharedPreferences.edit().remove(PREF_MEDIAMTX_SERVER).apply()
+                            }
                         }
                     }
+
+                    override fun onMetrics(metrics: WebRTCStreamMetrics) {
+                        lastWebRTCMetrics = metrics
+                        rebuildTelemetryCache()
+                        mainHandler.post { updateWebRTCMetricsView(metrics) }
+                    }
                 }
-                override fun onMetrics(metrics: WebRTCStreamMetrics) {
-                    lastWebRTCMetrics = metrics
-                    rebuildTelemetryCache()
-                    mainHandler.post { updateWebRTCMetricsView(metrics) }
-                }
-            }
             Log.i(TAG, "WebRTC streamer ready (starts on first telemetry client)")
 
             // If the telemetry callback already fired before streamer was ready, start now
@@ -5183,14 +5590,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun showServerInfo() {
         val deviceIp = NetworkUtils.getDeviceIpAddress() ?: "Unknown"
-        val message = """
+        val message =
+            """
             Lyrebird Servers Started
             IP: $deviceIp
             HTTP Commands: $HTTP_PORT
             Telemetry: $TELEMETRY_PORT
             Video: WHIP (auto on bridge connect)
-        """.trimIndent()
-        
+            """.trimIndent()
+
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         Log.i(TAG, message)
     }
@@ -5256,7 +5664,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             httpServer = null
             telemetryServer = null
             webRTCStreamer = null
- 
+
             // Unregister mDNS service
             discoveryManager.unregisterMdnsService()
 
@@ -5329,7 +5737,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             Log.w(TAG, "Failed to detach HSI widgets during destroy: ${error.message}", error)
         }
     }
-    
+
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, 1, 0, "Change Drone Name")
         menu.add(0, 20, 1, "Configure Stream/WebRTC...")
@@ -5347,87 +5755,102 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         menu.add(0, 4, nextOrder, "Format Drone Internal Storage")
         return super.onCreateOptionsMenu(menu)
     }
-    
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return if (handleLyrebirdMenuItem(item.itemId)) true else super.onOptionsItemSelected(item)
-    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        if (handleLyrebirdMenuItem(item.itemId)) true else super.onOptionsItemSelected(item)
 
     private fun handleLyrebirdMenuItem(itemId: Int): Boolean {
-        val action = when (itemId) {
-            1 -> { { showDroneNameDialog(isFirstTime = false) } }
-            2, 5, 7, 9, 20 -> ::showStreamSettingsDialog
-            21 -> { { setDetectionsEnabled(!isDetectionActiveForUi()) } }
-            22 -> ::toggleMavlinkFlightAllowed
-            8, 10 -> ::showDetectionSettingsDialog
-            11 -> { { showEdgeFilePicker(REQUEST_EDGE_MODEL_FILE, "Select YOLO TFLite model") } }
-            12 -> { { showEdgeFilePicker(REQUEST_EDGE_LABELS_FILE, "Select model labels") } }
-            13 -> ::showEdgeConfidenceDialog
-            6 -> ::showVideoSourceDialog
-            3 -> { { showFormatStorageDialog(CameraStorageLocation.SDCARD, "SD card") } }
-            4 -> { { showFormatStorageDialog(CameraStorageLocation.INTERNAL, "internal storage") } }
-            else -> return false
-        }
+        val action =
+            when (itemId) {
+                1 -> {
+                    { showDroneNameDialog(isFirstTime = false) }
+                }
+                2, 5, 7, 9, 20 -> ::showStreamSettingsDialog
+                21 -> {
+                    { setDetectionsEnabled(!isDetectionActiveForUi()) }
+                }
+                22 -> ::toggleMavlinkFlightAllowed
+                8, 10 -> ::showDetectionSettingsDialog
+                11 -> {
+                    { showEdgeFilePicker(REQUEST_EDGE_MODEL_FILE, "Select YOLO TFLite model") }
+                }
+                12 -> {
+                    { showEdgeFilePicker(REQUEST_EDGE_LABELS_FILE, "Select model labels") }
+                }
+                13 -> ::showEdgeConfidenceDialog
+                6 -> ::showVideoSourceDialog
+                3 -> {
+                    { showFormatStorageDialog(CameraStorageLocation.SDCARD, "SD card") }
+                }
+                4 -> {
+                    { showFormatStorageDialog(CameraStorageLocation.INTERNAL, "internal storage") }
+                }
+                else -> return false
+            }
         action()
         return true
     }
 
     // ==================== Utility Methods ====================
 
-
-    
     private fun fetchDroneSerialNumber() {
         runCatching {
             // Get drone serial number from DJI SDK
             val serialKey = KeyTools.createKey(FlightControllerKey.KeySerialNumber)
-            KeyManager.getInstance().getValue(serialKey, object : dji.v5.common.callback.CommonCallbacks.CompletionCallbackWithParam<String> {
-                override fun onSuccess(serialNumber: String?) {
-                    val previousSystemId = currentMavlinkSystemId()
-                    val previousConfiguredId = configuredMavlinkSystemId()
-                    droneSerialNumber = serialNumber?.trim()?.takeIf { it.isNotEmpty() } ?: "UNKNOWN"
-                    Log.i(TAG, "Drone serial number: $droneSerialNumber")
-                    LyrebirdFlightLogger.setVehicleSerial(droneSerialNumber)
-                    DroneSettingsProfiles.onAircraftChanged(
-                        sharedPreferences,
-                        PER_DRONE_PROFILE_KEYS,
-                        droneSerialNumber,
-                        mainHandler
-                    ) { profileApplied ->
-                        if (profileApplied) {
-                            // The restored profile may carry this aircraft's name and streaming
-                            // settings; re-derive the name and its display from them.
-                            loadDroneName()
-                            updateDroneNameDisplay()
-                            // The pre-profile sysid check above could not see a restored manual
-                            // sysid; restart the endpoint when the profile changed it.
-                            if (configuredMavlinkSystemId() != previousConfiguredId) {
-                                restartMavlinkEndpoint()
+            KeyManager.getInstance().getValue(
+                serialKey,
+                object : dji.v5.common.callback.CommonCallbacks.CompletionCallbackWithParam<String> {
+                    override fun onSuccess(serialNumber: String?) {
+                        val previousSystemId = currentMavlinkSystemId()
+                        val previousConfiguredId = configuredMavlinkSystemId()
+                        droneSerialNumber = serialNumber?.trim()?.takeIf { it.isNotEmpty() } ?: "UNKNOWN"
+                        Log.i(TAG, "Drone serial number: $droneSerialNumber")
+                        LyrebirdFlightLogger.setVehicleSerial(droneSerialNumber)
+                        DroneSettingsProfiles.onAircraftChanged(
+                            sharedPreferences,
+                            PER_DRONE_PROFILE_KEYS,
+                            droneSerialNumber,
+                            mainHandler,
+                        ) { profileApplied ->
+                            if (profileApplied) {
+                                // The restored profile may carry this aircraft's name and streaming
+                                // settings; re-derive the name and its display from them.
+                                loadDroneName()
+                                updateDroneNameDisplay()
+                                // The pre-profile sysid check above could not see a restored manual
+                                // sysid; restart the endpoint when the profile changed it.
+                                if (configuredMavlinkSystemId() != previousConfiguredId) {
+                                    restartMavlinkEndpoint()
+                                }
+                                Log.i(TAG, "Applied per-drone settings profile for $droneSerialNumber")
                             }
-                            Log.i(TAG, "Applied per-drone settings profile for $droneSerialNumber")
+                        }
+                        applyAutomaticDroneName()
+                        if (!configuredMavlinkSystemIdIsManual() && previousSystemId != currentMavlinkSystemId()) {
+                            restartMavlinkEndpoint()
                         }
                     }
-                    applyAutomaticDroneName()
-                    if (!configuredMavlinkSystemIdIsManual() && previousSystemId != currentMavlinkSystemId()) {
-                        restartMavlinkEndpoint()
+
+                    override fun onFailure(error: dji.v5.common.error.IDJIError) {
+                        droneSerialNumber = "UNKNOWN"
+                        Log.w(TAG, "Failed to get drone serial: ${error.description()}")
                     }
-                }
-                override fun onFailure(error: dji.v5.common.error.IDJIError) {
-                    droneSerialNumber = "UNKNOWN"
-                    Log.w(TAG, "Failed to get drone serial: ${error.description()}")
-                }
-            })
+                },
+            )
         }.onFailure { error ->
             droneSerialNumber = "UNKNOWN"
             Log.e(TAG, "Error fetching drone serial: ${error.message}", error)
         }
     }
 
-
-
     // ==================== Telemetry Data ====================
 
     private fun getLocation3D(): LocationCoordinate3D = location3DKey.get(LocationCoordinate3D(0.0, 0.0, .0))
+
     private fun getAltitude(): Double = altitudeKey.get(0.0)
+
     private fun getSatelliteCount(): Int = satelliteCountKey.get(-1)
+
     /** The point the gimbal is tracking, or null when nothing is. */
     @Volatile private var roiTarget: LocationCoordinate3D? = null
     private var roiTrackingRunnable: Runnable? = null
@@ -5459,7 +5882,11 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * relative rotation does not raise it: the desired and the measured angle are both joint
      * angles, so their difference is a rotation the gimbal can simply be asked to make.
      */
-    private fun startRoiTracking(latitudeDeg: Double, longitudeDeg: Double, altitudeM: Double) {
+    private fun startRoiTracking(
+        latitudeDeg: Double,
+        longitudeDeg: Double,
+        altitudeM: Double,
+    ) {
         roiTarget = LocationCoordinate3D(latitudeDeg, longitudeDeg, altitudeM)
         if (roiTrackingRunnable != null) return
         // The camera owns the yaw axis while it tracks a point. In yaw-follow mode the aircraft's
@@ -5479,15 +5906,16 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 override fun onFailure(error: IDJIError) {
                     Log.w(TAG, "Could not free gimbal yaw for ROI: ${error.description()}")
                 }
-            }
+            },
         )
-        val runnable = object : Runnable {
-            override fun run() {
-                val target = roiTarget ?: return
-                trackRoiOnce(target)
-                mainHandler.postDelayed(this, ROI_TRACK_INTERVAL_MS)
+        val runnable =
+            object : Runnable {
+                override fun run() {
+                    val target = roiTarget ?: return
+                    trackRoiOnce(target)
+                    mainHandler.postDelayed(this, ROI_TRACK_INTERVAL_MS)
+                }
             }
-        }
         roiTrackingRunnable = runnable
         mainHandler.post(runnable)
         Log.i(TAG, "ROI tracking $latitudeDeg, $longitudeDeg at ${altitudeM}m")
@@ -5512,7 +5940,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     override fun onFailure(error: IDJIError) {
                         Log.w(TAG, "Could not restore gimbal yaw follow: ${error.description()}")
                     }
-                }
+                },
             )
         }
         Log.i(TAG, "ROI tracking cleared")
@@ -5525,30 +5953,47 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         // read as the Gulf of Guinea. Waiting is the honest answer; the next tick tries again.
         if (position.latitude == 0.0 && position.longitude == 0.0) return
 
-        val aim = RoiControl.aimAt(
-            bearingToRoiDeg = DroneController.calculateBearing(
-                position.latitude, position.longitude, target.latitude, target.longitude
-            ).toDouble(),
-            groundDistanceM = DroneController.calculateDistance(
-                target.latitude, target.longitude, position.latitude, position.longitude
-            ),
-            altitudeAboveRoiM = position.altitude - target.altitude,
-            headingDeg = getHeading(),
-            aircraftPitchDeg = getAttitude().pitch
-        )
+        val aim =
+            RoiControl.aimAt(
+                bearingToRoiDeg =
+                    DroneController
+                        .calculateBearing(
+                            position.latitude,
+                            position.longitude,
+                            target.latitude,
+                            target.longitude,
+                        ).toDouble(),
+                groundDistanceM =
+                    DroneController.calculateDistance(
+                        target.latitude,
+                        target.longitude,
+                        position.latitude,
+                        position.longitude,
+                    ),
+                altitudeAboveRoiM = position.altitude - target.altitude,
+                headingDeg = getHeading(),
+                aircraftPitchDeg = getAttitude().pitch,
+            )
 
         val joint = getGimbalJointAttitude()
-        val pitchStep = RoiControl.step(
-            aim.pitchDeg - joint.pitch, ROI_DEADBAND_DEG, ROI_MAX_STEP_DEG
-        )
-        val yawStep = RoiControl.step(
-            RoiControl.normalizeAngle(aim.yawDeg - joint.yaw), ROI_DEADBAND_DEG, ROI_MAX_STEP_DEG
-        )
+        val pitchStep =
+            RoiControl.step(
+                aim.pitchDeg - joint.pitch,
+                ROI_DEADBAND_DEG,
+                ROI_MAX_STEP_DEG,
+            )
+        val yawStep =
+            RoiControl.step(
+                RoiControl.normalizeAngle(aim.yawDeg - joint.yaw),
+                ROI_DEADBAND_DEG,
+                ROI_MAX_STEP_DEG,
+            )
         if (pitchStep == 0.0 && yawStep == 0.0) return
         mavlinkCommandSink.nudgeGimbal(pitchStep, yawStep)
     }
 
     private fun getGimbalAttitude(): Attitude = sanitisedAttitude(gimbalAttitudeKey.get())
+
     private fun getGimbalJointAttitude(): Attitude = sanitisedAttitude(gimbalJointAttitudeKey.get())
 
     /**
@@ -5562,18 +6007,27 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      */
     private fun sanitisedAttitude(attitude: Attitude?): Attitude {
         if (attitude == null) return Attitude(0.0, 0.0, 0.0)
-        fun axis(value: Double?): Double =
-            if (value == null || kotlin.math.abs(value) > MAX_PLAUSIBLE_GIMBAL_DEG) 0.0 else value
+
+        fun axis(value: Double?): Double = if (value == null || kotlin.math.abs(value) > MAX_PLAUSIBLE_GIMBAL_DEG) 0.0 else value
         return Attitude(axis(attitude.pitch), axis(attitude.roll), axis(attitude.yaw))
     }
+
     private fun getHeading(): Double = compassHeadKey.get(0.0)
+
     private fun getHomeLocation(): LocationCoordinate2D = homeLocationKey.get(LocationCoordinate2D())
+
     private fun getSpeed(): Velocity3D = flightSpeedKey.get(Velocity3D(0.0, 0.0, 0.0))
+
     private fun getAttitude(): Attitude = attitudeKey.get(Attitude(0.0, 0.0, 0.0))
+
     private fun getCameraZoomFocalLength(): Int = cameraZoomFocalLengthKey.get(-1)
+
     private fun getCameraOpticalFocalLength(): Int = cameraOpticalFocalLengthKey.get(-1)
+
     private fun getCameraHybridFocalLength(): Int = cameraHybridFocalLengthKey.get(-1)
+
     private fun getBatteryLevel(): Int = batteryKey.get(-1)
+
     private fun getFlightMode(): FlightMode = flightModeKey.get(FlightMode.UNKNOWN)
 
     /**
@@ -5582,32 +6036,39 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * Mirrors the DJI system-status banner: ready when it reads "Ready to Go (GPS)",
      * i.e. [DJIDeviceStatus.NORMAL]. Any other status counts as not ready.
      */
-    private fun isReadyToTakeoff(): Boolean =
-        DeviceStatusManager.getInstance().getCurrentDJIDeviceStatus() == DJIDeviceStatus.NORMAL
+    private fun isReadyToTakeoff(): Boolean = DeviceStatusManager.getInstance().getCurrentDJIDeviceStatus() == DJIDeviceStatus.NORMAL
 
     /** Reason the aircraft cannot take off, or "NONE" when ready. Mirrors the DJI status banner. */
     private fun getTakeoffBlockReason(): String {
         val status = DeviceStatusManager.getInstance().getCurrentDJIDeviceStatus()
         return if (status == DJIDeviceStatus.NORMAL) "NONE" else status.name
     }
+
     private fun getTimeNeededToGoHome(): Int = goHomeAssessmentProcessor.value.timeNeededToGoHome
+
     private fun getTimeNeededToLand(): Int = timeNeededToLandProcessor.value
 
     private fun isHomeSet(): Boolean {
-        val shouldLatchHomePoint = !isHomePointSetLatch && !isFlyingKey.get(false) && run {
-            val home = getHomeLocation()
-            val hasHomeCoordinates = home.latitude != 0.0 && home.longitude != 0.0
-            if (!hasHomeCoordinates) {
-                false
-            } else {
-                val current = getLocation3D()
-                val distance = DroneController.calculateDistance(
-                    current.latitude, current.longitude,
-                    home.latitude, home.longitude
-                )
-                distance < 0.5
-            }
-        }
+        val shouldLatchHomePoint =
+            !isHomePointSetLatch &&
+                !isFlyingKey.get(false) &&
+                run {
+                    val home = getHomeLocation()
+                    val hasHomeCoordinates = home.latitude != 0.0 && home.longitude != 0.0
+                    if (!hasHomeCoordinates) {
+                        false
+                    } else {
+                        val current = getLocation3D()
+                        val distance =
+                            DroneController.calculateDistance(
+                                current.latitude,
+                                current.longitude,
+                                home.latitude,
+                                home.longitude,
+                            )
+                        distance < 0.5
+                    }
+                }
 
         if (shouldLatchHomePoint) {
             isHomePointSetLatch = true
@@ -5631,7 +6092,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         telemetryCoordinator.rtspPort = getRtspPort()
         telemetryCoordinator.rtspUser = getRtspUsername()
         telemetryCoordinator.streamRequiresAuth = activeMode == StreamingMode.RTSP &&
-            getRtspUsername().isNotEmpty() && getRtspPassword().isNotEmpty()
+            getRtspUsername().isNotEmpty() &&
+            getRtspPassword().isNotEmpty()
         val serverIp = lastClientIp ?: "127.0.0.1"
         telemetryCoordinator.rtmpUrl = getRtmpUrl(serverIp)
 
@@ -5642,31 +6104,33 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         // anything embedded here is disclosed to all of them.
         val phoneIp = NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
         val port = getRtspPort()
-        val path = when (activeMode) {
-            StreamingMode.WEBRTC -> "whip"
-            StreamingMode.RTSP -> "rtsp://$phoneIp:$port$DJI_RTSP_STREAM_PATH"
-            StreamingMode.RTMP -> getRtmpUrl(serverIp)
-            StreamingMode.AGORA -> "agora://${getAgoraChannel()}"
-            StreamingMode.GB28181 -> "gb28181://${getGbServerIp()}:${getGbServerPort()}/${getGbChannel()}"
-        }
+        val path =
+            when (activeMode) {
+                StreamingMode.WEBRTC -> "whip"
+                StreamingMode.RTSP -> "rtsp://$phoneIp:$port$DJI_RTSP_STREAM_PATH"
+                StreamingMode.RTMP -> getRtmpUrl(serverIp)
+                StreamingMode.AGORA -> "agora://${getAgoraChannel()}"
+                StreamingMode.GB28181 -> "gb28181://${getGbServerIp()}:${getGbServerPort()}/${getGbChannel()}"
+            }
         telemetryCoordinator.consumptionPath = path
 
         if (isMock) {
             val sdkMock = TelemetryProvider.currentMockTelemetry(droneName)
-            telemetryCoordinator.mockSnapshot = MockTelemetrySnapshot(
-                velocity = sdkMock.velocity.toString(),
-                heading = sdkMock.heading,
-                attitude = sdkMock.attitude.toString(),
-                location = sdkMock.location.toString(),
-                altitudeAGL = sdkMock.altitudeAGL,
-                gimbalAttitude = sdkMock.gimbalAttitude.toString(),
-                batteryPercent = sdkMock.batteryPercent,
-                satelliteCount = sdkMock.satelliteCount,
-                flightMode = sdkMock.flightMode,
-                isFlying = sdkMock.isFlying,
-                locationLatitude = sdkMock.location.latitude,
-                locationLongitude = sdkMock.location.longitude
-            )
+            telemetryCoordinator.mockSnapshot =
+                MockTelemetrySnapshot(
+                    velocity = sdkMock.velocity.toString(),
+                    heading = sdkMock.heading,
+                    attitude = sdkMock.attitude.toString(),
+                    location = sdkMock.location.toString(),
+                    altitudeAGL = sdkMock.altitudeAGL,
+                    gimbalAttitude = sdkMock.gimbalAttitude.toString(),
+                    batteryPercent = sdkMock.batteryPercent,
+                    satelliteCount = sdkMock.satelliteCount,
+                    flightMode = sdkMock.flightMode,
+                    isFlying = sdkMock.isFlying,
+                    locationLatitude = sdkMock.location.latitude,
+                    locationLongitude = sdkMock.location.longitude,
+                )
         } else {
             telemetryCoordinator.mockSnapshot = null
             rebuildRealTelemetryCache()
@@ -5705,14 +6169,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     /** Promote the old shipped-off default once; later explicit blocks remain operator choices. */
     private fun migrateMavlinkFlightDefault() {
         if (sharedPreferences.getBoolean(PREF_MAVLINK_FLIGHT_DEFAULT_MIGRATED, false)) return
-        sharedPreferences.edit()
+        sharedPreferences
+            .edit()
             .putBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true)
             .putBoolean(PREF_MAVLINK_FLIGHT_DEFAULT_MIGRATED, true)
             .apply()
     }
 
-    private fun isMavlinkFlightAllowed(): Boolean =
-        sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true)
+    private fun isMavlinkFlightAllowed(): Boolean = sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true)
 
     private fun mavlinkFlightAllowedMenuLabel(): String =
         if (isMavlinkFlightAllowed()) "MAVLink Flight: Allowed" else "MAVLink Flight: Blocked"
@@ -5729,13 +6193,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             setMavlinkFlightAllowed(false)
             return
         }
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Allow MAVLink flight control?")
             .setMessage(
                 "A MAVLink ground station (QGroundControl or similar) will be able to command " +
-                    "takeoff, landing, return-to-home and missions on this aircraft."
-            )
-            .setPositiveButton("Allow") { _, _ -> setMavlinkFlightAllowed(true) }
+                    "takeoff, landing, return-to-home and missions on this aircraft.",
+            ).setPositiveButton("Allow") { _, _ -> setMavlinkFlightAllowed(true) }
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -5743,11 +6207,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun setMavlinkFlightAllowed(allowed: Boolean) {
         sharedPreferences.edit().putBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, allowed).apply()
         invalidateOptionsMenu()
-        Toast.makeText(
-            this,
-            if (allowed) "MAVLink flight control allowed" else "MAVLink flight control blocked",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast
+            .makeText(
+                this,
+                if (allowed) "MAVLink flight control allowed" else "MAVLink flight control blocked",
+                Toast.LENGTH_SHORT,
+            ).show()
     }
 
     /**
@@ -5761,35 +6226,42 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun readMavlinkConfig(): MavlinkEndpointConfig {
         // These preferences are edited by hand in the field (adb, or the settings backup file), so
         // a value stored with the wrong type must not crash the app on startup.
-        val port = prefIntOrDefault(
-            MavlinkEndpointConfig.PREF_PORT, MavlinkEndpointConfig.DEFAULT_GCS_PORT
-        )
+        val port =
+            prefIntOrDefault(
+                MavlinkEndpointConfig.PREF_PORT,
+                MavlinkEndpointConfig.DEFAULT_GCS_PORT,
+            )
         // One system id per aircraft, so QGroundControl does not merge two drones into one vehicle.
         // 0 (the default) derives the id from the drone name once renamed, and the serial before that.
         val systemId = currentMavlinkSystemId()
         return MavlinkEndpointConfig(
-            enabled = runCatching {
-                sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ENABLED, true)
-            }.getOrDefault(true),
-            targetHost = runCatching {
-                sharedPreferences.getString(MavlinkEndpointConfig.PREF_HOST, "")
-            }.getOrNull().orEmpty(),
+            enabled =
+                runCatching {
+                    sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ENABLED, true)
+                }.getOrDefault(true),
+            targetHost =
+                runCatching {
+                    sharedPreferences.getString(MavlinkEndpointConfig.PREF_HOST, "")
+                }.getOrNull().orEmpty(),
             targetPort = port,
             listenPort = port,
-            mode = MavlinkEndpointConfig.Profile.fromPref(
-                runCatching {
-                    sharedPreferences.getString(MavlinkEndpointConfig.PREF_MODE, null)
-                }.getOrNull()
-            ),
+            mode =
+                MavlinkEndpointConfig.Profile.fromPref(
+                    runCatching {
+                        sharedPreferences.getString(MavlinkEndpointConfig.PREF_MODE, null)
+                    }.getOrNull(),
+                ),
             systemId = systemId,
-            signingKeyHex = runCatching {
-                sharedPreferences.getString(MavlinkEndpointConfig.PREF_SIGNING_KEY, "")
-            }.getOrNull().orEmpty(),
-            missionExecutor = MissionExecutor.fromPref(
+            signingKeyHex =
                 runCatching {
-                    sharedPreferences.getString(MavlinkEndpointConfig.PREF_MISSION_EXECUTOR, null)
-                }.getOrNull()
-            )
+                    sharedPreferences.getString(MavlinkEndpointConfig.PREF_SIGNING_KEY, "")
+                }.getOrNull().orEmpty(),
+            missionExecutor =
+                MissionExecutor.fromPref(
+                    runCatching {
+                        sharedPreferences.getString(MavlinkEndpointConfig.PREF_MISSION_EXECUTOR, null)
+                    }.getOrNull(),
+                ),
         )
     }
 
@@ -5798,32 +6270,23 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun configuredMavlinkSystemId(): Int =
         prefIntOrDefault(
-            MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
+            MavlinkEndpointConfig.PREF_SYSTEM_ID,
+            MavlinkEndpointConfig.DEFAULT_SYSTEM_ID,
         )
 
-    private fun configuredMavlinkSystemIdIsManual(): Boolean =
-        MavlinkSystemId.isManual(configuredMavlinkSystemId())
+    private fun configuredMavlinkSystemIdIsManual(): Boolean = MavlinkSystemId.isManual(configuredMavlinkSystemId())
 
-    private fun currentMavlinkSystemId(): Int =
-        MavlinkSystemId.resolve(configuredMavlinkSystemId(), sysIdKey())
+    private fun currentMavlinkSystemId(): Int = MavlinkSystemId.resolve(configuredMavlinkSystemId(), sysIdKey())
 
     /** Read an int preference that may have been stored as a string by a hand edit. */
-    private fun prefIntOrDefault(key: String, fallback: Int): Int =
+    private fun prefIntOrDefault(
+        key: String,
+        fallback: Int,
+    ): Int =
         runCatching { sharedPreferences.getInt(key, fallback) }
             .recoverCatching { sharedPreferences.getString(key, null)?.toInt() ?: fallback }
             .getOrDefault(fallback)
 
-    /**
-     * One consistent read of aircraft state for the MAVLink endpoint.
-     *
-     * Deliberately reads the same accessors that feed [rebuildRealTelemetryCache] rather than the
-     * cached JSON, so the two surfaces cannot report different numbers for the same instant while
-     * both are live.
-     *
-     * DJI reports no arming state, so `motorsRunning` comes from KeyIsFlying — the only honest
-     * source. Deriving it from the flight mode, as the ground-station helper currently does,
-     * reports armed while the aircraft is sitting on the ground.
-     */
     /**
      * Whether a home point is somewhere rather than the SDK's unset value.
      *
@@ -5831,7 +6294,10 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * recorded on this flight". DJI knows where home is well before that closes, and the check
      * that matters for arithmetic is whether the numbers are a place at all.
      */
-    private fun hasRealHomeCoordinates(latitude: Double, longitude: Double): Boolean =
+    private fun hasRealHomeCoordinates(
+        latitude: Double,
+        longitude: Double,
+    ): Boolean =
         (latitude != 0.0 || longitude != 0.0) &&
             latitude in -90.0..90.0 &&
             longitude in -180.0..180.0
@@ -5846,13 +6312,19 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
     private fun fleetDeviceId(): String {
         val serial = droneSerialNumber.trim()
         if (DroneSettingsProfiles.isUsableSerial(serial)) return serial
-        return sharedPreferences.getString(PREF_FLEET_INSTALL_ID, null)
+        return sharedPreferences
+            .getString(PREF_FLEET_INSTALL_ID, null)
             ?.takeIf { it.isNotBlank() }
             ?: generateFleetInstallId()
     }
 
     private fun generateFleetInstallId(): String {
-        val generated = "rc-" + java.util.UUID.randomUUID().toString().take(FLEET_INSTALL_ID_LENGTH)
+        val generated =
+            "rc-" +
+                java.util.UUID
+                    .randomUUID()
+                    .toString()
+                    .take(FLEET_INSTALL_ID_LENGTH)
         sharedPreferences.edit().putString(PREF_FLEET_INSTALL_ID, generated).apply()
         Log.i(TAG, "Generated a fleet install id for a device with no aircraft bound: $generated")
         return generated
@@ -5901,7 +6373,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             videoServer = getMediamtxServer(),
             // Both are stamped by the link as it sends, which owns the counters.
             appUptimeMs = 0L,
-            sequence = 0L
+            sequence = 0L,
         )
     }
 
@@ -5912,8 +6384,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * which cannot see app classes at compile time; the container is the seam between the two.
      */
     private fun attachFleetStrip(): FleetStripView? {
-        val container = findViewById<android.widget.FrameLayout>(R.id.fleet_strip_container)
-            ?: return null
+        val container =
+            findViewById<android.widget.FrameLayout>(R.id.fleet_strip_container)
+                ?: return null
         container.findViewById<FleetStripView>(R.id.fleet_strip)?.let { return it }
         return FleetStripView(this).apply {
             id = R.id.fleet_strip
@@ -5923,14 +6396,15 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
 
     private fun startFleetMesh() {
         if (fleetController != null) return
-        val controller = FleetDeckController(
-            activity = this,
-            prefs = sharedPreferences,
-            stripView = attachFleetStrip(),
-            mapWidget = mapWidget,
-            deviceIdProvider = ::fleetDeviceId,
-            beaconProvider = ::buildFleetBeacon
-        )
+        val controller =
+            FleetDeckController(
+                activity = this,
+                prefs = sharedPreferences,
+                stripView = attachFleetStrip(),
+                mapWidget = mapWidget,
+                deviceIdProvider = ::fleetDeviceId,
+                beaconProvider = ::buildFleetBeacon,
+            )
         controller.start()
         controller.setMapExpanded(sharedPreferences.getBoolean(PREF_MAP_EXPANDED, false))
         fleetController = controller
@@ -5954,14 +6428,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                 velocityNorthMps = speed.x,
                 velocityEastMps = speed.y,
                 velocityDownMps = speed.z,
-                headingDeg = getHeading()
+                headingDeg = getHeading(),
             )
         }
         ObstacleGuard.onBrake = { event ->
             LyrebirdFlightLogger.logStatus(
                 "OBSTACLE_STOP ${event.reason.name} " +
                     "clearance=${"%.1f".format(event.clearanceM)}m " +
-                    "required=${"%.1f".format(event.requiredM)}m"
+                    "required=${"%.1f".format(event.requiredM)}m",
             )
             // Status only, on the readout the pilot already watches. Nothing pops up over the
             // video: an aircraft that has just stopped itself needs the pilot looking outside,
@@ -5977,11 +6451,12 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         ObstacleGuard.onBrake = null
     }
 
-    private fun obstacleGuardSummary(): String = when {
-        !ObstacleGuard.isEnabled(sharedPreferences) -> "Off"
-        ObstacleGuard.isRunning -> "On, ${ObstacleBrake.DEFAULT_MARGIN_M.toInt()}m standoff"
-        else -> "On, sensors unavailable"
-    }
+    private fun obstacleGuardSummary(): String =
+        when {
+            !ObstacleGuard.isEnabled(sharedPreferences) -> "Off"
+            ObstacleGuard.isRunning -> "On, ${ObstacleBrake.DEFAULT_MARGIN_M.toInt()}m standoff"
+            else -> "On, sensors unavailable"
+        }
 
     /**
      * Turn the obstacle guard on or off.
@@ -5999,7 +6474,8 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             showLyrebirdSettingsMenu()
             return
         }
-        AlertDialog.Builder(this)
+        AlertDialog
+            .Builder(this)
             .setTitle("Enable obstacle guard?")
             .setMessage(
                 "While Lyrebird is flying a waypoint or trajectory itself, the aircraft's " +
@@ -6009,17 +6485,26 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     "It never steers around anything, and it never overrides you on the sticks.\n\n" +
                     "It cannot see into the airframe's blind arcs, and these sensors do not " +
                     "reliably detect wires, thin branches or netting. Treat it as a backstop, " +
-                    "not as a reason to fly closer to anything."
-            )
-            .setPositiveButton("Enable") { _, _ ->
+                    "not as a reason to fly closer to anything.",
+            ).setPositiveButton("Enable") { _, _ ->
                 sharedPreferences.edit().putBoolean(ObstacleGuard.PREF_ENABLED, true).apply()
                 startObstacleGuard()
                 showLyrebirdSettingsMenu()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
+    /**
+     * One consistent read of aircraft state for the MAVLink endpoint.
+     *
+     * Deliberately reads the same accessors that feed [rebuildRealTelemetryCache] rather than the
+     * cached JSON, so the two surfaces cannot report different numbers for the same instant while
+     * both are live.
+     *
+     * DJI reports no arming state, so `motorsRunning` comes from KeyIsFlying — the only honest
+     * source. Deriving it from the flight mode, as the ground-station helper currently does,
+     * reports armed while the aircraft is sitting on the ground.
+     */
     private fun buildMavlinkSnapshot(): MavlinkSnapshot {
         val location = getLocation3D()
         val homeLocation = getHomeLocation()
@@ -6061,7 +6546,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             // hide a mission that is actually under way; the heartbeat prefers MISSION instead.
             missionActive = mavlinkMissionSink.isRunning,
             isRecording = isRecordingKey.get() ?: false,
-
             gimbalRollDeg = gimbalAttitude.roll,
             gimbalPitchDeg = gimbalAttitude.pitch,
             gimbalYawDeg = gimbalAttitude.yaw,
@@ -6071,29 +6555,24 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             zoomFocalLengthMm = getCameraZoomFocalLength(),
             opticalFocalLengthMm = getCameraOpticalFocalLength(),
             hybridFocalLengthMm = getCameraHybridFocalLength(),
-
             lrfDistanceM = lrfDistanceMeters,
             lrfTargetLatitudeDeg = lrfTarget?.latitude,
             lrfTargetLongitudeDeg = lrfTarget?.longitude,
             lrfTargetAltitudeM = lrfTarget?.altitude,
-
             readyToTakeoff = isReadyToTakeoff(),
             takeoffBlockReason = getTakeoffBlockReason(),
-
             timeNeededToGoHomeS = getTimeNeededToGoHome(),
             timeNeededToLandS = getTimeNeededToLand(),
             totalFlightTimeS = getTimeNeededToGoHome() + getTimeNeededToLand(),
             maxRadiusCanFlyAndGoHomeM = goHomeInfo.maxRadiusCanFlyAndGoHome.toDouble(),
             batteryNeededToGoHomePercent = goHomeInfo.batteryPercentNeededToGoHome,
             batteryNeededToLandPercent = goHomeInfo.batteryPercentNeededToLand,
-
             waypointReached = DroneController.isWaypointReached(),
             waypointSeq = DroneController.getWaypointSeq(),
             yawReached = DroneController.isYawReached(),
             yawSeq = DroneController.getYawSeq(),
             altitudeReached = DroneController.isAltitudeReached(),
             altitudeSeq = DroneController.getAltitudeSeq(),
-
             // The same answers GET /config gives, so a ground station on MAVLink alone still
             // learns how to reach the other surfaces and what this airframe carries.
             ipAddress = NetworkUtils.getDeviceIpAddress() ?: "",
@@ -6101,13 +6580,13 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             telemetryPort = TELEMETRY_PORT,
             videoMode = getStreamingMode().prefValue,
             hasThermal = runCatching { hasThermalCamera() }.getOrDefault(false),
-
             autoSensingActive = isAutoSensingActive,
             detectionSource = getDetectionSource().prefValue,
             detectionConfidenceThreshold = getEdgeConfidenceThreshold(),
-            detectedTargets = currentDetectedTargets.map {
-                DetectedTargetSnapshot(it.type, it.left, it.top, it.right, it.bottom, it.confidence)
-            }
+            detectedTargets =
+                currentDetectedTargets.map {
+                    DetectedTargetSnapshot(it.type, it.left, it.top, it.right, it.bottom, it.confidence)
+                },
         )
     }
 
@@ -6120,8 +6599,117 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * stream is up is deliberate — advertising a dead RTSP URL makes a ground station sit in a
      * connect-retry loop, which is worse than reporting no stream.
      */
-    private fun currentMavlinkVideoStream(): MavlinkVideoStream? =
-        MavlinkVideoStream.fromWhipUrl(lastWhipUrl, droneName)
+    private fun currentMavlinkVideoStream(): MavlinkVideoStream? = MavlinkVideoStream.fromWhipUrl(lastWhipUrl, droneName)
+
+    /**
+     * Apply one parameter write from a ground station.
+     *
+     * An allowlist, not a passthrough. Most of the published list is read-only by nature — PID
+     * gains belong to the control profile, and the PX4 compatibility parameters are constants
+     * that exist only to satisfy QGroundControl's setup checks. Writing those would either do
+     * nothing or quietly change flight behaviour from a settings dialog, so anything not named
+     * here is refused rather than accepted and dropped.
+     */
+    private fun applyMavlinkParameter(
+        name: String,
+        value: Float,
+    ): CommandResult =
+        when (name) {
+            PARAM_MAX_HEIGHT ->
+                awaitParameterWrite { done ->
+                    DroneController.setMaxFlightHeight(value.toInt())
+                    done(true)
+                }
+
+            PARAM_MAX_DISTANCE ->
+                awaitParameterWrite { done ->
+                    DroneController.setMaxFlightDistance(value.toInt())
+                    done(true)
+                }
+
+            PARAM_DISTANCE_LIMIT ->
+                awaitParameterWrite { done ->
+                    DroneController.setDistanceLimitEnabled(value >= 0.5f)
+                    done(true)
+                }
+
+            PARAM_WEBRTC_FPS ->
+                if (setWebRtcFps(value.toInt())) {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                } else {
+                    CommandResult(MavlinkCommandOutcome.DENIED, "Unsupported frame rate")
+                }
+
+            PARAM_DETECTIONS -> {
+                setDetectionsEnabled(value >= 0.5f)
+                CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            PARAM_SURFACE_H264_ENCODER -> {
+                setDjiSurfaceH264Encoder(value >= 0.5f)
+                CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            PARAM_MAVLINK_SYSTEM_ID -> {
+                val systemId = value.toInt()
+                if (value != systemId.toFloat() || !setMavlinkSystemId(systemId)) {
+                    CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        "Use 0 for automatic or 1-99 for a manual vehicle ID",
+                    )
+                } else {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                }
+            }
+
+            PARAM_EDGE_CONFIDENCE ->
+                if (setEdgeConfidence(value)) {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                } else {
+                    CommandResult(MavlinkCommandOutcome.DENIED, "Threshold out of range")
+                }
+
+            PARAM_RTH_ALTITUDE -> {
+                val altitude = value.toInt()
+                if (altitude <= 0) {
+                    CommandResult(MavlinkCommandOutcome.DENIED, "RTH altitude must be positive")
+                } else {
+                    // Waited on rather than fired and forgotten, because the PARAM_VALUE sent back
+                    // immediately afterwards is meant to report what the parameter now holds. Without
+                    // the wait it reports the value from before the write, and a ground station
+                    // correctly concludes the write did not take.
+                    awaitParameterWrite { done -> DroneController.setRTHAltitude(altitude, done) }
+                }
+            }
+
+            else -> {
+                Log.d(TAG, "Refusing write to read-only parameter $name")
+                CommandResult(MavlinkCommandOutcome.DENIED, "$name is read-only")
+            }
+        }
+
+    /**
+     * Run an asynchronous parameter write and wait, briefly, for the aircraft to confirm it.
+     *
+     * Bounded so a key the aircraft never answers cannot wedge the endpoint's receive thread —
+     * a timeout is reported as a failure, which is what it is.
+     */
+    private fun awaitParameterWrite(write: ((Boolean) -> Unit) -> Unit): CommandResult {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val succeeded =
+            java.util.concurrent.atomic
+                .AtomicBoolean(false)
+        write { ok ->
+            succeeded.set(ok)
+            latch.countDown()
+        }
+        val answered = latch.await(ACTION_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        return when {
+            !answered -> CommandResult(MavlinkCommandOutcome.FAILED, "Aircraft did not answer")
+            succeeded.get() -> CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            else -> CommandResult(MavlinkCommandOutcome.FAILED, "Aircraft refused the write")
+        }
+    }
 
     /**
      * The active control profile, published as read-only MAVLink parameters.
@@ -6135,107 +6723,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * Read-only for now: these are published, not settable. Making them writable is a change with
      * its own safety review, since they are the gains an autonomous control loop flies on.
      */
-    /**
-     * Apply one parameter write from a ground station.
-     *
-     * An allowlist, not a passthrough. Most of the published list is read-only by nature — PID
-     * gains belong to the control profile, and the PX4 compatibility parameters are constants
-     * that exist only to satisfy QGroundControl's setup checks. Writing those would either do
-     * nothing or quietly change flight behaviour from a settings dialog, so anything not named
-     * here is refused rather than accepted and dropped.
-     */
-    private fun applyMavlinkParameter(name: String, value: Float): CommandResult = when (name) {
-        PARAM_MAX_HEIGHT -> awaitParameterWrite { done ->
-            DroneController.setMaxFlightHeight(value.toInt())
-            done(true)
-        }
-
-        PARAM_MAX_DISTANCE -> awaitParameterWrite { done ->
-            DroneController.setMaxFlightDistance(value.toInt())
-            done(true)
-        }
-
-        PARAM_DISTANCE_LIMIT -> awaitParameterWrite { done ->
-            DroneController.setDistanceLimitEnabled(value >= 0.5f)
-            done(true)
-        }
-
-        PARAM_WEBRTC_FPS ->
-            if (setWebRtcFps(value.toInt())) {
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            } else {
-                CommandResult(MavlinkCommandOutcome.DENIED, "Unsupported frame rate")
-            }
-
-        PARAM_DETECTIONS -> {
-            setDetectionsEnabled(value >= 0.5f)
-            CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        PARAM_SURFACE_H264_ENCODER -> {
-            setDjiSurfaceH264Encoder(value >= 0.5f)
-            CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        PARAM_MAVLINK_SYSTEM_ID -> {
-            val systemId = value.toInt()
-            if (value != systemId.toFloat() || !setMavlinkSystemId(systemId)) {
-                CommandResult(
-                    MavlinkCommandOutcome.DENIED,
-                    "Use 0 for automatic or 1-99 for a manual vehicle ID"
-                )
-            } else {
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            }
-        }
-
-        PARAM_EDGE_CONFIDENCE ->
-            if (setEdgeConfidence(value)) {
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            } else {
-                CommandResult(MavlinkCommandOutcome.DENIED, "Threshold out of range")
-            }
-
-        PARAM_RTH_ALTITUDE -> {
-            val altitude = value.toInt()
-            if (altitude <= 0) {
-                CommandResult(MavlinkCommandOutcome.DENIED, "RTH altitude must be positive")
-            } else {
-                // Waited on rather than fired and forgotten, because the PARAM_VALUE sent back
-                // immediately afterwards is meant to report what the parameter now holds. Without
-                // the wait it reports the value from before the write, and a ground station
-                // correctly concludes the write did not take.
-                awaitParameterWrite { done -> DroneController.setRTHAltitude(altitude, done) }
-            }
-        }
-
-        else -> {
-            Log.d(TAG, "Refusing write to read-only parameter $name")
-            CommandResult(MavlinkCommandOutcome.DENIED, "$name is read-only")
-        }
-    }
-
-    /**
-     * Run an asynchronous parameter write and wait, briefly, for the aircraft to confirm it.
-     *
-     * Bounded so a key the aircraft never answers cannot wedge the endpoint's receive thread —
-     * a timeout is reported as a failure, which is what it is.
-     */
-    private fun awaitParameterWrite(write: ((Boolean) -> Unit) -> Unit): CommandResult {
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val succeeded = java.util.concurrent.atomic.AtomicBoolean(false)
-        write { ok ->
-            succeeded.set(ok)
-            latch.countDown()
-        }
-        val answered = latch.await(ACTION_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-        return when {
-            !answered -> CommandResult(MavlinkCommandOutcome.FAILED, "Aircraft did not answer")
-            succeeded.get() -> CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            else -> CommandResult(MavlinkCommandOutcome.FAILED, "Aircraft refused the write")
-        }
-    }
-
     private fun mavlinkParameters(): List<Pair<String, Float>> {
         val profile = DroneControlProfiles.activeProfile()
         return listOf(
@@ -6283,7 +6770,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             // device ids (any non-zero value satisfies QGC) rather than exposed for recalibration.
             "CAL_GYRO0_ID" to 131074f,
             "CAL_ACC0_ID" to 131330f,
-            "CAL_MAG0_ID" to 131586f
+            "CAL_MAG0_ID" to 131586f,
         )
     }
 
@@ -6298,239 +6785,267 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * Commands run on the main thread because the DJI view models expect it, and the endpoint
      * calls this from its receive thread.
      */
-    private val mavlinkCommandSink = object : MavlinkCommandSink {
-
-        override fun setGimbal(rotation: GimbalRotation): CommandResult {
-            // An explicit aim ends the tracking. Otherwise the two fight at 5 Hz and the operator
-            // loses, which looks like a gimbal that ignores its commands rather than like a
-            // region of interest that is still set.
-            stopRoiTracking()
-            return rotateGimbal(rotation)
-        }
-
-        /** The aim itself, with no effect on tracking — what the ROI loop drives. */
-        private fun rotateGimbal(rotation: GimbalRotation): CommandResult {
-            gimbalKey.action(
-                GimbalAngleRotation(
-                    if (rotation.mode == GimbalRotationMode.ABSOLUTE) {
-                        GimbalAngleRotationMode.ABSOLUTE_ANGLE
-                    } else {
-                        GimbalAngleRotationMode.RELATIVE_ANGLE
-                    },
-                    rotation.pitchDeg,
-                    rotation.rollDeg,
-                    rotation.yawDeg,
-                    rotation.pitchIgnored,
-                    rotation.rollIgnored,
-                    rotation.yawIgnored,
-                    0.1,
-                    false,
-                    0
-                )
-            )
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        override fun setGimbalRelative(pitchDeg: Double, yawDeg: Double): CommandResult {
-            stopRoiTracking()
-            return nudgeGimbal(pitchDeg, yawDeg)
-        }
-
-        /** A relative nudge that leaves tracking alone, so the ROI loop can use it. */
-        fun nudgeGimbal(pitchDeg: Double, yawDeg: Double): CommandResult {
-            // A zero delta on an axis means "leave it alone", which is what the ignore flags say
-            // — sending zero as a relative angle would be the same thing, but saying it through
-            // the flag is what keeps a two-axis nudge from fighting itself.
-            return rotateGimbal(
-                GimbalRotation(
-                    mode = GimbalRotationMode.RELATIVE,
-                    pitchDeg = pitchDeg,
-                    rollDeg = 0.0,
-                    yawDeg = yawDeg,
-                    pitchIgnored = pitchDeg == 0.0,
-                    rollIgnored = true,
-                    yawIgnored = yawDeg == 0.0
-                )
-            )
-        }
-
-        override fun setRegionOfInterest(
-            latitudeDeg: Double,
-            longitudeDeg: Double,
-            altitudeM: Double
-        ): CommandResult {
-            if (!latitudeDeg.isFinite() || !longitudeDeg.isFinite()) {
-                return CommandResult(MavlinkCommandOutcome.DENIED, "ROI needs a real position")
+    private val mavlinkCommandSink =
+        object : MavlinkCommandSink {
+            override fun setGimbal(rotation: GimbalRotation): CommandResult {
+                // An explicit aim ends the tracking. Otherwise the two fight at 5 Hz and the operator
+                // loses, which looks like a gimbal that ignores its commands rather than like a
+                // region of interest that is still set.
+                stopRoiTracking()
+                return rotateGimbal(rotation)
             }
-            startRoiTracking(latitudeDeg, longitudeDeg, altitudeM.takeIf { it.isFinite() } ?: 0.0)
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
 
-        override fun clearRegionOfInterest(): CommandResult {
-            stopRoiTracking()
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+            /** The aim itself, with no effect on tracking — what the ROI loop drives. */
+            private fun rotateGimbal(rotation: GimbalRotation): CommandResult {
+                gimbalKey.action(
+                    GimbalAngleRotation(
+                        if (rotation.mode == GimbalRotationMode.ABSOLUTE) {
+                            GimbalAngleRotationMode.ABSOLUTE_ANGLE
+                        } else {
+                            GimbalAngleRotationMode.RELATIVE_ANGLE
+                        },
+                        rotation.pitchDeg,
+                        rotation.rollDeg,
+                        rotation.yawDeg,
+                        rotation.pitchIgnored,
+                        rotation.rollIgnored,
+                        rotation.yawIgnored,
+                        0.1,
+                        false,
+                        0,
+                    ),
+                )
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
 
-        override fun measureLrf(): CommandResult {
-            val info = Payload.takeFreshLrfReading()
-                ?: return CommandResult(MavlinkCommandOutcome.FAILED, "No rangefinder reading")
-            if (info.laserMeasureState != LaserMeasureState.NORMAL) {
-                // The laser did not lock — no distance, and no point to geo-reference.
+            override fun setGimbalRelative(
+                pitchDeg: Double,
+                yawDeg: Double,
+            ): CommandResult {
+                stopRoiTracking()
+                return nudgeGimbal(pitchDeg, yawDeg)
+            }
+
+            /** A relative nudge that leaves tracking alone, so the ROI loop can use it. */
+            fun nudgeGimbal(
+                pitchDeg: Double,
+                yawDeg: Double,
+            ): CommandResult {
+                // A zero delta on an axis means "leave it alone", which is what the ignore flags say
+                // — sending zero as a relative angle would be the same thing, but saying it through
+                // the flag is what keeps a two-axis nudge from fighting itself.
+                return rotateGimbal(
+                    GimbalRotation(
+                        mode = GimbalRotationMode.RELATIVE,
+                        pitchDeg = pitchDeg,
+                        rollDeg = 0.0,
+                        yawDeg = yawDeg,
+                        pitchIgnored = pitchDeg == 0.0,
+                        rollIgnored = true,
+                        yawIgnored = yawDeg == 0.0,
+                    ),
+                )
+            }
+
+            override fun setRegionOfInterest(
+                latitudeDeg: Double,
+                longitudeDeg: Double,
+                altitudeM: Double,
+            ): CommandResult {
+                if (!latitudeDeg.isFinite() || !longitudeDeg.isFinite()) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED, "ROI needs a real position")
+                }
+                startRoiTracking(latitudeDeg, longitudeDeg, altitudeM.takeIf { it.isFinite() } ?: 0.0)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun clearRegionOfInterest(): CommandResult {
+                stopRoiTracking()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun measureLrf(): CommandResult {
+                val info =
+                    Payload.takeFreshLrfReading()
+                        ?: return CommandResult(MavlinkCommandOutcome.FAILED, "No rangefinder reading")
+                if (info.laserMeasureState != LaserMeasureState.NORMAL) {
+                    // The laser did not lock — no distance, and no point to geo-reference.
+                    return CommandResult(
+                        MavlinkCommandOutcome.FAILED,
+                        "Laser state ${info.laserMeasureState}",
+                    )
+                }
+                lrfDistanceMeters = info.distance
+                info.location3D
+                    ?.takeIf { it.latitude != 0.0 || it.longitude != 0.0 || it.altitude != 0.0 }
+                    // Surfaced on the telemetry stream as lrfTarget, exactly as the HTTP route does.
+                    ?.let { lrfTargetLocation = it }
+                // Centimetres: the distance is metres with a useful fraction.
                 return CommandResult(
-                    MavlinkCommandOutcome.FAILED, "Laser state ${info.laserMeasureState}"
+                    MavlinkCommandOutcome.ACCEPTED,
+                    resultValue = ((info.distance ?: 0.0) * 100).toInt(),
                 )
             }
-            lrfDistanceMeters = info.distance
-            info.location3D
-                ?.takeIf { it.latitude != 0.0 || it.longitude != 0.0 || it.altitude != 0.0 }
-                // Surfaced on the telemetry stream as lrfTarget, exactly as the HTTP route does.
-                ?.let { lrfTargetLocation = it }
-            // Centimetres: the distance is metres with a useful fraction.
-            return CommandResult(
-                MavlinkCommandOutcome.ACCEPTED,
-                resultValue = ((info.distance ?: 0.0) * 100).toInt()
-            )
-        }
 
-        override fun captureTemperature(): CommandResult {
-            val maxTemp = readThermalMaxTempNow()
-                ?: return CommandResult(MavlinkCommandOutcome.FAILED, "No thermal reading")
-            // Hundredths of a degree, so a fractional reading survives an integer field.
-            return CommandResult(
-                MavlinkCommandOutcome.ACCEPTED,
-                resultValue = (maxTemp * 100).toInt()
-            )
-        }
-
-        override fun captureThermalImage(): CommandResult {
-            // The descriptor names the per-lens files the shutter stored; downloads stay on the
-            // media surface (by name), exactly as they do over HTTP. Only the shutter is commanded
-            // here — there is no room for the descriptor in an ack.
-            val descriptor = Payload.captureThermal(mediaVM)
-                ?: return CommandResult(
-                    MavlinkCommandOutcome.FAILED, "Thermal capture produced no file"
+            override fun captureTemperature(): CommandResult {
+                val maxTemp =
+                    readThermalMaxTempNow()
+                        ?: return CommandResult(MavlinkCommandOutcome.FAILED, "No thermal reading")
+                // Hundredths of a degree, so a fractional reading survives an integer field.
+                return CommandResult(
+                    MavlinkCommandOutcome.ACCEPTED,
+                    resultValue = (maxTemp * 100).toInt(),
                 )
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED, detail = descriptor)
-        }
+            }
 
-        override fun dropPayload(): CommandResult {
-            val profile = DroneControlProfiles.activeProfile()
-            val indexType = profile.payloadIndexType
-                ?: return CommandResult(
-                    MavlinkCommandOutcome.UNSUPPORTED,
-                    "${profile.displayName} has no payload drop port"
+            override fun captureThermalImage(): CommandResult {
+                // The descriptor names the per-lens files the shutter stored; downloads stay on the
+                // media surface (by name), exactly as they do over HTTP. Only the shutter is commanded
+                // here — there is no room for the descriptor in an ack.
+                val descriptor =
+                    Payload.captureThermal(mediaVM)
+                        ?: return CommandResult(
+                            MavlinkCommandOutcome.FAILED,
+                            "Thermal capture produced no file",
+                        )
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED, detail = descriptor)
+            }
+
+            override fun dropPayload(): CommandResult {
+                val profile = DroneControlProfiles.activeProfile()
+                val indexType =
+                    profile.payloadIndexType
+                        ?: return CommandResult(
+                            MavlinkCommandOutcome.UNSUPPORTED,
+                            "${profile.displayName} has no payload drop port",
+                        )
+                val dropped =
+                    Payload.dropPayload(
+                        payloadWidgetVM,
+                        indexType,
+                        profile.dropArmSwitchIndex,
+                        profile.dropReleaseButtonIndex,
+                    )
+                return if (dropped) {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                } else {
+                    CommandResult(MavlinkCommandOutcome.FAILED, "Drop refused by the payload")
+                }
+            }
+
+            override fun setAutoSensing(enabled: Boolean): CommandResult {
+                // On the main thread, as the HTTP route does: this drives the detector and its UI
+                // switch, and the MAVLink receive thread is not where either belongs.
+                mainHandler.post {
+                    if (enabled) startAutoSensing() else stopAutoSensing()
+                    setAutoSensingSwitchChecked(enabled)
+                }
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setParameter(
+                name: String,
+                value: Float,
+            ): CommandResult = applyMavlinkParameter(name, value)
+
+            override fun setTextParameter(
+                name: String,
+                value: String,
+            ): CommandResult {
+                val applied =
+                    when (name) {
+                        PARAM_DRONE_NAME -> setDroneName(value)
+                        PARAM_VIDEO_SOURCE -> setVideoSource(value)
+                        PARAM_MEDIAMTX -> setMediamtxServer(value)
+                        PARAM_DETECTION_SOURCE -> setDetectionSource(value)
+                        PARAM_RC_CONTROL_MODE -> DroneController.setRcControlMode(value)
+                        PARAM_RTC_RESOLUTION -> setWebRtcResolution(value)
+                        PARAM_STREAMING_MODE -> {
+                            val mode = StreamingMode.entries.firstOrNull { it.prefValue == value }
+                            if (mode == null) {
+                                false
+                            } else {
+                                setStreamingMode(mode)
+                                true
+                            }
+                        }
+
+                        else -> {
+                            Log.d(TAG, "Refusing write to unknown text parameter $name")
+                            return CommandResult(MavlinkCommandOutcome.DENIED, "$name is not writable")
+                        }
+                    }
+                // The detail carries the value the setting now holds, so the acknowledgement echoes
+                // what took rather than what was asked for — which is how a caller detects a value
+                // the aircraft rejected as out of range or unknown.
+                val current = textParameters().firstOrNull { it.first == name }?.second.orEmpty()
+                return if (applied) {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED, current)
+                } else {
+                    CommandResult(MavlinkCommandOutcome.DENIED, current)
+                }
+            }
+
+            override fun textParameters(): List<Pair<String, String>> =
+                listOf(
+                    PARAM_DRONE_NAME to droneName,
+                    PARAM_VIDEO_SOURCE to getVideoSourceMode().prefValue,
+                    PARAM_MEDIAMTX to getMediamtxServer(),
+                    PARAM_DETECTION_SOURCE to getDetectionSource().prefValue,
+                    PARAM_RC_CONTROL_MODE to DroneController.getRcControlMode(),
+                    PARAM_RTC_RESOLUTION to getWebRTCResolutionPreset().prefValue,
+                    PARAM_STREAMING_MODE to getStreamingMode().prefValue,
                 )
-            val dropped = Payload.dropPayload(
-                payloadWidgetVM, indexType,
-                profile.dropArmSwitchIndex, profile.dropReleaseButtonIndex
-            )
-            return if (dropped) {
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            } else {
-                CommandResult(MavlinkCommandOutcome.FAILED, "Drop refused by the payload")
+
+            override fun setCameraZoom(zoomRatio: Float): CommandResult {
+                if (zoomRatio <= 0f) return CommandResult(MavlinkCommandOutcome.FAILED)
+                zoomKey.set(zoomRatio.toDouble())
+                // set() is fire-and-forget; the ratio the aircraft settled on is reported in
+                // telemetry, which is where a ground station should read it back from.
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
-        }
 
-        override fun setAutoSensing(enabled: Boolean): CommandResult {
-            // On the main thread, as the HTTP route does: this drives the detector and its UI
-            // switch, and the MAVLink receive thread is not where either belongs.
-            mainHandler.post {
-                if (enabled) startAutoSensing() else stopAutoSensing()
-                setAutoSensingSwitchChecked(enabled)
-            }
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+            override fun startVideoRecording(): CommandResult = awaitAction(startRecording)
 
-        override fun setParameter(name: String, value: Float): CommandResult =
-            applyMavlinkParameter(name, value)
+            override fun stopVideoRecording(): CommandResult = awaitAction(stopRecording)
 
-        override fun setTextParameter(name: String, value: String): CommandResult {
-            val applied = when (name) {
-                PARAM_DRONE_NAME -> setDroneName(value)
-                PARAM_VIDEO_SOURCE -> setVideoSource(value)
-                PARAM_MEDIAMTX -> setMediamtxServer(value)
-                PARAM_DETECTION_SOURCE -> setDetectionSource(value)
-                PARAM_RC_CONTROL_MODE -> DroneController.setRcControlMode(value)
-                PARAM_RTC_RESOLUTION -> setWebRtcResolution(value)
-                PARAM_STREAMING_MODE -> {
-                    val mode = StreamingMode.entries.firstOrNull { it.prefValue == value }
-                    if (mode == null) false else { setStreamingMode(mode); true }
+            /**
+             * Trip one shutter.
+             *
+             * Runs on a worker rather than inline: tripping a shutter and waiting for the file to
+             * appear takes seconds, and this is called from the endpoint's single receive thread —
+             * blocking it would stall every other inbound message, including the ground station's own
+             * heartbeat handling.
+             *
+             * So the command is acknowledged as accepted and the real outcome follows as
+             * CAMERA_IMAGE_CAPTURED, whose `capture_result` reports whether a photo actually
+             * happened. That split is what the message exists for.
+             *
+             * Uses the generic photo path, not the thermal one: a Mini 3 has a single lens and no
+             * thermal file to find, so labelling the result thermal/wide/zoom would be meaningless.
+             *
+             * The endpoint is optional rather than required: the distance-triggered capture loop
+             * inside a flying mission trips this same shutter, and a mission must not stop
+             * photographing because the MAVLink endpoint happens to be mid-restart. Without an
+             * endpoint there is simply no CAMERA_IMAGE_CAPTURED to send, so the outcome is logged
+             * instead of reported — the shutter still fires.
+             */
+            override fun captureImage(): CommandResult {
+                val endpoint = mavlinkEndpoint
+                endpoint?.reportCaptureStarted()
+                captureExecutor.execute {
+                    val file =
+                        runCatching { Payload.capturePhoto(mediaVM) }
+                            .onFailure { Log.e(TAG, "Capture failed: ${it.message}", it) }
+                            .getOrNull()
+                    if (file == null) {
+                        Log.w(TAG, "Capture produced no file")
+                    }
+                    endpoint?.reportImageCaptured(file != null, file?.fileName.orEmpty())
                 }
-
-                else -> {
-                    Log.d(TAG, "Refusing write to unknown text parameter $name")
-                    return CommandResult(MavlinkCommandOutcome.DENIED, "$name is not writable")
-                }
-            }
-            // The detail carries the value the setting now holds, so the acknowledgement echoes
-            // what took rather than what was asked for — which is how a caller detects a value
-            // the aircraft rejected as out of range or unknown.
-            val current = textParameters().firstOrNull { it.first == name }?.second.orEmpty()
-            return if (applied) {
-                CommandResult(MavlinkCommandOutcome.ACCEPTED, current)
-            } else {
-                CommandResult(MavlinkCommandOutcome.DENIED, current)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
         }
-
-        override fun textParameters(): List<Pair<String, String>> = listOf(
-            PARAM_DRONE_NAME to droneName,
-            PARAM_VIDEO_SOURCE to getVideoSourceMode().prefValue,
-            PARAM_MEDIAMTX to getMediamtxServer(),
-            PARAM_DETECTION_SOURCE to getDetectionSource().prefValue,
-            PARAM_RC_CONTROL_MODE to DroneController.getRcControlMode(),
-            PARAM_RTC_RESOLUTION to getWebRTCResolutionPreset().prefValue,
-            PARAM_STREAMING_MODE to getStreamingMode().prefValue
-        )
-
-        override fun setCameraZoom(zoomRatio: Float): CommandResult {
-            if (zoomRatio <= 0f) return CommandResult(MavlinkCommandOutcome.FAILED)
-            zoomKey.set(zoomRatio.toDouble())
-            // set() is fire-and-forget; the ratio the aircraft settled on is reported in
-            // telemetry, which is where a ground station should read it back from.
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        override fun startVideoRecording(): CommandResult = awaitAction(startRecording)
-
-        override fun stopVideoRecording(): CommandResult = awaitAction(stopRecording)
-
-        /**
-         * Trip one shutter.
-         *
-         * Runs on a worker rather than inline: tripping a shutter and waiting for the file to
-         * appear takes seconds, and this is called from the endpoint's single receive thread —
-         * blocking it would stall every other inbound message, including the ground station's own
-         * heartbeat handling.
-         *
-         * So the command is acknowledged as accepted and the real outcome follows as
-         * CAMERA_IMAGE_CAPTURED, whose `capture_result` reports whether a photo actually
-         * happened. That split is what the message exists for.
-         *
-         * Uses the generic photo path, not the thermal one: a Mini 3 has a single lens and no
-         * thermal file to find, so labelling the result thermal/wide/zoom would be meaningless.
-         *
-         * The endpoint is optional rather than required: the distance-triggered capture loop
-         * inside a flying mission trips this same shutter, and a mission must not stop
-         * photographing because the MAVLink endpoint happens to be mid-restart. Without an
-         * endpoint there is simply no CAMERA_IMAGE_CAPTURED to send, so the outcome is logged
-         * instead of reported — the shutter still fires.
-         */
-        override fun captureImage(): CommandResult {
-            val endpoint = mavlinkEndpoint
-            endpoint?.reportCaptureStarted()
-            captureExecutor.execute {
-                val file = runCatching { Payload.capturePhoto(mediaVM) }
-                    .onFailure { Log.e(TAG, "Capture failed: ${it.message}", it) }
-                    .getOrNull()
-                if (file == null) {
-                    Log.w(TAG, "Capture produced no file")
-                }
-                endpoint?.reportImageCaptured(file != null, file?.fileName.orEmpty())
-            }
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-    }
 
     /**
      * Issue a DJI action key and report what actually happened.
@@ -6545,7 +7060,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      */
     private fun awaitAction(key: DJIKey.ActionKey<EmptyMsg, EmptyMsg>): CommandResult {
         val latch = java.util.concurrent.CountDownLatch(1)
-        val succeeded = java.util.concurrent.atomic.AtomicBoolean(false)
+        val succeeded =
+            java.util.concurrent.atomic
+                .AtomicBoolean(false)
         key.action(
             {
                 succeeded.set(true)
@@ -6554,7 +7071,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             { error ->
                 Log.w(TAG, "DJI action failed: ${error.description()}")
                 latch.countDown()
-            }
+            },
         )
         val answered = latch.await(ACTION_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         return when {
@@ -6564,16 +7081,6 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    /**
-     * Flight-motion commands over MAVLink, behind the safety gate.
-     *
-     * Three layers, checked in order:
-    *   1. lb_mav_0_allow_flight — enabled by default; an explicit settings choice can block it.
-     *   2. command authority — MAVLink speaks as the Pilot, so it is refused once the Safety
-     *      Computer has seized control over HTTP.
-     *   3. the RC manual-override latch — closed-loop commands (reposition, yaw) are refused while
-     *      the physical RC pilot has taken over.
-     */
     /**
      * Returns a refusal when MAVLink-commanded motion is blocked, or null when it may proceed.
      *
@@ -6590,21 +7097,22 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             // idea why the command was refused.
             ToastUtils.showToast(
                 "MAVLink flight command blocked — flight control not allowed " +
-                    "(enable it from the settings menu)"
+                    "(enable it from the settings menu)",
             )
             return CommandResult(MavlinkCommandOutcome.DENIED)
         }
         // A frame signed with the configured key is the Safety Computer; anything else is the
         // Pilot. Before signing every MAVLink command was the Pilot unconditionally, so an
         // installation that configures no key sees exactly the behaviour it saw before.
-        val source = if (mavlinkEndpoint?.isTrustedOrigin == true) {
-            ControlAuthority.Source.SAFETY
-        } else {
-            ControlAuthority.Source.PILOT
-        }
+        val source =
+            if (mavlinkEndpoint?.isTrustedOrigin == true) {
+                ControlAuthority.Source.SAFETY
+            } else {
+                ControlAuthority.Source.PILOT
+            }
         if (!ControlAuthority.authorizeControlCommand(source)) {
             ToastUtils.showToast(
-                "MAVLink flight command blocked — the Safety Computer has control"
+                "MAVLink flight command blocked — the Safety Computer has control",
             )
             return CommandResult(MavlinkCommandOutcome.DENIED)
         }
@@ -6627,351 +7135,379 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         }
     }
 
-    private val mavlinkMotionSink = object : MavlinkMotionSink {
-
-        override fun takeoff(altitudeM: Float?): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("takeoff")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            DroneController.startTakeOff()
-            if (altitudeM != null) climbAfterTakeoff(altitudeM.toDouble())
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        override fun land(): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("land")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            supersedeMission("land")
-            DroneController.startLanding()
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        override fun returnToHome(): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("return to home")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            supersedeMission("return to home")
-            DroneController.startReturnToHome()
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        override fun reposition(
-            latitudeDeg: Double,
-            longitudeDeg: Double,
-            altitudeMeters: Double,
-            yawDeg: Double,
-            groundSpeedMps: Double
-        ): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("reposition")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            supersedeMission("reposition")
-
-            // DO_REPOSITION carries three "leave this one alone" sentinels, and QGroundControl
-            // sends all three. None of them are values to fly to, and passing them through as if
-            // they were is what made a goto fly backwards and an altitude change do nothing.
-
-            // param1 is "ground speed, less than 0 (-1) for default". As a speed it is harmless;
-            // as the *ceiling* the waypoint loop clamps to, -1 m/s is a command to retreat.
-            val speed = groundSpeedMps
-                .takeIf { it.isFinite() && it > 0.0 }
-                ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
-
-            // param5/param6 NaN mean "hold the current position and change only the altitude",
-            // which is how QGC expresses Change Altitude. A COMMAND_INT carries them as scaled
-            // int32, where NaN converts to 0 -- a real coordinate in the Gulf of Guinea rather
-            // than a marker -- so the zero case has to be caught alongside the non-finite one.
-            val holdingPosition = !latitudeDeg.isFinite() || !longitudeDeg.isFinite() ||
-                (abs(latitudeDeg) < REPOSITION_COORD_EPSILON &&
-                    abs(longitudeDeg) < REPOSITION_COORD_EPSILON)
-            if (holdingPosition) {
-                // Three of QGroundControl's guided actions are this one command, told apart only
-                // by which parameters are real: Go to location carries a position, Change
-                // altitude carries only an altitude, and Set heading carries only a yaw. So a
-                // command with no position is not automatically an altitude change, and reading
-                // it as one silently discarded the heading the operator had just dialled in.
-                //
-                // Neither is routed to a waypoint at the current position, which would be the
-                // obvious way to express "stay here": a zero-length leg has no bearing, so the
-                // nose-forward controller reads atan2(0, 0) and turns the aircraft north first.
-                return if (!yawDeg.isNaN()) {
-                    val seq = DroneController.gotoYaw(yawDeg)
-                    CommandResult(
-                        MavlinkCommandOutcome.ACCEPTED,
-                        pending = PendingCommand(PendingKind.YAW, seq)
-                    )
-                } else {
-                    val seq = DroneController.gotoAltitude(
-                        // A Change altitude always names one. Defended anyway, because an
-                        // altitude of NaN reaches the vertical controller as a setpoint and
-                        // every comparison against it is false, so the aircraft would hold
-                        // whatever throttle it had rather than refuse.
-                        altitudeMeters.takeIf { it.isFinite() } ?: getLocation3D().altitude
-                    )
-                    CommandResult(
-                        MavlinkCommandOutcome.ACCEPTED,
-                        pending = PendingCommand(PendingKind.ALTITUDE, seq)
-                    )
+    /**
+     * Flight-motion commands over MAVLink, behind the safety gate.
+     *
+     * Three layers, checked in order:
+     *   1. lb_mav_0_allow_flight — enabled by default; an explicit settings choice can block it.
+     *   2. command authority — MAVLink speaks as the Pilot, so it is refused once the Safety
+     *      Computer has seized control over HTTP.
+     *   3. the RC manual-override latch — closed-loop commands (reposition, yaw) are refused while
+     *      the physical RC pilot has taken over.
+     */
+    private val mavlinkMotionSink =
+        object : MavlinkMotionSink {
+            override fun takeoff(altitudeM: Float?): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("takeoff")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
+                DroneController.startTakeOff()
+                if (altitudeM != null) climbAfterTakeoff(altitudeM.toDouble())
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
-            // param4 NaN means "use the vehicle's heading mode", exactly as it does in a mission
-            // item. Honouring it here too is what lets a single reposition express nose-forward,
-            // which is otherwise only reachable by uploading a one-item plan. The arrival heading
-            // is then the heading the aircraft already holds: "do not change yaw" cannot mean
-            // "finish by rotating to north", which is what a hardcoded zero asked for.
-            // param7 NaN means "keep the altitude you are at", the same "leave this alone" that
-            // the other three parameters express. Flown as a setpoint it is not refused: every
-            // comparison against NaN is false, so the aircraft never reaches the altitude and
-            // never reports arriving.
-            val altitude = altitudeMeters.takeIf { it.isFinite() } ?: getLocation3D().altitude
-            val seq = if (yawDeg.isNaN()) {
-                DroneController.flyToWaypointNoseForward(
-                    latitudeDeg, longitudeDeg, altitude, getHeading(), speed
-                )
-            } else {
-                DroneController.flyToWaypointHoldHeading(
-                    latitudeDeg, longitudeDeg, altitude, yawDeg, speed
-                )
+            override fun land(): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("land")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                supersedeMission("land")
+                DroneController.startLanding()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
-            // A refused leg is a refusal, not a pending flight: the controller published the
-            // seq exactly so a caller correlating on it can tell the two apart. Answering
-            // ACCEPTED here is what made MAVLink and HTTP disagree about the same command —
-            // HTTP inspects this same refusal, the reposition path did not — and left a ground
-            // station awaiting a leg the aircraft never started flying.
-            val refusal = DroneController.lastWaypointRefusal()
-            if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
-                return CommandResult(
-                    MavlinkCommandOutcome.DENIED,
-                    "Waypoint refused: ${refusal.reason}"
-                )
-            }
-            return CommandResult(
-                MavlinkCommandOutcome.ACCEPTED,
-                pending = PendingCommand(PendingKind.WAYPOINT, seq)
-            )
-        }
 
-        override fun setYaw(yawDeg: Double): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("yaw")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
+            override fun returnToHome(): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("return to home")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                supersedeMission("return to home")
+                DroneController.startReturnToHome()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
-            supersedeMission("yaw")
-            val seq = DroneController.gotoYaw(yawDeg)
-            return CommandResult(
-                MavlinkCommandOutcome.ACCEPTED,
-                pending = PendingCommand(PendingKind.YAW, seq)
-            )
-        }
 
-        @Suppress("LongParameterList")
-        override fun orbit(
-            latitudeDeg: Double,
-            longitudeDeg: Double,
-            altitudeMeters: Double,
-            radiusMeters: Double,
-            tangentialSpeedMps: Double,
-            clockwise: Boolean,
-            arcDegrees: Double,
-            faceCentre: Boolean
-        ): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("orbit")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            if (!latitudeDeg.isFinite() || !longitudeDeg.isFinite()) {
-                return CommandResult(MavlinkCommandOutcome.DENIED, "Orbit needs a real centre")
-            }
-            // A radius of zero is a rotation in place dressed as an orbit, and the radial term
-            // would divide the aircraft's own position noise by nothing to correct it.
-            if (radiusMeters < MIN_ORBIT_RADIUS_M) {
-                return CommandResult(
-                    MavlinkCommandOutcome.DENIED,
-                    "Orbit radius must be at least $MIN_ORBIT_RADIUS_M m"
-                )
-            }
-            supersedeMission("orbit")
-            DroneController.orbit(
-                centreLatitude = latitudeDeg,
-                centreLongitude = longitudeDeg,
-                // As everywhere else on this surface, an unset altitude is the one being held.
-                targetAltitude = altitudeMeters.takeIf { it.isFinite() }
-                    ?: getLocation3D().altitude,
-                radiusMeters = radiusMeters,
-                tangentialSpeedMps = tangentialSpeedMps,
-                clockwise = clockwise,
-                arcDegrees = arcDegrees,
-                faceCentre = faceCentre
-            )
-            // Acknowledged immediately rather than held pending until the lap completes: a full
-            // orbit takes minutes, and QGroundControl's orbit tool re-issues DO_ORBIT as its
-            // parameters change — a pending ack makes it refuse with "Waiting on previous
-            // response to same command" for the whole lap. The orbit still finishes on its own;
-            // completion is reported on the telemetry stream, not by blocking the next command.
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+            override fun reposition(
+                latitudeDeg: Double,
+                longitudeDeg: Double,
+                altitudeMeters: Double,
+                yawDeg: Double,
+                groundSpeedMps: Double,
+            ): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("reposition")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                supersedeMission("reposition")
 
-        override fun abortToPositionHold(): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("abort")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            supersedeMission("abort")
-            // The union of the three HTTP aborts: stop the PID loops, neutralise the sticks and
-            // leave virtual stick, and end any DJI wayline. Each is safe when nothing is running.
-            DroneController.abortAllMissions()
-            DroneController.setStick(0f, 0f, 0f, 0f)
-            DroneController.disableVirtualStick()
-            runCatching { DroneController.endMission() }
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+                // DO_REPOSITION carries three "leave this one alone" sentinels, and QGroundControl
+                // sends all three. None of them are values to fly to, and passing them through as if
+                // they were is what made a goto fly backwards and an altitude change do nothing.
 
-        override fun enableOffboard(): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("enableVirtualStick")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            DroneController.enableVirtualStick()
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+                // param1 is "ground speed, less than 0 (-1) for default". As a speed it is harmless;
+                // as the *ceiling* the waypoint loop clamps to, -1 m/s is a command to retreat.
+                val speed =
+                    groundSpeedMps
+                        .takeIf { it.isFinite() && it > 0.0 }
+                        ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
 
-        override fun manualControl(
-            roll: Float,
-            pitch: Float,
-            throttle: Float,
-            yaw: Float
-        ): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            // Refused while the pilot has the sticks, exactly as /send/stick is. The latch
-            // already drops virtual stick, so these would most likely be ignored anyway — but
-            // "most likely ignored" is not the guarantee to rely on when the pilot has taken
-            // over, and the two surfaces disagreeing about it is its own bug.
-            if (DroneController.shouldRejectAutonomousCommand("stick")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            // DJI's sticks: left is yaw/throttle, right is roll/pitch. MAVLink's axes are named
-            // for what they do, so the mapping is by meaning rather than by position.
-            DroneController.setStick(
-                leftX = yaw,
-                leftY = throttle,
-                rightX = roll,
-                rightY = pitch
-            )
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+                // param5/param6 NaN mean "hold the current position and change only the altitude",
+                // which is how QGC expresses Change Altitude. A COMMAND_INT carries them as scaled
+                // int32, where NaN converts to 0 -- a real coordinate in the Gulf of Guinea rather
+                // than a marker -- so the zero case has to be caught alongside the non-finite one.
+                val holdingPosition =
+                    !latitudeDeg.isFinite() ||
+                        !longitudeDeg.isFinite() ||
+                        (
+                            abs(latitudeDeg) < REPOSITION_COORD_EPSILON &&
+                                abs(longitudeDeg) < REPOSITION_COORD_EPSILON
+                        )
+                if (holdingPosition) {
+                    // Three of QGroundControl's guided actions are this one command, told apart only
+                    // by which parameters are real: Go to location carries a position, Change
+                    // altitude carries only an altitude, and Set heading carries only a yaw. So a
+                    // command with no position is not automatically an altitude change, and reading
+                    // it as one silently discarded the heading the operator had just dialled in.
+                    //
+                    // Neither is routed to a waypoint at the current position, which would be the
+                    // obvious way to express "stay here": a zero-length leg has no bearing, so the
+                    // nose-forward controller reads atan2(0, 0) and turns the aircraft north first.
+                    return if (!yawDeg.isNaN()) {
+                        val seq = DroneController.gotoYaw(yawDeg)
+                        CommandResult(
+                            MavlinkCommandOutcome.ACCEPTED,
+                            pending = PendingCommand(PendingKind.YAW, seq),
+                        )
+                    } else {
+                        val seq =
+                            DroneController.gotoAltitude(
+                                // A Change altitude always names one. Defended anyway, because an
+                                // altitude of NaN reaches the vertical controller as a setpoint and
+                                // every comparison against it is false, so the aircraft would hold
+                                // whatever throttle it had rather than refuse.
+                                altitudeMeters.takeIf { it.isFinite() } ?: getLocation3D().altitude,
+                            )
+                        CommandResult(
+                            MavlinkCommandOutcome.ACCEPTED,
+                            pending = PendingCommand(PendingKind.ALTITUDE, seq),
+                        )
+                    }
+                }
 
-        override fun setAltitude(altitudeMeters: Double): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("altitude")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
-            }
-            supersedeMission("altitude change")
-            val seq = DroneController.gotoAltitude(altitudeMeters)
-            return CommandResult(
-                MavlinkCommandOutcome.ACCEPTED,
-                pending = PendingCommand(PendingKind.ALTITUDE, seq)
-            )
-        }
-
-        override fun releaseManualOverride(): CommandResult {
-            // Deliberately not behind the flight gate: this grants authority rather than using
-            // it, and the commands it re-enables are each gated in their own right.
-            DroneController.deactivateManualOverride()
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        override fun releaseSafetyControl(): CommandResult {
-            // Deliberately not behind the flight gate: this is the operation that returns
-            // authority to the Pilot, so it must be reachable precisely while the Safety
-            // Computer holds control (the gate would refuse everything once SAFETY seized it).
-            // Only a frame signed with the configured key may release — an unsigned frame is
-            // the Pilot, and the Pilot cannot release safety. HTTP's /releaseSafetyControl has
-            // the same rule, enforced with its X-Safety-Token header instead.
-            val source = if (mavlinkEndpoint?.isTrustedOrigin == true) {
-                ControlAuthority.Source.SAFETY
-            } else {
-                ControlAuthority.Source.PILOT
-            }
-            return if (ControlAuthority.releaseSafetyControl(source)) {
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            } else {
-                CommandResult(
-                    MavlinkCommandOutcome.DENIED,
-                    "Only the Safety Computer can release safety control"
-                )
-            }
-        }
-
-        /**
-         * Whether the movement with this seq has arrived.
-         *
-         * The seq comparison is what makes the answer trustworthy: the latch is a single shared
-         * flag, so without it a leftover `true` from the previous movement reads as this one
-         * arriving instantly. A manual override is reported as a failure rather than as a wait,
-         * because the command is not going to complete once the pilot has the sticks.
-         */
-        override fun pollCompletion(pending: PendingCommand): CommandProgress {
-            if (DroneController.isManualOverrideActive) return CommandProgress.ABANDONED
-            // A refused waypoint is a refusal the moment it is detected, not a command that
-            // runs until somebody gives up waiting: the leg was never issued to the airframe,
-            // so no reach latch will ever close for it.
-            if (pending.kind == PendingKind.WAYPOINT) {
+                // param4 NaN means "use the vehicle's heading mode", exactly as it does in a mission
+                // item. Honouring it here too is what lets a single reposition express nose-forward,
+                // which is otherwise only reachable by uploading a one-item plan. The arrival heading
+                // is then the heading the aircraft already holds: "do not change yaw" cannot mean
+                // "finish by rotating to north", which is what a hardcoded zero asked for.
+                // param7 NaN means "keep the altitude you are at", the same "leave this alone" that
+                // the other three parameters express. Flown as a setpoint it is not refused: every
+                // comparison against NaN is false, so the aircraft never reaches the altitude and
+                // never reports arriving.
+                val altitude = altitudeMeters.takeIf { it.isFinite() } ?: getLocation3D().altitude
+                val seq =
+                    if (yawDeg.isNaN()) {
+                        DroneController.flyToWaypointNoseForward(
+                            latitudeDeg,
+                            longitudeDeg,
+                            altitude,
+                            getHeading(),
+                            speed,
+                        )
+                    } else {
+                        DroneController.flyToWaypointHoldHeading(
+                            latitudeDeg,
+                            longitudeDeg,
+                            altitude,
+                            yawDeg,
+                            speed,
+                        )
+                    }
+                // A refused leg is a refusal, not a pending flight: the controller published the
+                // seq exactly so a caller correlating on it can tell the two apart. Answering
+                // ACCEPTED here is what made MAVLink and HTTP disagree about the same command —
+                // HTTP inspects this same refusal, the reposition path did not — and left a ground
+                // station awaiting a leg the aircraft never started flying.
                 val refusal = DroneController.lastWaypointRefusal()
-                if (refusal?.seq == pending.seq &&
-                    refusal.reason != DroneController.WaypointRejection.NONE
-                ) {
-                    return CommandProgress.ABANDONED
+                if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                    return CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        "Waypoint refused: ${refusal.reason}",
+                    )
+                }
+                return CommandResult(
+                    MavlinkCommandOutcome.ACCEPTED,
+                    pending = PendingCommand(PendingKind.WAYPOINT, seq),
+                )
+            }
+
+            override fun setYaw(yawDeg: Double): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("yaw")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                supersedeMission("yaw")
+                val seq = DroneController.gotoYaw(yawDeg)
+                return CommandResult(
+                    MavlinkCommandOutcome.ACCEPTED,
+                    pending = PendingCommand(PendingKind.YAW, seq),
+                )
+            }
+
+            @Suppress("LongParameterList")
+            override fun orbit(
+                latitudeDeg: Double,
+                longitudeDeg: Double,
+                altitudeMeters: Double,
+                radiusMeters: Double,
+                tangentialSpeedMps: Double,
+                clockwise: Boolean,
+                arcDegrees: Double,
+                faceCentre: Boolean,
+            ): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("orbit")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                if (!latitudeDeg.isFinite() || !longitudeDeg.isFinite()) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED, "Orbit needs a real centre")
+                }
+                // A radius of zero is a rotation in place dressed as an orbit, and the radial term
+                // would divide the aircraft's own position noise by nothing to correct it.
+                if (radiusMeters < MIN_ORBIT_RADIUS_M) {
+                    return CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        "Orbit radius must be at least $MIN_ORBIT_RADIUS_M m",
+                    )
+                }
+                supersedeMission("orbit")
+                DroneController.orbit(
+                    centreLatitude = latitudeDeg,
+                    centreLongitude = longitudeDeg,
+                    // As everywhere else on this surface, an unset altitude is the one being held.
+                    targetAltitude =
+                        altitudeMeters.takeIf { it.isFinite() }
+                            ?: getLocation3D().altitude,
+                    radiusMeters = radiusMeters,
+                    tangentialSpeedMps = tangentialSpeedMps,
+                    clockwise = clockwise,
+                    arcDegrees = arcDegrees,
+                    faceCentre = faceCentre,
+                )
+                // Acknowledged immediately rather than held pending until the lap completes: a full
+                // orbit takes minutes, and QGroundControl's orbit tool re-issues DO_ORBIT as its
+                // parameters change — a pending ack makes it refuse with "Waiting on previous
+                // response to same command" for the whole lap. The orbit still finishes on its own;
+                // completion is reported on the telemetry stream, not by blocking the next command.
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun abortToPositionHold(): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("abort")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                supersedeMission("abort")
+                // The union of the three HTTP aborts: stop the PID loops, neutralise the sticks and
+                // leave virtual stick, and end any DJI wayline. Each is safe when nothing is running.
+                DroneController.abortAllMissions()
+                DroneController.setStick(0f, 0f, 0f, 0f)
+                DroneController.disableVirtualStick()
+                runCatching { DroneController.endMission() }
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun enableOffboard(): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("enableVirtualStick")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                DroneController.enableVirtualStick()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun manualControl(
+                roll: Float,
+                pitch: Float,
+                throttle: Float,
+                yaw: Float,
+            ): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                // Refused while the pilot has the sticks, exactly as /send/stick is. The latch
+                // already drops virtual stick, so these would most likely be ignored anyway — but
+                // "most likely ignored" is not the guarantee to rely on when the pilot has taken
+                // over, and the two surfaces disagreeing about it is its own bug.
+                if (DroneController.shouldRejectAutonomousCommand("stick")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                // DJI's sticks: left is yaw/throttle, right is roll/pitch. MAVLink's axes are named
+                // for what they do, so the mapping is by meaning rather than by position.
+                DroneController.setStick(
+                    leftX = yaw,
+                    leftY = throttle,
+                    rightX = roll,
+                    rightY = pitch,
+                )
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setAltitude(altitudeMeters: Double): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("altitude")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                supersedeMission("altitude change")
+                val seq = DroneController.gotoAltitude(altitudeMeters)
+                return CommandResult(
+                    MavlinkCommandOutcome.ACCEPTED,
+                    pending = PendingCommand(PendingKind.ALTITUDE, seq),
+                )
+            }
+
+            override fun releaseManualOverride(): CommandResult {
+                // Deliberately not behind the flight gate: this grants authority rather than using
+                // it, and the commands it re-enables are each gated in their own right.
+                DroneController.deactivateManualOverride()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun releaseSafetyControl(): CommandResult {
+                // Deliberately not behind the flight gate: this is the operation that returns
+                // authority to the Pilot, so it must be reachable precisely while the Safety
+                // Computer holds control (the gate would refuse everything once SAFETY seized it).
+                // Only a frame signed with the configured key may release — an unsigned frame is
+                // the Pilot, and the Pilot cannot release safety. HTTP's /releaseSafetyControl has
+                // the same rule, enforced with its X-Safety-Token header instead.
+                val source =
+                    if (mavlinkEndpoint?.isTrustedOrigin == true) {
+                        ControlAuthority.Source.SAFETY
+                    } else {
+                        ControlAuthority.Source.PILOT
+                    }
+                return if (ControlAuthority.releaseSafetyControl(source)) {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                } else {
+                    CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        "Only the Safety Computer can release safety control",
+                    )
                 }
             }
-            val (currentSeq, reached) = when (pending.kind) {
-                PendingKind.WAYPOINT ->
-                    DroneController.getWaypointSeq() to DroneController.isWaypointReached()
-                PendingKind.YAW ->
-                    DroneController.getYawSeq() to DroneController.isYawReached()
-                PendingKind.ALTITUDE ->
-                    DroneController.getAltitudeSeq() to DroneController.isAltitudeReached()
-                PendingKind.ORBIT ->
-                    DroneController.getOrbitSeq() to DroneController.isOrbitComplete()
-            }
-            return when {
-                // A newer command took over. Ordinary, not a failure: this is what re-issuing a
-                // goto looks like from the perspective of the one it replaced.
-                currentSeq > pending.seq -> CommandProgress.SUPERSEDED
-                currentSeq == pending.seq && reached -> CommandProgress.ARRIVED
-                else -> CommandProgress.RUNNING
-            }
-        }
 
-        override fun arm(): CommandResult {
-            // DJI has no arming: motors spin up when the takeoff command actually runs. QGC's
-            // takeoff sequence arms right after NAV_TAKEOFF is accepted, so this is a gated no-op
-            // that keeps the sequence moving rather than an honest refusal that aborts it. The
-            // heartbeat reports armed from [armedCommanded] so QGC's arm wait sees a result.
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("arm")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
+            /**
+             * Whether the movement with this seq has arrived.
+             *
+             * The seq comparison is what makes the answer trustworthy: the latch is a single shared
+             * flag, so without it a leftover `true` from the previous movement reads as this one
+             * arriving instantly. A manual override is reported as a failure rather than as a wait,
+             * because the command is not going to complete once the pilot has the sticks.
+             */
+            override fun pollCompletion(pending: PendingCommand): CommandProgress {
+                if (DroneController.isManualOverrideActive) return CommandProgress.ABANDONED
+                // A refused waypoint is a refusal the moment it is detected, not a command that
+                // runs until somebody gives up waiting: the leg was never issued to the airframe,
+                // so no reach latch will ever close for it.
+                if (pending.kind == PendingKind.WAYPOINT) {
+                    val refusal = DroneController.lastWaypointRefusal()
+                    if (refusal?.seq == pending.seq &&
+                        refusal.reason != DroneController.WaypointRejection.NONE
+                    ) {
+                        return CommandProgress.ABANDONED
+                    }
+                }
+                val (currentSeq, reached) =
+                    when (pending.kind) {
+                        PendingKind.WAYPOINT ->
+                            DroneController.getWaypointSeq() to DroneController.isWaypointReached()
+                        PendingKind.YAW ->
+                            DroneController.getYawSeq() to DroneController.isYawReached()
+                        PendingKind.ALTITUDE ->
+                            DroneController.getAltitudeSeq() to DroneController.isAltitudeReached()
+                        PendingKind.ORBIT ->
+                            DroneController.getOrbitSeq() to DroneController.isOrbitComplete()
+                    }
+                return when {
+                    // A newer command took over. Ordinary, not a failure: this is what re-issuing a
+                    // goto looks like from the perspective of the one it replaced.
+                    currentSeq > pending.seq -> CommandProgress.SUPERSEDED
+                    currentSeq == pending.seq && reached -> CommandProgress.ARRIVED
+                    else -> CommandProgress.RUNNING
+                }
             }
-            armedCommanded = true
-            Log.i(TAG, "Vehicle armed (commanded; DJI has no arming state)")
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
 
-        override fun disarm(): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            if (DroneController.shouldRejectAutonomousCommand("disarm")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
+            override fun arm(): CommandResult {
+                // DJI has no arming: motors spin up when the takeoff command actually runs. QGC's
+                // takeoff sequence arms right after NAV_TAKEOFF is accepted, so this is a gated no-op
+                // that keeps the sequence moving rather than an honest refusal that aborts it. The
+                // heartbeat reports armed from [armedCommanded] so QGC's arm wait sees a result.
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("arm")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                armedCommanded = true
+                Log.i(TAG, "Vehicle armed (commanded; DJI has no arming state)")
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
-            armedCommanded = false
-            Log.i(TAG, "Vehicle disarmed (commanded)")
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+
+            override fun disarm(): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                if (DroneController.shouldRejectAutonomousCommand("disarm")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                armedCommanded = false
+                Log.i(TAG, "Vehicle disarmed (commanded)")
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
         }
-    }
 
     /**
      * Climb to a requested altitude once the take-off has finished.
@@ -6990,8 +7526,9 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         captureExecutor.execute {
             val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
-                val airborne = isFlyingKey.get(false) &&
-                    DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
+                val airborne =
+                    isFlyingKey.get(false) &&
+                        DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
                 if (airborne) {
                     Log.i(TAG, "Take-off complete; climbing to ${altitudeMeters}m")
                     mainHandler.post { DroneController.gotoAltitude(altitudeMeters) }
@@ -7019,467 +7556,520 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
      * means hold that heading. One plan can mix them, which the two separate HTTP endpoints
      * cannot express.
      */
-    private val mavlinkMissionSink = object : MavlinkMissionSink {
+    private val mavlinkMissionSink =
+        object : MavlinkMissionSink {
+            private var listener: MissionProgressListener? = null
 
-        private var listener: MissionProgressListener? = null
+            @Volatile
+            private var missionThread: Thread? = null
 
-        @Volatile
-        private var missionThread: Thread? = null
+            @Volatile
+            private var running = false
 
-        @Volatile
-        private var running = false
+            /**
+             * Distance-triggered capture state for the plan being flown, or null when the plan set
+             * no trigger distance. [CMD_DO_SET_CAM_TRIGG_DIST] arms it; the accumulate-and-compare
+             * arithmetic lives in [DistanceTrigger], and the fix it last advanced from is the anchor
+             * below.
+             */
+            private var distanceTrigger: DistanceTrigger? = null
 
-        /**
-         * Distance-triggered capture state for the plan being flown, or null when the plan set
-         * no trigger distance. [CMD_DO_SET_CAM_TRIGG_DIST] arms it; the accumulate-and-compare
-         * arithmetic lives in [DistanceTrigger], and the fix it last advanced from is the anchor
-         * below.
-         */
-        private var distanceTrigger: DistanceTrigger? = null
+            /** The fix [distanceTrigger] last measured from, so consecutive fixes make a path. */
+            private var triggerAnchorLat: Double? = null
+            private var triggerAnchorLon: Double? = null
 
-        /** The fix [distanceTrigger] last measured from, so consecutive fixes make a path. */
-        private var triggerAnchorLat: Double? = null
-        private var triggerAnchorLon: Double? = null
+            override val isRunning: Boolean get() = running
 
-        override val isRunning: Boolean get() = running
-
-        override fun setProgressListener(listener: MissionProgressListener?) {
-            this.listener = listener
-        }
-
-        override fun startMission(
-            items: List<MissionItem>,
-            startIndex: Int,
-            executor: MissionExecutor
-        ): CommandResult {
-            mavlinkFlightGate()?.let { return it }
-            // A plan is an autonomous command like any other. The sequencer aborts on the first
-            // leg if the latch is set, but refusing it here says so plainly rather than
-            // accepting a mission that is going to stop immediately.
-            if (DroneController.shouldRejectAutonomousCommand("mission")) {
-                return CommandResult(MavlinkCommandOutcome.DENIED)
+            override fun setProgressListener(listener: MissionProgressListener?) {
+                this.listener = listener
             }
-            // Idempotent: QGC enters mission mode with SET_MODE(MISSION) and then sends
-            // MISSION_START, so a running plan must not be stopped and restarted by the second
-            // command of the pair.
-            if (running) return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            stopMission()
-            return when (executor) {
-                MissionExecutor.DJI_NATIVE -> startNative(items)
-                MissionExecutor.ONBOARD -> startOnboard(items, startIndex)
-            }
-        }
 
-        /**
-         * Hand the whole list to DJI's wayline engine.
-         *
-         * DJI's own take-off (to [WaylineMissionHelper]'s `securityTakeOffHeight`) and its wayline
-         * action framework mean this carries much more of a plan than a bare waypoint path: a
-         * leading NAV_TAKEOFF's altitude becomes the take-off height, a trailing LAND/RTL becomes
-         * the mission's finish action, DO_CHANGE_SPEED becomes a per-leg [WaylineWaypoint.speed],
-         * param4 becomes a fixed heading, and camera/gimbal items become wayline actions
-         * (translated by [translatePlanActionToWaylineAction]) triggered at the waypoint they sit
-         * after — the same "takes effect where it sits" semantics [executePlanAction] uses.
-         *
-         * `DO_SET_ROI`/`DO_SET_ROI_LOCATION` are compiled rather than dropped: MAVLink's ROI is
-         * modal (it stays in force until `DO_SET_ROI_NONE` or a non-location `DO_SET_ROI`), so
-         * `currentRoi` below is carried across items the same way and stamped onto every waypoint
-         * model built while it is active, driving DJI's own `TOWARD_POI` yaw and gimbal modes —
-         * see [WaylineMissionHelper.createWaypointFromLatLon]. `CMD_SET_CAMERA_MODE` remains
-         * skipped; DJI's wayline engine has no camera-mode concept.
-         */
-        private fun startNative(items: List<MissionItem>): CommandResult {
-            var speed = items.firstNotNullOfOrNull { it.speedMps }
-                ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
-            var currentRoi: WaylineLocationCoordinate3D? = null
-            // Modal, exactly like the ROI above: a trigger distance set by one item stays in
-            // force for every waypoint built after it, until another item changes or clears it.
-            var currentDistanceTriggerM: Double? = null
-            val pendingActions = mutableListOf<WaylineActionInfo>()
-            val waypointModels = mutableListOf<WaypointInfoModel>()
-            for (item in items) {
-                if (item.isWaypoint) {
-                    val heading = if (item.noseForward) null else item.param4.toDouble()
-                    waypointModels.add(
-                        WaylineMissionHelper.createWaypointFromLatLon(
-                            item.latitudeDeg, item.longitudeDeg, item.altitudeM,
-                            waypointModels.size,
-                            headingDeg = heading,
-                            speedMps = speed,
-                            roiTarget = currentRoi,
-                            extraActions = pendingActions.toList()
-                        ).apply {
-                            distanceIntervalMeters = currentDistanceTriggerM
-                        }
-                    )
-                    pendingActions.clear()
-                    continue
+            override fun startMission(
+                items: List<MissionItem>,
+                startIndex: Int,
+                executor: MissionExecutor,
+            ): CommandResult {
+                mavlinkFlightGate()?.let { return it }
+                // A plan is an autonomous command like any other. The sequencer aborts on the first
+                // leg if the latch is set, but refusing it here says so plainly rather than
+                // accepting a mission that is going to stop immediately.
+                if (DroneController.shouldRejectAutonomousCommand("mission")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                item.speedMps?.let { speed = it }
-                when (item.command) {
-                    Mav.CMD_DO_SET_ROI_LOCATION ->
-                        currentRoi = WaylineLocationCoordinate3D(item.latitudeDeg, item.longitudeDeg, item.altitudeM)
-                    Mav.CMD_DO_SET_ROI_NONE -> currentRoi = null
-                    Mav.CMD_DO_SET_ROI -> currentRoi = if (item.param1.toInt() == Mav.ROI_MODE_LOCATION) {
-                        WaylineLocationCoordinate3D(item.latitudeDeg, item.longitudeDeg, item.altitudeM)
-                    } else {
-                        null
-                    }
-                    // A zero or negative distance is MAVLink's way of turning the trigger off;
-                    // WPML expresses the same thing by the waypoint carrying no interval.
-                    Mav.CMD_DO_SET_CAM_TRIGG_DIST ->
-                        currentDistanceTriggerM = item.param1.toDouble().takeIf { it > 0.0 }
-                    else -> translatePlanActionToWaylineAction(item)?.let { pendingActions.add(it) }
+                // Idempotent: QGC enters mission mode with SET_MODE(MISSION) and then sends
+                // MISSION_START, so a running plan must not be stopped and restarted by the second
+                // command of the pair.
+                if (running) return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                stopMission()
+                return when (executor) {
+                    MissionExecutor.DJI_NATIVE -> startNative(items)
+                    MissionExecutor.ONBOARD -> startOnboard(items, startIndex)
                 }
             }
-            if (waypointModels.size < 2) {
-                // DJI's wayline engine needs a path, not a point.
-                return CommandResult(
-                    MavlinkCommandOutcome.DENIED,
-                    "DJI native missions need at least two waypoints"
-                )
-            }
-            // Actions after the last leg (e.g. a final photo before landing) have no later
-            // waypoint to attach to, so they ride along with the last one instead of being lost.
-            if (pendingActions.isNotEmpty()) {
-                val last = waypointModels.last()
-                last.actionInfos = ArrayList(last.actionInfos + pendingActions)
-            }
 
-            val finishAction = when (items.lastOrNull {
-                it.command == Mav.CMD_NAV_LAND || it.command == Mav.CMD_NAV_RETURN_TO_LAUNCH
-            }?.command) {
-                Mav.CMD_NAV_LAND -> WaylineFinishedAction.AUTO_LAND
-                Mav.CMD_NAV_RETURN_TO_LAUNCH -> WaylineFinishedAction.GO_HOME
-                else -> WaylineFinishedAction.NO_ACTION
-            }
-            val takeoffHeightM = items.firstOrNull { it.command == Mav.CMD_NAV_TAKEOFF }
-                ?.altitudeM?.takeIf { it > 0.0 } ?: 20.0
-            val missionConfig = WaylineMissionHelper.createMissionConfig(
-                finishAction = finishAction,
-                securityTakeOffHeightM = takeoffHeightM
-            )
-
-            running = true
-            // Distinct from NAVIGATING: DJI's own wayline engine is flying this, not the app's
-            // virtual-stick loop, and the status badge showing MANUAL for a mission that is
-            // flying perfectly fine was ambient RC stick noise being read as a takeover — see the
-            // MISSION exclusion in VirtualStickVM.tryUpdateVirtualStickByRc().
-            DroneController.markMissionActive()
-            listener?.onItemStarted(0)
-            DroneController.navigateWaylineMissionNative(
-                waypointModels,
-                missionConfig,
-                speed,
-                onProgress = { waypointIndex -> listener?.onItemStarted(waypointIndex) },
-                onFinished = { success ->
-                    running = false
-                    DroneController.clearMissionActiveIfStillSet()
-                    listener?.onMissionFinished(success)
-                }
-            )
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
-
-        /**
-         * Translate one non-waypoint, non-ROI plan item into the DJI wayline action it maps to,
-         * or null when there is none. ROI items are handled separately in [startNative], since
-         * they set waypoint-level yaw/gimbal state rather than a one-shot triggered action;
-         * [Mav.CMD_SET_CAMERA_MODE] has no wayline equivalent and is the one item still skipped
-         * outright.
-         */
-        private fun translatePlanActionToWaylineAction(item: MissionItem): WaylineActionInfo? =
-            when (item.command) {
-                Mav.CMD_IMAGE_START_CAPTURE -> WaylineActionInfo().apply {
-                    actionType = WaylineActionType.TAKE_PHOTO
-                    takePhotoParam = ActionTakePhotoParam().apply { payloadPositionIndex = 0 }
-                }
-                Mav.CMD_VIDEO_START_CAPTURE -> WaylineActionInfo().apply {
-                    actionType = WaylineActionType.START_RECORD
-                    startRecordParam = ActionStartRecordParam().apply { payloadPositionIndex = 0 }
-                }
-                Mav.CMD_VIDEO_STOP_CAPTURE -> WaylineActionInfo().apply {
-                    actionType = WaylineActionType.STOP_RECORD
-                    stopRecordParam = ActionStopRecordParam().apply { payloadPositionIndex = 0 }
-                }
-                Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW -> WaylineActionInfo().apply {
-                    actionType = WaylineActionType.GIMBAL_ROTATE
-                    gimbalRotateParam = ActionGimbalRotateParam().apply {
-                        payloadPositionIndex = 0
-                        rotateMode = WaylineGimbalActuatorRotateMode.ABSOLUTE_ANGLE
-                        enablePitch = item.param1.isFinite()
-                        pitch = item.param1.toDouble()
-                        enableYaw = item.param2.isFinite()
-                        yaw = item.param2.toDouble()
-                    }
-                }
-                else -> null
-            }
-
-        /**
-         * Sequence the items ourselves, one waypoint at a time.
-         *
-         * Runs on its own thread because it waits: each leg is issued, then the reach latch is
-         * polled until the matching seq reports arrival. Comparing the seq rather than just the
-         * boolean is what stops a stale latch from a previous leg being read as this one's
-         * arrival — the same reason the seq mechanism exists on the HTTP surface.
-         */
-        private fun startOnboard(items: List<MissionItem>, startIndex: Int): CommandResult {
-            val lastLegIndex = items.indexOfLast { it.isWaypoint }
-            if (lastLegIndex < 0) {
-                return CommandResult(MavlinkCommandOutcome.DENIED, "No waypoints in plan")
-            }
-            var speed = items.firstNotNullOfOrNull { it.speedMps }
-                ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
-
-            // A fresh plan means a fresh trigger state: the armed distance and the accumulated
-            // ground both belong to whichever plan set them, not to a previously flown one.
-            distanceTrigger = null
-            triggerAnchorLat = null
-            triggerAnchorLon = null
-            running = true
-            missionThread = thread(name = "MavlinkMission", start = true) {
-                // Every item in order, not only the waypoints. Walking the waypoints alone meant
-                // a plan's camera and gimbal actions were carried through the upload and then
-                // silently dropped, so a survey flew the right path and photographed nothing.
-                for ((index, item) in items.withIndex()) {
-                    if (!running) break
-                    if (index < startIndex) continue
-
-                    if (!item.isWaypoint) {
-                        // Actions take effect where they sit in the plan and do not block: their
-                        // whole purpose is to be in force for the legs that follow.
-                        item.speedMps?.let { speed = it }
-                        listener?.onItemStarted(index)
-                        if (!executePlanAction(item)) {
-                            listener?.onMissionFinished(false)
-                            running = false
-                            return@thread
-                        }
-                        listener?.onItemReached(index)
+            /**
+             * Hand the whole list to DJI's wayline engine.
+             *
+             * DJI's own take-off (to [WaylineMissionHelper]'s `securityTakeOffHeight`) and its wayline
+             * action framework mean this carries much more of a plan than a bare waypoint path: a
+             * leading NAV_TAKEOFF's altitude becomes the take-off height, a trailing LAND/RTL becomes
+             * the mission's finish action, DO_CHANGE_SPEED becomes a per-leg [WaylineWaypoint.speed],
+             * param4 becomes a fixed heading, and camera/gimbal items become wayline actions
+             * (translated by [translatePlanActionToWaylineAction]) triggered at the waypoint they sit
+             * after — the same "takes effect where it sits" semantics [executePlanAction] uses.
+             *
+             * `DO_SET_ROI`/`DO_SET_ROI_LOCATION` are compiled rather than dropped: MAVLink's ROI is
+             * modal (it stays in force until `DO_SET_ROI_NONE` or a non-location `DO_SET_ROI`), so
+             * `currentRoi` below is carried across items the same way and stamped onto every waypoint
+             * model built while it is active, driving DJI's own `TOWARD_POI` yaw and gimbal modes —
+             * see [WaylineMissionHelper.createWaypointFromLatLon]. `CMD_SET_CAMERA_MODE` remains
+             * skipped; DJI's wayline engine has no camera-mode concept.
+             */
+            private fun startNative(items: List<MissionItem>): CommandResult {
+                var speed =
+                    items.firstNotNullOfOrNull { it.speedMps }
+                        ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
+                var currentRoi: WaylineLocationCoordinate3D? = null
+                // Modal, exactly like the ROI above: a trigger distance set by one item stays in
+                // force for every waypoint built after it, until another item changes or clears it.
+                var currentDistanceTriggerM: Double? = null
+                val pendingActions = mutableListOf<WaylineActionInfo>()
+                val waypointModels = mutableListOf<WaypointInfoModel>()
+                for (item in items) {
+                    if (item.isWaypoint) {
+                        val heading = if (item.noseForward) null else item.param4.toDouble()
+                        waypointModels.add(
+                            WaylineMissionHelper
+                                .createWaypointFromLatLon(
+                                    item.latitudeDeg,
+                                    item.longitudeDeg,
+                                    item.altitudeM,
+                                    waypointModels.size,
+                                    headingDeg = heading,
+                                    speedMps = speed,
+                                    roiTarget = currentRoi,
+                                    extraActions = pendingActions.toList(),
+                                ).apply {
+                                    distanceIntervalMeters = currentDistanceTriggerM
+                                },
+                        )
+                        pendingActions.clear()
                         continue
                     }
-
-                    listener?.onItemStarted(index)
-                    val seq = flyLeg(item, speed, isLast = index == lastLegIndex)
-                    if (!awaitLeg(seq)) {
-                        // Interrupted, overridden, or timed out — stop rather than skipping on.
-                        listener?.onMissionFinished(false)
-                        running = false
-                        return@thread
+                    item.speedMps?.let { speed = it }
+                    when (item.command) {
+                        Mav.CMD_DO_SET_ROI_LOCATION ->
+                            currentRoi = WaylineLocationCoordinate3D(item.latitudeDeg, item.longitudeDeg, item.altitudeM)
+                        Mav.CMD_DO_SET_ROI_NONE -> currentRoi = null
+                        Mav.CMD_DO_SET_ROI ->
+                            currentRoi =
+                                if (item.param1.toInt() == Mav.ROI_MODE_LOCATION) {
+                                    WaylineLocationCoordinate3D(item.latitudeDeg, item.longitudeDeg, item.altitudeM)
+                                } else {
+                                    null
+                                }
+                        // A zero or negative distance is MAVLink's way of turning the trigger off;
+                        // WPML expresses the same thing by the waypoint carrying no interval.
+                        Mav.CMD_DO_SET_CAM_TRIGG_DIST ->
+                            currentDistanceTriggerM = item.param1.toDouble().takeIf { it > 0.0 }
+                        else -> translatePlanActionToWaylineAction(item)?.let { pendingActions.add(it) }
                     }
-                    listener?.onItemReached(index)
                 }
-                listener?.onMissionFinished(running)
-                running = false
-            }
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
-        }
+                if (waypointModels.size < 2) {
+                    // DJI's wayline engine needs a path, not a point.
+                    return CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        "DJI native missions need at least two waypoints",
+                    )
+                }
+                // Actions after the last leg (e.g. a final photo before landing) have no later
+                // waypoint to attach to, so they ride along with the last one instead of being lost.
+                if (pendingActions.isNotEmpty()) {
+                    val last = waypointModels.last()
+                    last.actionInfos = ArrayList(last.actionInfos + pendingActions)
+                }
 
-        /**
-         * Carry out a plan item that is not a leg.
-         *
-         * Returns false only for the items that end the plan — a land or a return has nothing
-         * after it, and continuing to the next waypoint would fly away from a descent already
-         * under way. A payload action that fails is logged and the plan carries on: a camera that
-         * will not switch mode is a worse photograph, not a reason to abandon a survey mid-air.
-         */
-        private fun executePlanAction(item: MissionItem): Boolean {
-            when (item.command) {
-                Mav.CMD_SET_CAMERA_MODE -> setCameraMode(item.param2.toInt())
-                Mav.CMD_IMAGE_START_CAPTURE -> mavlinkCommandSink.captureImage()
-                Mav.CMD_VIDEO_START_CAPTURE -> mavlinkCommandSink.startVideoRecording()
-                Mav.CMD_VIDEO_STOP_CAPTURE -> mavlinkCommandSink.stopVideoRecording()
-                Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW -> mavlinkCommandSink.setGimbal(
-                    GimbalRotation(
-                        mode = GimbalRotationMode.ABSOLUTE,
-                        pitchDeg = item.param1.toDouble(),
-                        rollDeg = 0.0,
-                        yawDeg = item.param2.toDouble(),
-                        pitchIgnored = !item.param1.isFinite(),
-                        rollIgnored = true,
-                        yawIgnored = !item.param2.isFinite()
-                    )
-                )
-                // The legacy mount-control command: pitch is param1, yaw is param3 (param2 is
-                // roll, which no DJI gimbal here supports).
-                Mav.CMD_DO_MOUNT_CONTROL -> mavlinkCommandSink.setGimbal(
-                    GimbalRotation(
-                        mode = GimbalRotationMode.ABSOLUTE,
-                        pitchDeg = item.param1.toDouble(),
-                        rollDeg = 0.0,
-                        yawDeg = item.param3.toDouble(),
-                        pitchIgnored = !item.param1.isFinite(),
-                        rollIgnored = true,
-                        yawIgnored = !item.param3.isFinite()
-                    )
-                )
-                // Arm the distance-triggered capture loop. A zero or negative distance is the
-                // MAVLink way of turning it off again, so it disarms rather than being ignored.
-                Mav.CMD_DO_SET_CAM_TRIGG_DIST -> {
-                    val intervalM = item.param1.toDouble()
-                    if (intervalM > 0.0) {
-                        distanceTrigger = DistanceTrigger(intervalM)
-                        Log.i(TAG, "Distance-triggered capture armed: one photo every ${intervalM}m")
-                    } else {
-                        distanceTrigger = null
-                        Log.i(TAG, "Distance-triggered capture disarmed")
+                val finishAction =
+                    when (
+                        items
+                            .lastOrNull {
+                                it.command == Mav.CMD_NAV_LAND || it.command == Mav.CMD_NAV_RETURN_TO_LAUNCH
+                            }?.command
+                    ) {
+                        Mav.CMD_NAV_LAND -> WaylineFinishedAction.AUTO_LAND
+                        Mav.CMD_NAV_RETURN_TO_LAUNCH -> WaylineFinishedAction.GO_HOME
+                        else -> WaylineFinishedAction.NO_ACTION
                     }
-                    Unit
-                }                Mav.CMD_DO_SET_ROI_LOCATION -> mavlinkCommandSink.setRegionOfInterest(
-                    item.latitudeDeg, item.longitudeDeg, item.altitudeM
+                val takeoffHeightM =
+                    items
+                        .firstOrNull { it.command == Mav.CMD_NAV_TAKEOFF }
+                        ?.altitudeM
+                        ?.takeIf { it > 0.0 } ?: 20.0
+                val missionConfig =
+                    WaylineMissionHelper.createMissionConfig(
+                        finishAction = finishAction,
+                        securityTakeOffHeightM = takeoffHeightM,
+                    )
+
+                running = true
+                // Distinct from NAVIGATING: DJI's own wayline engine is flying this, not the app's
+                // virtual-stick loop, and the status badge showing MANUAL for a mission that is
+                // flying perfectly fine was ambient RC stick noise being read as a takeover — see the
+                // MISSION exclusion in VirtualStickVM.tryUpdateVirtualStickByRc().
+                DroneController.markMissionActive()
+                listener?.onItemStarted(0)
+                DroneController.navigateWaylineMissionNative(
+                    waypointModels,
+                    missionConfig,
+                    speed,
+                    onProgress = { waypointIndex -> listener?.onItemStarted(waypointIndex) },
+                    onFinished = { success ->
+                        running = false
+                        DroneController.clearMissionActiveIfStillSet()
+                        listener?.onMissionFinished(success)
+                    },
                 )
-                Mav.CMD_DO_SET_ROI_NONE -> mavlinkCommandSink.clearRegionOfInterest()
-                Mav.CMD_DO_SET_ROI -> if (item.param1.toInt() == Mav.ROI_MODE_LOCATION) {
-                    mavlinkCommandSink.setRegionOfInterest(
-                        item.latitudeDeg, item.longitudeDeg, item.altitudeM
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            /**
+             * Translate one non-waypoint, non-ROI plan item into the DJI wayline action it maps to,
+             * or null when there is none. ROI items are handled separately in [startNative], since
+             * they set waypoint-level yaw/gimbal state rather than a one-shot triggered action;
+             * [Mav.CMD_SET_CAMERA_MODE] has no wayline equivalent and is the one item still skipped
+             * outright.
+             */
+            private fun translatePlanActionToWaylineAction(item: MissionItem): WaylineActionInfo? =
+                when (item.command) {
+                    Mav.CMD_IMAGE_START_CAPTURE ->
+                        WaylineActionInfo().apply {
+                            actionType = WaylineActionType.TAKE_PHOTO
+                            takePhotoParam = ActionTakePhotoParam().apply { payloadPositionIndex = 0 }
+                        }
+                    Mav.CMD_VIDEO_START_CAPTURE ->
+                        WaylineActionInfo().apply {
+                            actionType = WaylineActionType.START_RECORD
+                            startRecordParam = ActionStartRecordParam().apply { payloadPositionIndex = 0 }
+                        }
+                    Mav.CMD_VIDEO_STOP_CAPTURE ->
+                        WaylineActionInfo().apply {
+                            actionType = WaylineActionType.STOP_RECORD
+                            stopRecordParam = ActionStopRecordParam().apply { payloadPositionIndex = 0 }
+                        }
+                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
+                        WaylineActionInfo().apply {
+                            actionType = WaylineActionType.GIMBAL_ROTATE
+                            gimbalRotateParam =
+                                ActionGimbalRotateParam().apply {
+                                    payloadPositionIndex = 0
+                                    rotateMode = WaylineGimbalActuatorRotateMode.ABSOLUTE_ANGLE
+                                    enablePitch = item.param1.isFinite()
+                                    pitch = item.param1.toDouble()
+                                    enableYaw = item.param2.isFinite()
+                                    yaw = item.param2.toDouble()
+                                }
+                        }
+                    else -> null
+                }
+
+            /**
+             * Sequence the items ourselves, one waypoint at a time.
+             *
+             * Runs on its own thread because it waits: each leg is issued, then the reach latch is
+             * polled until the matching seq reports arrival. Comparing the seq rather than just the
+             * boolean is what stops a stale latch from a previous leg being read as this one's
+             * arrival — the same reason the seq mechanism exists on the HTTP surface.
+             */
+            private fun startOnboard(
+                items: List<MissionItem>,
+                startIndex: Int,
+            ): CommandResult {
+                val lastLegIndex = items.indexOfLast { it.isWaypoint }
+                if (lastLegIndex < 0) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED, "No waypoints in plan")
+                }
+                var speed =
+                    items.firstNotNullOfOrNull { it.speedMps }
+                        ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
+
+                // A fresh plan means a fresh trigger state: the armed distance and the accumulated
+                // ground both belong to whichever plan set them, not to a previously flown one.
+                distanceTrigger = null
+                triggerAnchorLat = null
+                triggerAnchorLon = null
+                running = true
+                missionThread =
+                    thread(name = "MavlinkMission", start = true) {
+                        // Every item in order, not only the waypoints. Walking the waypoints alone meant
+                        // a plan's camera and gimbal actions were carried through the upload and then
+                        // silently dropped, so a survey flew the right path and photographed nothing.
+                        for ((index, item) in items.withIndex()) {
+                            if (!running) break
+                            if (index < startIndex) continue
+
+                            if (!item.isWaypoint) {
+                                // Actions take effect where they sit in the plan and do not block: their
+                                // whole purpose is to be in force for the legs that follow.
+                                item.speedMps?.let { speed = it }
+                                listener?.onItemStarted(index)
+                                if (!executePlanAction(item)) {
+                                    listener?.onMissionFinished(false)
+                                    running = false
+                                    return@thread
+                                }
+                                listener?.onItemReached(index)
+                                continue
+                            }
+
+                            listener?.onItemStarted(index)
+                            val seq = flyLeg(item, speed, isLast = index == lastLegIndex)
+                            if (!awaitLeg(seq)) {
+                                // Interrupted, overridden, or timed out — stop rather than skipping on.
+                                listener?.onMissionFinished(false)
+                                running = false
+                                return@thread
+                            }
+                            listener?.onItemReached(index)
+                        }
+                        listener?.onMissionFinished(running)
+                        running = false
+                    }
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            /**
+             * Carry out a plan item that is not a leg.
+             *
+             * Returns false only for the items that end the plan — a land or a return has nothing
+             * after it, and continuing to the next waypoint would fly away from a descent already
+             * under way. A payload action that fails is logged and the plan carries on: a camera that
+             * will not switch mode is a worse photograph, not a reason to abandon a survey mid-air.
+             */
+            private fun executePlanAction(item: MissionItem): Boolean {
+                when (item.command) {
+                    Mav.CMD_SET_CAMERA_MODE -> setCameraMode(item.param2.toInt())
+                    Mav.CMD_IMAGE_START_CAPTURE -> mavlinkCommandSink.captureImage()
+                    Mav.CMD_VIDEO_START_CAPTURE -> mavlinkCommandSink.startVideoRecording()
+                    Mav.CMD_VIDEO_STOP_CAPTURE -> mavlinkCommandSink.stopVideoRecording()
+                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
+                        mavlinkCommandSink.setGimbal(
+                            GimbalRotation(
+                                mode = GimbalRotationMode.ABSOLUTE,
+                                pitchDeg = item.param1.toDouble(),
+                                rollDeg = 0.0,
+                                yawDeg = item.param2.toDouble(),
+                                pitchIgnored = !item.param1.isFinite(),
+                                rollIgnored = true,
+                                yawIgnored = !item.param2.isFinite(),
+                            ),
+                        )
+                    // The legacy mount-control command: pitch is param1, yaw is param3 (param2 is
+                    // roll, which no DJI gimbal here supports).
+                    Mav.CMD_DO_MOUNT_CONTROL ->
+                        mavlinkCommandSink.setGimbal(
+                            GimbalRotation(
+                                mode = GimbalRotationMode.ABSOLUTE,
+                                pitchDeg = item.param1.toDouble(),
+                                rollDeg = 0.0,
+                                yawDeg = item.param3.toDouble(),
+                                pitchIgnored = !item.param1.isFinite(),
+                                rollIgnored = true,
+                                yawIgnored = !item.param3.isFinite(),
+                            ),
+                        )
+                    // Arm the distance-triggered capture loop. A zero or negative distance is the
+                    // MAVLink way of turning it off again, so it disarms rather than being ignored.
+                    Mav.CMD_DO_SET_CAM_TRIGG_DIST -> {
+                        val intervalM = item.param1.toDouble()
+                        if (intervalM > 0.0) {
+                            distanceTrigger = DistanceTrigger(intervalM)
+                            Log.i(TAG, "Distance-triggered capture armed: one photo every ${intervalM}m")
+                        } else {
+                            distanceTrigger = null
+                            Log.i(TAG, "Distance-triggered capture disarmed")
+                        }
+                        Unit
+                    } Mav.CMD_DO_SET_ROI_LOCATION ->
+                        mavlinkCommandSink.setRegionOfInterest(
+                            item.latitudeDeg,
+                            item.longitudeDeg,
+                            item.altitudeM,
+                        )
+                    Mav.CMD_DO_SET_ROI_NONE -> mavlinkCommandSink.clearRegionOfInterest()
+                    Mav.CMD_DO_SET_ROI ->
+                        if (item.param1.toInt() == Mav.ROI_MODE_LOCATION) {
+                            mavlinkCommandSink.setRegionOfInterest(
+                                item.latitudeDeg,
+                                item.longitudeDeg,
+                                item.altitudeM,
+                            )
+                        } else {
+                            mavlinkCommandSink.clearRegionOfInterest()
+                        }
+                    Mav.CMD_NAV_TAKEOFF -> {
+                        mavlinkMotionSink.takeoff(item.altitudeM.toFloat().takeIf { it > 0f })
+                        if (!awaitAirborne()) {
+                            Log.w(TAG, "Take-off did not complete in time; aborting mission")
+                            return false
+                        }
+                    }
+                    Mav.CMD_NAV_LAND -> {
+                        mavlinkMotionSink.land()
+                        return false
+                    }
+                    Mav.CMD_NAV_RETURN_TO_LAUNCH -> {
+                        mavlinkMotionSink.returnToHome()
+                        return false
+                    }
+                    // A speed change has already been folded into the running speed above; there is
+                    // nothing else to do with it.
+                    else -> Log.d(TAG, "Plan item ${item.command} has no action")
+                }
+                return true
+            }
+
+            /**
+             * Issue one leg with the controller its param4 asks for, returning the command's seq.
+             *
+             * The arrival criteria travel with it. Without them every leg is treated as a
+             * destination, so a plan is flown as a series of stops rather than as a trajectory —
+             * which is what the aircraft did before it read param1 and param2.
+             */
+            private fun flyLeg(
+                item: MissionItem,
+                speed: Double,
+                isLast: Boolean,
+            ): Long {
+                val yaw = if (item.noseForward) 0.0 else item.param4.toDouble()
+                val arrival =
+                    DroneController.WaypointArrival(
+                        acceptanceRadiusM = item.acceptanceRadiusM,
+                        holdSeconds = item.holdSeconds,
+                        // The final leg is never a pass-through, whatever the plan says: there is nothing
+                        // after it to fly on to, so the aircraft settles there.
+                        passThrough = item.passThrough && !isLast,
+                    )
+                return if (item.noseForward) {
+                    DroneController.flyToWaypointNoseForward(
+                        item.latitudeDeg,
+                        item.longitudeDeg,
+                        item.altitudeM,
+                        yaw,
+                        speed,
+                        arrival,
                     )
                 } else {
-                    mavlinkCommandSink.clearRegionOfInterest()
+                    DroneController.flyToWaypointHoldHeading(
+                        item.latitudeDeg,
+                        item.longitudeDeg,
+                        item.altitudeM,
+                        yaw,
+                        speed,
+                        arrival,
+                    )
                 }
-                Mav.CMD_NAV_TAKEOFF -> {
-                    mavlinkMotionSink.takeoff(item.altitudeM.toFloat().takeIf { it > 0f })
-                    if (!awaitAirborne()) {
-                        Log.w(TAG, "Take-off did not complete in time; aborting mission")
+            }
+
+            /**
+             * Block until a take-off just commanded has actually left the ground.
+             *
+             * [executePlanAction] returns as soon as [MavlinkMotionSink.takeoff] is issued, because
+             * DJI's own take-off climb is asynchronous. Without this wait the sequencer moved
+             * straight on to the first waypoint while the aircraft was still in its take-off
+             * sequence, which had the waypoint controller fight DJI for the sticks and left
+             * [awaitLeg] polling a seq the aircraft was never going to report — the mission looked
+             * stalled rather than flown. Uses the same airborne test as [climbAfterTakeoff], since it
+             * is the same transition being waited for.
+             */
+            private fun awaitAirborne(): Boolean {
+                val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
+                while (running && System.currentTimeMillis() < deadline) {
+                    val airborne =
+                        isFlyingKey.get(false) &&
+                            DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
+                    if (airborne) return true
+                    runCatching { Thread.sleep(TAKEOFF_POLL_MS) }.onFailure {
+                        Thread.currentThread().interrupt()
                         return false
                     }
                 }
-                Mav.CMD_NAV_LAND -> {
-                    mavlinkMotionSink.land()
-                    return false
-                }
-                Mav.CMD_NAV_RETURN_TO_LAUNCH -> {
-                    mavlinkMotionSink.returnToHome()
-                    return false
-                }
-                // A speed change has already been folded into the running speed above; there is
-                // nothing else to do with it.
-                else -> Log.d(TAG, "Plan item ${item.command} has no action")
+                return false
             }
-            return true
-        }
 
-        /**
-         * Issue one leg with the controller its param4 asks for, returning the command's seq.
-         *
-         * The arrival criteria travel with it. Without them every leg is treated as a
-         * destination, so a plan is flown as a series of stops rather than as a trajectory —
-         * which is what the aircraft did before it read param1 and param2.
-         */
-        private fun flyLeg(item: MissionItem, speed: Double, isLast: Boolean): Long {
-            val yaw = if (item.noseForward) 0.0 else item.param4.toDouble()
-            val arrival = DroneController.WaypointArrival(
-                acceptanceRadiusM = item.acceptanceRadiusM,
-                holdSeconds = item.holdSeconds,
-                // The final leg is never a pass-through, whatever the plan says: there is nothing
-                // after it to fly on to, so the aircraft settles there.
-                passThrough = item.passThrough && !isLast
-            )
-            return if (item.noseForward) {
-                DroneController.flyToWaypointNoseForward(
-                    item.latitudeDeg, item.longitudeDeg, item.altitudeM, yaw, speed, arrival
-                )
-            } else {
-                DroneController.flyToWaypointHoldHeading(
-                    item.latitudeDeg, item.longitudeDeg, item.altitudeM, yaw, speed, arrival
-                )
+            /** Wait for the leg with this seq to report reached. False if it did not. */
+            private fun awaitLeg(seq: Long): Boolean {
+                val deadline = System.currentTimeMillis() + MISSION_LEG_TIMEOUT_MS
+                while (running && System.currentTimeMillis() < deadline) {
+                    if (DroneController.isManualOverrideActive) return false
+                    // A refused leg was never going to be flown, so waiting can only end at the
+                    // timeout. The obstacle guard publishes the refusal with the same seq the leg
+                    // was issued under, which is exactly what makes the two matchable here.
+                    val refusal = DroneController.lastWaypointRefusal()
+                    if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                        Log.w(TAG, "Mission leg seq=$seq refused (${refusal.reason}); stopping plan")
+                        return false
+                    }
+                    if (DroneController.getWaypointSeq() == seq && DroneController.isWaypointReached()) {
+                        return true
+                    }
+                    maybeCaptureByDistance()
+                    runCatching { Thread.sleep(MISSION_POLL_MS) }.onFailure {
+                        Thread.currentThread().interrupt()
+                        return false
+                    }
+                }
+                return false
             }
-        }
 
-        /**
-         * Block until a take-off just commanded has actually left the ground.
-         *
-         * [executePlanAction] returns as soon as [MavlinkMotionSink.takeoff] is issued, because
-         * DJI's own take-off climb is asynchronous. Without this wait the sequencer moved
-         * straight on to the first waypoint while the aircraft was still in its take-off
-         * sequence, which had the waypoint controller fight DJI for the sticks and left
-         * [awaitLeg] polling a seq the aircraft was never going to report — the mission looked
-         * stalled rather than flown. Uses the same airborne test as [climbAfterTakeoff], since it
-         * is the same transition being waited for.
-         */
-        private fun awaitAirborne(): Boolean {
-            val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
-            while (running && System.currentTimeMillis() < deadline) {
-                val airborne = isFlyingKey.get(false) &&
-                    DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
-                if (airborne) return true
-                runCatching { Thread.sleep(TAKEOFF_POLL_MS) }.onFailure {
-                    Thread.currentThread().interrupt()
-                    return false
+            /**
+             * Trip the shutter when the distance trigger's accumulated ground has crossed another
+             * interval.
+             *
+             * Called from the leg-wait poll, so it advances at that cadence (5 Hz) rather than
+             * exactly on the crossing; a survey's intervals are metres apart, so the error is well
+             * under a metre at the speeds a mapping flight flies. Ground truth is the aircraft's
+             * own reported position — the same source navigation uses, so a photo and a leg's
+             * arrival can never disagree about where the aircraft was.
+             *
+             * The first fix only anchors: there is nothing yet to have travelled from, and the
+             * SDK's unset (0, 0) is a real place in the Atlantic rather than a distance of zero.
+             */
+            private fun maybeCaptureByDistance() {
+                val trigger = distanceTrigger ?: return
+                val location = getLocation3D()
+                val lastLat = triggerAnchorLat
+                val lastLon = triggerAnchorLon
+                if (lastLat == null ||
+                    lastLon == null ||
+                    (location.latitude == 0.0 && location.longitude == 0.0)
+                ) {
+                    triggerAnchorLat = location.latitude
+                    triggerAnchorLon = location.longitude
+                    return
                 }
-            }
-            return false
-        }
-
-        /** Wait for the leg with this seq to report reached. False if it did not. */
-        private fun awaitLeg(seq: Long): Boolean {
-            val deadline = System.currentTimeMillis() + MISSION_LEG_TIMEOUT_MS
-            while (running && System.currentTimeMillis() < deadline) {
-                if (DroneController.isManualOverrideActive) return false
-                // A refused leg was never going to be flown, so waiting can only end at the
-                // timeout. The obstacle guard publishes the refusal with the same seq the leg
-                // was issued under, which is exactly what makes the two matchable here.
-                val refusal = DroneController.lastWaypointRefusal()
-                if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
-                    Log.w(TAG, "Mission leg seq=$seq refused (${refusal.reason}); stopping plan")
-                    return false
-                }
-                if (DroneController.getWaypointSeq() == seq && DroneController.isWaypointReached()) {
-                    return true
-                }
-                maybeCaptureByDistance()
-                runCatching { Thread.sleep(MISSION_POLL_MS) }.onFailure {
-                    Thread.currentThread().interrupt()
-                    return false
-                }
-            }
-            return false
-        }
-
-        /**
-         * Trip the shutter when the distance trigger's accumulated ground has crossed another
-         * interval.
-         *
-         * Called from the leg-wait poll, so it advances at that cadence (5 Hz) rather than
-         * exactly on the crossing; a survey's intervals are metres apart, so the error is well
-         * under a metre at the speeds a mapping flight flies. Ground truth is the aircraft's
-         * own reported position — the same source navigation uses, so a photo and a leg's
-         * arrival can never disagree about where the aircraft was.
-         *
-         * The first fix only anchors: there is nothing yet to have travelled from, and the
-         * SDK's unset (0, 0) is a real place in the Atlantic rather than a distance of zero.
-         */
-        private fun maybeCaptureByDistance() {
-            val trigger = distanceTrigger ?: return
-            val location = getLocation3D()
-            val lastLat = triggerAnchorLat
-            val lastLon = triggerAnchorLon
-            if (lastLat == null || lastLon == null ||
-                (location.latitude == 0.0 && location.longitude == 0.0)
-            ) {
+                val travelled =
+                    DroneController.calculateDistance(
+                        lastLat,
+                        lastLon,
+                        location.latitude,
+                        location.longitude,
+                    )
                 triggerAnchorLat = location.latitude
                 triggerAnchorLon = location.longitude
-                return
+                if (trigger.addTravelled(travelled)) {
+                    Log.i(TAG, "Distance trigger: capturing (${"%.1f".format(travelled)}m since last fix)")
+                    mavlinkCommandSink.captureImage()
+                }
             }
-            val travelled = DroneController.calculateDistance(
-                lastLat, lastLon, location.latitude, location.longitude
-            )
-            triggerAnchorLat = location.latitude
-            triggerAnchorLon = location.longitude
-            if (trigger.addTravelled(travelled)) {
-                Log.i(TAG, "Distance trigger: capturing (${"%.1f".format(travelled)}m since last fix)")
-                mavlinkCommandSink.captureImage()
-            }
-        }
 
-        override fun stopMission(): CommandResult {
-            running = false
-            missionThread?.interrupt()
-            missionThread = null
-            mainHandler.post { DroneController.abortAllMissions() }
-            return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            override fun stopMission(): CommandResult {
+                running = false
+                missionThread?.interrupt()
+                missionThread = null
+                mainHandler.post { DroneController.abortAllMissions() }
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
         }
-    }
 
     private fun startMavlinkEndpoint() {
         val config = readMavlinkConfig()
@@ -7488,38 +8078,44 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             return
         }
         runCatching {
-            val ftpServer = MavlinkFtpServer(
-                object : MavlinkFtpServer.FtpFileSource {
-                    override fun listFiles(): List<Pair<String, Long>> =
-                        Payload.listMediaFiles(mediaVM)
+            val ftpServer =
+                MavlinkFtpServer(
+                    object : MavlinkFtpServer.FtpFileSource {
+                        override fun listFiles(): List<Pair<String, Long>> = Payload.listMediaFiles(mediaVM)
 
-                    override fun readFileBytes(name: String): ByteArray? =
-                        Payload.downloadMediaBytes(mediaVM, name)
-                },
-                ftpExecutor
-            )
-            val endpoint = MavlinkTelemetryEndpoint(
-                config,
-                ::buildMavlinkSnapshot,
-                ::currentMavlinkVideoStream,
-                ::mavlinkParameters,
-                mavlinkCommandSink,
-                mavlinkMotionSink,
-                mavlinkMissionSink,
-                ftpServer,
-                commandLog = { command, result ->
-                    LyrebirdFlightLogger.logMavlinkCommand(
-                        command = command.command,
-                        params = listOf(
-                            command.param1, command.param2, command.param3, command.param4,
-                            command.param5, command.param6, command.param7
-                        ),
-                        result = result.mavResult,
-                        signed = mavlinkEndpoint?.isTrustedOrigin == true,
-                        senderSystem = command.senderSystem
-                    )
-                }
-            )
+                        override fun readFileBytes(name: String): ByteArray? = Payload.downloadMediaBytes(mediaVM, name)
+                    },
+                    ftpExecutor,
+                )
+            val endpoint =
+                MavlinkTelemetryEndpoint(
+                    config,
+                    ::buildMavlinkSnapshot,
+                    ::currentMavlinkVideoStream,
+                    ::mavlinkParameters,
+                    mavlinkCommandSink,
+                    mavlinkMotionSink,
+                    mavlinkMissionSink,
+                    ftpServer,
+                    commandLog = { command, result ->
+                        LyrebirdFlightLogger.logMavlinkCommand(
+                            command = command.command,
+                            params =
+                                listOf(
+                                    command.param1,
+                                    command.param2,
+                                    command.param3,
+                                    command.param4,
+                                    command.param5,
+                                    command.param6,
+                                    command.param7,
+                                ),
+                            result = result.mavResult,
+                            signed = mavlinkEndpoint?.isTrustedOrigin == true,
+                            senderSystem = command.senderSystem,
+                        )
+                    },
+                )
             endpoint.onPeerDiscovered = { peer ->
                 Log.i(TAG, "MAVLink ground station at $peer")
                 // A MAVLink ground station appearing is the same event as the first TCP
@@ -7556,7 +8152,7 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         val goHomeInfo = goHomeAssessmentProcessor.value
         val timeNeededToGoHome = getTimeNeededToGoHome()
         val timeNeededToLand = getTimeNeededToLand()
-        
+
         telemetryCoordinator.speed = getSpeed()
         telemetryCoordinator.heading = getHeading()
         telemetryCoordinator.attitude = getAttitude()
@@ -7576,16 +8172,19 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         // that is a real spot in the Atlantic: measuring to it produced a confident 2,559 km
         // from a stationary aircraft, which is worse than reporting nothing because it looks
         // like an answer.
-        telemetryCoordinator.distanceToHome = if (
-            hasRealHomeCoordinates(homeLocation.latitude, homeLocation.longitude)
-        ) {
-            DroneController.calculateDistance(
-                location.latitude, location.longitude,
-                homeLocation.latitude, homeLocation.longitude
-            )
-        } else {
-            0.0
-        }
+        telemetryCoordinator.distanceToHome =
+            if (
+                hasRealHomeCoordinates(homeLocation.latitude, homeLocation.longitude)
+            ) {
+                DroneController.calculateDistance(
+                    location.latitude,
+                    location.longitude,
+                    homeLocation.latitude,
+                    homeLocation.longitude,
+                )
+            } else {
+                0.0
+            }
         telemetryCoordinator.waypointReached = DroneController.isWaypointReached()
         telemetryCoordinator.intermediaryWaypointReached = DroneController.isIntermediaryWaypointReached()
         telemetryCoordinator.yawReached = DroneController.isYawReached()
@@ -7615,9 +8214,5 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         telemetryCoordinator.lowBatteryThreshold = lowBatteryThresholdProcessor.value
     }
 
-
     // ==================== HTTP Server ====================
-
 }
-
-

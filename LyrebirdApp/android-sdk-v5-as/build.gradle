@@ -54,21 +54,17 @@ def lyrebirdSourceIncludes = [
 
 // The list above is source-root-relative, which is what Detekt matches against. Spotless resolves
 // targets relative to the module directory instead, so reusing it as a Spotless target matched no
-// file at all: this check passed having inspected nothing. Verified by appending a deliberate
-// violation to a listed file and still getting BUILD SUCCESSFUL.
-//
-// Repointing it is not a one-line fix, so it is deliberately not done here: the app's Lyrebird
-// sources were never checked, and turning the gate on requires reformatting controller, webrtc,
-// server and safety sources plus resolving the violations ktlint cannot fix on its own — among
-// them 10 KDoc-adjacency sites in controller/DroneController.kt, controller/Payload.kt and
-// FlightDeckActivity.kt. That deserves its own reviewable change; :lyrebird-core below is already
-// correctly scoped and does gate its Kotlin.
+// file at all and the check passed having inspected nothing — verified by appending a deliberate
+// violation to a listed file and still getting BUILD SUCCESSFUL. The prefix below is what makes
+// the target resolve, derived from the same list so the two cannot drift apart again.
+def lyrebirdSpotlessIncludes = lyrebirdSourceIncludes.collect { "src/main/java/$it" }
+
 project(':app') {
     apply plugin: 'com.diffplug.spotless'
 
     spotless {
         kotlin {
-            target lyrebirdSourceIncludes
+            target lyrebirdSpotlessIncludes
             ktlint('1.5.0')
         }
     }
