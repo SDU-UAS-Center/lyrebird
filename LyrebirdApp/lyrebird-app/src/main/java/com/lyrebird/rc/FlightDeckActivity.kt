@@ -30,6 +30,7 @@ import androidx.core.app.ActivityCompat
 import androidx.lifecycle.ViewModelProvider
 import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
+import com.lyrebird.rc.controller.MavlinkFlightPolicy
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.RoiControl
 import com.lyrebird.rc.controller.SafetyLatchStore
@@ -4518,34 +4519,27 @@ class FlightDeckActivity :
      * rather than a gate.
      */
     private fun mavlinkFlightGate(): CommandResult? {
-        if (!sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true)) {
+        val result =
+            MavlinkFlightPolicy().check(
+                flightAllowed = sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true),
+                trustedOrigin = mavlinkEndpoint?.isTrustedOrigin == true,
+            )
+        if (result != null) {
             // Silent otherwise: the sender gets MAV_RESULT_DENIED over the wire and it lands in
             // the flight log, but nobody standing at the aircraft would ever see either of those
             // in the moment — a ground station could sit there commanding takeoff on a fresh
             // install after the setting has explicitly been blocked and the pilot would have no
             // idea why the command was refused.
+            val message = result.detail.orEmpty()
             ToastUtils.showToast(
-                "MAVLink flight command blocked — flight control not allowed " +
-                    "(enable it from the settings menu)",
+                if (message.contains("not allowed")) {
+                    "$message (enable it from the settings menu)"
+                } else {
+                    message
+                },
             )
-            return CommandResult(MavlinkCommandOutcome.DENIED)
         }
-        // A frame signed with the configured key is the Safety Computer; anything else is the
-        // Pilot. Before signing every MAVLink command was the Pilot unconditionally, so an
-        // installation that configures no key sees exactly the behaviour it saw before.
-        val source =
-            if (mavlinkEndpoint?.isTrustedOrigin == true) {
-                ControlAuthority.Source.SAFETY
-            } else {
-                ControlAuthority.Source.PILOT
-            }
-        if (!ControlAuthority.authorizeControlCommand(source)) {
-            ToastUtils.showToast(
-                "MAVLink flight command blocked — the Safety Computer has control",
-            )
-            return CommandResult(MavlinkCommandOutcome.DENIED)
-        }
-        return null
+        return result
     }
 
     /**
