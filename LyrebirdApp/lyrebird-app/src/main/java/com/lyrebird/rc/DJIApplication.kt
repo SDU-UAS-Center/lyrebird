@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.lyrebird.rc.models.MSDKManagerVM
 import com.lyrebird.rc.models.globalViewModels
+import com.lyrebird.rc.server.DeviceSessionLeaseRegistry
 
 /**
  * Class Description
@@ -22,6 +23,11 @@ open class DJIApplication : Application() {
         try {
             super.onCreate()
             Log.d("DJIApplication", "super.onCreate() completed")
+
+            if (!DeviceSessionLeaseRegistry.acquire()) {
+                Log.w("DJIApplication", "Another Lyrebird app owns the device session; SDK startup is deferred")
+                return
+            }
 
             // Ensure initialization is called first
             Log.d("DJIApplication", "Initializing Mobile SDK...")

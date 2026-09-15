@@ -74,10 +74,10 @@ import com.lyrebird.rc.models.PayloadWidgetVM
 import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.server.DeviceSessionLeaseRegistry
 import com.lyrebird.rc.server.DiscoveryAdvertiser
 import com.lyrebird.rc.server.LyrebirdDiscoveryManager
 import com.lyrebird.rc.server.LyrebirdSession
-import com.lyrebird.rc.server.SessionLease
 import com.lyrebird.rc.server.TelemetryServer
 import com.lyrebird.rc.settings.AircraftStorage
 import com.lyrebird.rc.settings.DetectionSource
@@ -3147,7 +3147,7 @@ class FlightDeckActivity :
         // advertisement for a service nobody was listening on.
         session =
             LyrebirdSession(
-                lease = SessionLease(),
+                lease = DeviceSessionLeaseRegistry.current(),
                 http = SimpleHttpServer(HTTP_PORT, this, mavlinkCommandSink),
                 telemetry = buildTelemetryServer(),
                 advertiser = DiscoveryAdvertiser(discoveryManager) { droneSerialNumber },
