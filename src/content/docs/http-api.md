@@ -20,7 +20,7 @@ Two computers can drive the same drone over HTTP. Which one is in command is dec
 
 ![Two-Computer Safety Control — request flow](../../../docs/images/two-computer-safety-control-Request%20flow.drawio.png)
 
-*How a single HTTP command is arbitrated: the `X-Safety-Token` header classifies the request, `ControlAuthority` holds one in-memory latch, and the first Safety command seizes control and cancels whatever the Pilot was flying.*
+*How a single HTTP command is arbitrated: the `X-Safety-Token` header classifies the request, `ControlAuthority` holds a latch (kept between runs, keyed by aircraft serial), and the first Safety command seizes control and cancels whatever the Pilot was flying.*
 
 Rules enforced by the app on every `/send/*` command:
 
@@ -32,7 +32,14 @@ Rules enforced by the app on every `/send/*` command:
 - The takeover is **persistent** — there is no timeout. If the Safety Computer goes silent, the
   Pilot does *not* regain control.
 - The only way back is `POST /releaseSafetyControl`, which only the Safety Computer may call.
-- An app restart resets to Pilot control ("restart == fresh mission"). State is in-memory only.
+- The latch **survives a restart**, and is keyed by aircraft serial. A crash, an OOM kill, or an
+  Android-initiated restart is not the Safety Computer releasing control, so the app reads the
+  latch back on startup — the red banner is shown before an aircraft has even connected. A
+  takeover only ever holds the airframe it happened on: connecting a different aircraft reads
+  *that* aircraft's latch, so one airframe cannot lock out another.
+- The latch lives in the app's private preferences. Clearing app data or reinstalling the app is
+  the deliberate bypass when the Safety Computer is not there to release it; nothing else clears
+  it, and the app will not do it for you.
 
 While the Safety Computer holds authority, a red **SAFETY COMPUTER IN CONTROL** banner is shown
 over the video feed. Normal Pilot control shows no banner.

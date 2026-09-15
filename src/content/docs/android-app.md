@@ -65,7 +65,7 @@ Separately, and needing no configuration at all, DJI's SDK runs its own RTSP ser
 
 ### Safety and identity
 
-A Safety Computer can seize command authority from the Pilot Computer at any time — over HTTP via the `X-Safety-Token` header, over MAVLink via [packet signing](/mavlink/#how-packet-signing-works) — and only it can hand control back; the takeover is persistent and shown on screen with a red **SAFETY COMPUTER IN CONTROL** banner. See [the two-computer safety model](/http-api/#two-computer-safety-authority). Separately, UDP broadcast auto-discovery (port 30000), mDNS, and subnet scanning mean a ground station never has to be told the aircraft's IP by hand, and every command executed over either wire is written to the on-device flight log (JSONL; see [Logs & Troubleshooting](/operations/#flight-logging) for where).
+A Safety Computer can seize command authority from the Pilot Computer at any time — over HTTP via the `X-Safety-Token` header, over MAVLink via [packet signing](/mavlink/#how-packet-signing-works) — and only it can hand control back; the takeover is persistent (no timeout, and it survives an app restart, keyed by aircraft serial) and shown on screen with a red **SAFETY COMPUTER IN CONTROL** banner. See [the two-computer safety model](/http-api/#two-computer-safety-authority). Separately, UDP broadcast auto-discovery (port 30000), mDNS, and subnet scanning mean a ground station never has to be told the aircraft's IP by hand, and every command executed over either wire is written to the on-device flight log (JSONL; see [Logs & Troubleshooting](/operations/#flight-logging) for where).
 
 ## Supported hardware
 

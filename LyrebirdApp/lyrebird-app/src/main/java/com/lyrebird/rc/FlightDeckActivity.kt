@@ -55,6 +55,7 @@ import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.RoiControl
+import com.lyrebird.rc.controller.SafetyLatchStore
 import com.lyrebird.rc.controller.WaylineMissionHelper
 import com.lyrebird.rc.edge.EdgeDetectionConfig
 import com.lyrebird.rc.edge.EdgeDetectionController
@@ -993,12 +994,22 @@ class FlightDeckActivity :
         }
 
     private fun setupControlAuthorityBanner() {
+        // The latch outlives the process: a restart is not a release, so the stored authority for
+        // this aircraft is read back here, before the command server can accept anything. The
+        // serial is only known once the SDK answers, so it is asked for at each read and written
+        // under whatever it is at the time; see AuthorityLatch.restore().
+        ControlAuthority.attachPersistence(
+            SafetyLatchStore(sharedPreferences),
+            aircraftSerial = { droneSerialNumber },
+        )
         ControlAuthority.listener =
             object : ControlAuthority.Listener {
                 override fun onAuthorityChanged(authority: ControlAuthority.Authority) {
                     mainHandler.post { updateControlAuthorityBanner(authority) }
                 }
             }
+        // Draws the banner from whatever the latch says, which after a takeover that survived a
+        // restart is SAFETY — the operator sees it before the aircraft is even connected.
         updateControlAuthorityBanner(ControlAuthority.active)
     }
 
@@ -5207,6 +5218,11 @@ class FlightDeckActivity :
                         droneSerialNumber = serialNumber?.trim()?.takeIf { it.isNotEmpty() } ?: "UNKNOWN"
                         Log.i(TAG, "Drone serial number: $droneSerialNumber")
                         LyrebirdFlightLogger.setVehicleSerial(droneSerialNumber)
+                        // The latch is per airframe, and this is the moment the airframe becomes
+                        // known: read its latch now, so a takeover recorded for it is in force
+                        // before its first command, and one recorded for another aircraft is left
+                        // where it belongs.
+                        ControlAuthority.restoreLatch()
                         DroneSettingsProfiles.onAircraftChanged(
                             sharedPreferences,
                             PER_DRONE_PROFILE_KEYS,
