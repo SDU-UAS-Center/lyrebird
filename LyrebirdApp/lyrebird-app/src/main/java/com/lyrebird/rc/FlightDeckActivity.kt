@@ -6729,6 +6729,18 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
                     latitudeDeg, longitudeDeg, altitude, yawDeg, speed
                 )
             }
+            // A refused leg is a refusal, not a pending flight: the controller published the
+            // seq exactly so a caller correlating on it can tell the two apart. Answering
+            // ACCEPTED here is what made MAVLink and HTTP disagree about the same command —
+            // HTTP inspects this same refusal, the reposition path did not — and left a ground
+            // station awaiting a leg the aircraft never started flying.
+            val refusal = DroneController.lastWaypointRefusal()
+            if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                return CommandResult(
+                    MavlinkCommandOutcome.DENIED,
+                    "Waypoint refused: ${refusal.reason}"
+                )
+            }
             return CommandResult(
                 MavlinkCommandOutcome.ACCEPTED,
                 pending = PendingCommand(PendingKind.WAYPOINT, seq)
@@ -6896,6 +6908,17 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
          */
         override fun pollCompletion(pending: PendingCommand): CommandProgress {
             if (DroneController.isManualOverrideActive) return CommandProgress.ABANDONED
+            // A refused waypoint is a refusal the moment it is detected, not a command that
+            // runs until somebody gives up waiting: the leg was never issued to the airframe,
+            // so no reach latch will ever close for it.
+            if (pending.kind == PendingKind.WAYPOINT) {
+                val refusal = DroneController.lastWaypointRefusal()
+                if (refusal?.seq == pending.seq &&
+                    refusal.reason != DroneController.WaypointRejection.NONE
+                ) {
+                    return CommandProgress.ABANDONED
+                }
+            }
             val (currentSeq, reached) = when (pending.kind) {
                 PendingKind.WAYPOINT ->
                     DroneController.getWaypointSeq() to DroneController.isWaypointReached()
@@ -7348,6 +7371,14 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
             val deadline = System.currentTimeMillis() + MISSION_LEG_TIMEOUT_MS
             while (running && System.currentTimeMillis() < deadline) {
                 if (DroneController.isManualOverrideActive) return false
+                // A refused leg was never going to be flown, so waiting can only end at the
+                // timeout. The obstacle guard publishes the refusal with the same seq the leg
+                // was issued under, which is exactly what makes the two matchable here.
+                val refusal = DroneController.lastWaypointRefusal()
+                if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                    Log.w(TAG, "Mission leg seq=$seq refused (${refusal.reason}); stopping plan")
+                    return false
+                }
                 if (DroneController.getWaypointSeq() == seq && DroneController.isWaypointReached()) {
                     return true
                 }
