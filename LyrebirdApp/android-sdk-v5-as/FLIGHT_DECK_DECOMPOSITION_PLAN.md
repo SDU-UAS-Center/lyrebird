@@ -33,6 +33,20 @@ skips. The activity is 5,401 lines, down from 7,665. The documentation build pas
 in the new extracted files. Style/localization findings remain, including those carried with
 the existing UI code. These are not being represented as clean static-analysis reports.
 
+Since that checkpoint, the branch has also landed:
+
+- neutral HTTP media/detection/LRF/flight ports, with no DJI/ViewModel/UXSDK/DroneController
+  imports or direct controller calls remaining in `LyrebirdHttpServer.kt`;
+- V5 media, detection, MAVLink payload/camera, motion, and mission adapters;
+- pure MAVLink flight policy, WHIP target/endpoint policies, detection telemetry projection, and
+  V5 WebRTC construction policies;
+- blocked-runtime startup handling, lease-last teardown ordering, and a process-scoped lease gate
+  before DJI SDK initialization.
+
+These are still adapter extractions, not proof of activity-independent runtime ownership. Activity
+recreation, background operation, process death, USB chooser behavior, and physical flight/video
+qualification remain open device gates.
+
 The formatting scope repair exposed 53 files with existing violations. Most changes outside the
 extracted components are formatter output; small comment-placement fixes and controller naming
 suppressions preserve behavior. The original interpolated-glob target was still vacuous, even
