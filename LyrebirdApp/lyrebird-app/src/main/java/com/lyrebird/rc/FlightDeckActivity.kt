@@ -417,6 +417,111 @@ class FlightDeckActivity :
                 DroneController.enableVirtualStick()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
+
+            override fun waypoint(
+                latitudeDeg: Double,
+                longitudeDeg: Double,
+                altitudeM: Double,
+                yawDeg: Double,
+                maxSpeedMps: Double,
+                noseForward: Boolean,
+            ): CommandResult {
+                val commandName = if (noseForward) "gotoWaypointNoseForward" else "gotoWaypointHoldHeading"
+                if (DroneController.shouldRejectAutonomousCommand(commandName)) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                val seq =
+                    if (noseForward) {
+                        DroneController.flyToWaypointNoseForward(
+                            latitudeDeg,
+                            longitudeDeg,
+                            altitudeM,
+                            yawDeg,
+                            maxSpeedMps,
+                        )
+                    } else {
+                        DroneController.flyToWaypointHoldHeading(
+                            latitudeDeg,
+                            longitudeDeg,
+                            altitudeM,
+                            yawDeg,
+                            maxSpeedMps,
+                        )
+                    }
+                val refusal = DroneController.lastWaypointRefusal()
+                return if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                    CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        detail = refusal.reason.name,
+                        pending = PendingCommand(PendingKind.WAYPOINT, seq),
+                    )
+                } else {
+                    CommandResult(
+                        MavlinkCommandOutcome.ACCEPTED,
+                        pending = PendingCommand(PendingKind.WAYPOINT, seq),
+                    )
+                }
+            }
+
+            override fun nativeTrajectory(
+                waypoints: List<Triple<Double, Double, Double>>,
+                speedMps: Double,
+            ): CommandResult {
+                if (DroneController.shouldRejectAutonomousCommand("navigateTrajectoryDJINative")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                DroneController.navigateTrajectoryNative(waypoints, speedMps)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun abortNativeMission(): CommandResult {
+                DroneController.endMission()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setRthAltitude(altitudeM: Int): CommandResult {
+                DroneController.setRTHAltitude(altitudeM)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setMaxFlightHeight(heightM: Int): CommandResult {
+                DroneController.setMaxFlightHeight(heightM)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setMaxFlightDistance(distanceM: Int): CommandResult {
+                DroneController.setMaxFlightDistance(distanceM)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setDistanceLimitEnabled(enabled: Boolean): CommandResult {
+                DroneController.setDistanceLimitEnabled(enabled)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun setRcControlMode(mode: String): CommandResult =
+                if (DroneController.setRcControlMode(mode)) {
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                } else {
+                    CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+
+            override fun requestRcPairing(): CommandResult {
+                DroneController.requestRcPairing()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun stopRcPairing(): CommandResult {
+                DroneController.stopRcPairing()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun deactivateManualOverride(): CommandResult {
+                DroneController.deactivateManualOverride()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun isManualOverrideActive(): Boolean = DroneController.isManualOverrideActive
         }
     }
 

@@ -150,21 +150,16 @@ internal class LyrebirdHttpCommandHandler(
                 "Received: roll: ${command.roll}, pitch: ${command.pitch}, yaw: ${command.yaw}"
             },
             "/send/gotoWaypointHoldHeading" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoWaypointHoldHeading")) {
-                    AUTONOMOUS_COMMAND_REJECTED
-                } else {
-                    when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
+                when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
                         is LyrebirdHttpCommandParser.ParseResult.Invalid -> command.message
                         is LyrebirdHttpCommandParser.ParseResult.Valid -> {
                             val wp = command.value
-                            val seq = DroneController.flyToWaypointHoldHeading(
-                                wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed
-                            )
+                            val result = host.flight.waypoint(wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed, false)
+                            val seq = result.pending?.seq ?: 0L
                             // A refusal is still a seq: report it as refused so a retry loop
                             // stops iffing on "accepted, just flying" and waiting forever.
-                            val refusal = DroneController.lastWaypointRefusal()
-                            if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
-                                "WAYPOINT_REFUSED seq=$seq reason=${refusal.reason} " +
+                            if (result.outcome == MavlinkCommandOutcome.DENIED) {
+                                "WAYPOINT_REFUSED seq=$seq reason=${result.detail} " +
                                     "Latitude=${wp.latitude}, Longitude=${wp.longitude}"
                             } else {
                                 "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
@@ -172,26 +167,20 @@ internal class LyrebirdHttpCommandHandler(
                                     "Yaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
                             }
                         }
-                    }
                 }
             },
             // Nose-follows-path. During travel the heading is forced to bearing(current -> waypoint);
             // the yaw field is the FINAL arrival heading the drone rotates to in place once it
             // arrives. Use /send/gotoWaypointHoldHeading to keep the nose on yaw while translating.
             "/send/gotoWaypointNoseForward" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoWaypointNoseForward")) {
-                    AUTONOMOUS_COMMAND_REJECTED
-                } else {
-                    when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
+                when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
                         is LyrebirdHttpCommandParser.ParseResult.Invalid -> command.message
                         is LyrebirdHttpCommandParser.ParseResult.Valid -> {
                             val wp = command.value
-                            val seq = DroneController.flyToWaypointNoseForward(
-                                wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed
-                            )
-                            val refusal = DroneController.lastWaypointRefusal()
-                            if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
-                                "WAYPOINT_REFUSED seq=$seq reason=${refusal.reason} " +
+                            val result = host.flight.waypoint(wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed, true)
+                            val seq = result.pending?.seq ?: 0L
+                            if (result.outcome == MavlinkCommandOutcome.DENIED) {
+                                "WAYPOINT_REFUSED seq=$seq reason=${result.detail} " +
                                     "Latitude=${wp.latitude}, Longitude=${wp.longitude}"
                             } else {
                                 "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
@@ -199,7 +188,6 @@ internal class LyrebirdHttpCommandHandler(
                                     "FinalYaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
                             }
                         }
-                    }
                 }
             },
             "/send/gimbal/rel_pitch" to { postData ->
@@ -315,31 +303,29 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/navigateTrajectoryDJINative" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("navigateTrajectoryDJINative")) {
-                    AUTONOMOUS_COMMAND_REJECTED
-                } else {
-                    when (val command = LyrebirdHttpCommandParser.parseNativeTrajectory(postData)) {
+                when (val command = LyrebirdHttpCommandParser.parseNativeTrajectory(postData)) {
                         is LyrebirdHttpCommandParser.ParseResult.Invalid -> command.message
                         is LyrebirdHttpCommandParser.ParseResult.Valid -> {
                             val trajectory = command.value
-                            DroneController.navigateTrajectoryNative(
+                            val result = host.flight.nativeTrajectory(
                                 trajectory.waypoints,
                                 trajectory.speed
                             )
-                            "DJI native mission requested with ${trajectory.waypoints.size} waypoints " +
-                                "at ${trajectory.speed}m/s"
+                            if (result.outcome == MavlinkCommandOutcome.DENIED) AUTONOMOUS_COMMAND_REJECTED else {
+                                "DJI native mission requested with ${trajectory.waypoints.size} waypoints " +
+                                    "at ${trajectory.speed}m/s"
+                            }
                         }
-                    }
                 }
             },
             "/send/abort/DJIMission" to {
-                DroneController.endMission()
+                host.flight.abortNativeMission()
                 "Mission stop requested"
             },
             "/send/setRTHAltitude" to { postData ->
                 val altitude = postData.toIntOrNull()
                 if (altitude != null) {
-                    DroneController.setRTHAltitude(altitude)
+                    host.flight.setRthAltitude(altitude)
                     "RTH altitude set to $altitude m"
                 } else {
                     "Invalid altitude value"
@@ -348,7 +334,7 @@ internal class LyrebirdHttpCommandHandler(
             "/send/setMaxFlightHeight" to { postData ->
                 val height = postData.toIntOrNull()
                 if (height != null) {
-                    DroneController.setMaxFlightHeight(height)
+                    host.flight.setMaxFlightHeight(height)
                     "Max flight height set to $height m"
                 } else {
                     "Invalid height value"
@@ -357,7 +343,7 @@ internal class LyrebirdHttpCommandHandler(
             "/send/setMaxFlightDistance" to { postData ->
                 val distance = postData.toIntOrNull()
                 if (distance != null) {
-                    DroneController.setMaxFlightDistance(distance)
+                    host.flight.setMaxFlightDistance(distance)
                     "Max flight distance set to $distance m"
                 } else {
                     "Invalid distance value"
@@ -366,11 +352,11 @@ internal class LyrebirdHttpCommandHandler(
             "/send/setDistanceLimitEnabled" to { postData ->
                 when (postData.trim().lowercase()) {
                     "true", "1", "on", "enable" -> {
-                        DroneController.setDistanceLimitEnabled(true)
+                        host.flight.setDistanceLimitEnabled(true)
                         "Distance limit enabled"
                     }
                     "false", "0", "off", "disable" -> {
-                        DroneController.setDistanceLimitEnabled(false)
+                        host.flight.setDistanceLimitEnabled(false)
                         "Distance limit disabled"
                     }
                     else -> "Invalid value (use true/false)"
@@ -378,18 +364,18 @@ internal class LyrebirdHttpCommandHandler(
             },
             "/send/setRcControlMode" to { postData ->
                 val mode = postData.trim().lowercase()
-                if (DroneController.setRcControlMode(mode)) {
+                if (host.flight.setRcControlMode(mode).outcome == MavlinkCommandOutcome.ACCEPTED) {
                     "RC control mode set to $mode"
                 } else {
                     "Invalid control mode (jp|usa|ch|custom)"
                 }
             },
             "/send/rcPairing/start" to {
-                DroneController.requestRcPairing()
+                host.flight.requestRcPairing()
                 "RC pairing requested"
             },
             "/send/rcPairing/stop" to {
-                DroneController.stopRcPairing()
+                host.flight.stopRcPairing()
                 "RC pairing stopped"
             },
             "/send/setDroneName" to { postData ->
@@ -482,12 +468,12 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/deactivateManualOverride" to {
-                DroneController.deactivateManualOverride()
+                host.flight.deactivateManualOverride()
                 host.mainHandler.post { host.updateManualOverrideUI() }
                 "Manual override deactivated. Autonomous commands are now allowed."
             },
             "/get/isManualOverrideActive" to {
-                if (DroneController.isManualOverrideActive) "true" else "false"
+                if (host.flight.isManualOverrideActive()) "true" else "false"
             },
             "/send/autoSensing/start" to {
                 host.mainHandler.post {

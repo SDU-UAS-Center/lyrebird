@@ -43,4 +43,23 @@ interface LyrebirdFlightPort {
     fun abortMission(): CommandResult
     fun abortAll(): CommandResult
     fun enableVirtualStick(): CommandResult
+    fun waypoint(
+        latitudeDeg: Double,
+        longitudeDeg: Double,
+        altitudeM: Double,
+        yawDeg: Double,
+        maxSpeedMps: Double,
+        noseForward: Boolean,
+    ): CommandResult
+    fun nativeTrajectory(waypoints: List<Triple<Double, Double, Double>>, speedMps: Double): CommandResult
+    fun abortNativeMission(): CommandResult
+    fun setRthAltitude(altitudeM: Int): CommandResult
+    fun setMaxFlightHeight(heightM: Int): CommandResult
+    fun setMaxFlightDistance(distanceM: Int): CommandResult
+    fun setDistanceLimitEnabled(enabled: Boolean): CommandResult
+    fun setRcControlMode(mode: String): CommandResult
+    fun requestRcPairing(): CommandResult
+    fun stopRcPairing(): CommandResult
+    fun deactivateManualOverride(): CommandResult
+    fun isManualOverrideActive(): Boolean
 }
