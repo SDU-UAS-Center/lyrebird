@@ -3057,6 +3057,11 @@ class FlightDeckActivity :
         sessionStatus?.takeIf { it.blockedByAnotherSession }?.let {
             ToastUtils.showLongToast(it.summary())
         }
+        if (sessionStatus?.leaseHeld != true || !sessionStatus.isServing) {
+            Log.w(TAG, "Runtime startup skipped because this app does not own a serving session")
+            updateMavlinkHttpStatusView()
+            return
+        }
 
         // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
         // same question asked between aircraft, which nothing on the device could answer before.
@@ -3154,11 +3159,6 @@ class FlightDeckActivity :
 
             stopEdgeDetection()
 
-            // Stop the session: it withdraws the advertisement, stops both servers, and gives
-            // the lease back, in that order. Stopping the servers by hand here is what used to
-            // leave the mDNS registration standing with nothing behind it.
-            session?.stop()
-            session = null
             mavlinkEndpoint?.stop()
             mavlinkEndpoint = null
             captureExecutor.shutdownNow()
@@ -3179,6 +3179,11 @@ class FlightDeckActivity :
             stopObstacleGuard()
             stopFleetMesh()
             webRTCStreamer = null
+
+            // Stop the network session last among runtime owners. It withdraws the advertisement,
+            // stops both servers, and only then gives the device-local lease back to another APK.
+            session?.stop()
+            session = null
 
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {

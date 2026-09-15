@@ -18,7 +18,8 @@ line numbers. Progress is tracked by responsibility and validation, not by lines
 | 5 | HTTP command boundary now exposes neutral media, detection, LRF, and flight ports; `LyrebirdHttpServer.kt` has no direct DJI, ViewModel, UXSDK, or `DroneController` dependency. V5 implementations preserve existing route results, waypoint refusals, native-mission dispatch, limits, RC pairing, and manual-override behavior. | Move shared command policy and MAVLink sinks next, without changing Safety, RC override, or response semantics. |
 | 6 | Target selection and WHIP endpoint construction are now pure tested policies; publisher lifecycle and native DJI streaming remain in the activity. | Move publisher/native-stream lifecycle and Wi-Fi-lock ownership behind a coordinator. |
 | 7 | Not started: detection coordination. | Focused tests and the corresponding bench gates below. |
-| 8-9 | Not started: activity-independent runtime, SDK/lease startup ordering, shutdown ordering, and final shell. | Explicit lifecycle review and device qualification. |
+| 8 | Runtime startup now stops after a blocked/non-serving session, and activity teardown releases the network lease after fleet, streaming, MAVLink, and other runtime owners stop. SDK product-connection gating and activity-independent ownership remain. | Add a runtime owner independent of activity recreation and verify SDK initialization/lease ordering on-device. |
+| 9 | Not started: final activity shell and flavor seams. | Explicit lifecycle review and device qualification. |
 
 Automated checks at this checkpoint include both Android unit-test suites, both Spotless checks,
 and `assembleCurrentDebug` plus `assembleDemoBiomassDebug`. The settings regression pins the
