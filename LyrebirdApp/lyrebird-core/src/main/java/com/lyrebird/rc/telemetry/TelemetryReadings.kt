@@ -36,14 +36,18 @@ data class Reading<T>(
     val reported: Boolean = true,
 )
 
-/** A position on the WGS-84 ellipsoid, with both altitude references kept apart. */
+/**
+ * A position on the WGS-84 ellipsoid.
+ *
+ * Carries only the height above mean sea level: the wire keeps height above the take-off point in
+ * its own top-level `altitude` field, so having it here too meant two fields holding the same
+ * number, with the frame reading one of them. One source, and it is the one the frame uses.
+ */
 data class GeoPosition(
     val latitudeDeg: Double,
     val longitudeDeg: Double,
     /** Height above mean sea level, metres. */
     val altitudeAslM: Double,
-    /** Height above the recorded take-off point, metres. */
-    val altitudeAglM: Double,
 ) {
     /** True when the coordinates are inside the globe's range rather than an unset sentinel. */
     val isPlausible: Boolean

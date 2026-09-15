@@ -8182,7 +8182,6 @@ class FlightDeckActivity :
                 latitudeDeg = location.latitude,
                 longitudeDeg = location.longitude,
                 altitudeAslM = location.altitude,
-                altitudeAglM = altitudeAgl,
             )
         telemetryCoordinator.altitudeASL = location.altitude
         telemetryCoordinator.altitudeAGL = altitudeAgl

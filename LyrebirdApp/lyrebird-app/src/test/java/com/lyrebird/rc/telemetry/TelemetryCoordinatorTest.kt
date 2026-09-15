@@ -20,7 +20,6 @@ class TelemetryCoordinatorTest {
             latitudeDeg = 55.123,
             longitudeDeg = 12.456,
             altitudeAslM = 45.2,
-            altitudeAglM = 20.5,
         )
         coordinator.altitudeASL = 45.2
         coordinator.altitudeAGL = 20.5

@@ -25,11 +25,9 @@ class TelemetryWireFixtureTest {
             latitudeDeg = 55.47,
             longitudeDeg = 10.32,
             altitudeAslM = 30.0,
-            altitudeAglM = 12.0,
         )
-        // The wire takes AGL from this field, not from the position object's altitudeAglM — the
-        // two are set together in FlightDeckActivity. See the note in the commit: geo position's
-        // AGL is currently duplicated and should be reconciled to one source.
+        // AGL is the frame's own top-level field, which is why the position object does not
+        // carry a second copy of it.
         altitudeAGL = 12.0
         gimbalAttitude = AttitudeDeg(rollDeg = 0.0, pitchDeg = -45.0, yawDeg = 90.0)
         gimbalJointAttitude = AttitudeDeg(rollDeg = 0.0, pitchDeg = -30.0, yawDeg = 10.0)

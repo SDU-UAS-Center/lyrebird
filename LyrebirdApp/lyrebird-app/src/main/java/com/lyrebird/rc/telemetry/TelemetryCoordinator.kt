@@ -21,6 +21,15 @@ class TelemetryCoordinator {
     @Volatile var attitude: AttitudeDeg? = null
     @Volatile var location: GeoPosition? = null
     @Volatile var altitudeASL: Double = 0.0
+
+    /**
+     * Height above the take-off point, metres — the frame's own top-level `altitude`.
+     *
+     * The single source for it: [GeoPosition] deliberately carries only ASL, so there is no second
+     * copy to disagree with. It is a plain number rather than a nullable reading because it has
+     * always been one on the wire, and emitting `null` where consumers may be doing arithmetic
+     * would be a compatibility break to fix an ambiguity that has not bitten.
+     */
     @Volatile var altitudeAGL: Double = 0.0
     @Volatile var gimbalAttitude: AttitudeDeg? = null
     @Volatile var gimbalJointAttitude: AttitudeDeg? = null

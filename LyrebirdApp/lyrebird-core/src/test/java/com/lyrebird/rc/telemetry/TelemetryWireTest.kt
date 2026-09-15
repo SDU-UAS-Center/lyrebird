@@ -37,7 +37,7 @@ class TelemetryWireTest {
     fun `a position serialises to the keys consumers already parse`() {
         val json =
             JSONObject(
-                GeoPosition(latitudeDeg = 55.47, longitudeDeg = 10.32, altitudeAslM = 30.0, altitudeAglM = 12.0)
+                GeoPosition(latitudeDeg = 55.47, longitudeDeg = 10.32, altitudeAslM = 30.0)
                     .toWireJson(),
             )
         assertEquals(55.47, json.getDouble("latitude"), 1e-9)

@@ -15,7 +15,7 @@ class TelemetryReadingsTest {
     private fun position(
         lat: Double,
         lon: Double,
-    ) = GeoPosition(latitudeDeg = lat, longitudeDeg = lon, altitudeAslM = 0.0, altitudeAglM = 0.0)
+    ) = GeoPosition(latitudeDeg = lat, longitudeDeg = lon, altitudeAslM = 0.0)
 
     @Test
     fun `an unset position is not plausible`() {
