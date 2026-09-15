@@ -1,11 +1,6 @@
 package com.lyrebird.rc
 
 import android.os.Handler
-import com.lyrebird.rc.models.MediaVM
-import com.lyrebird.rc.models.PayloadWidgetVM
-import dji.sdk.keyvalue.key.DJIKey
-import dji.sdk.keyvalue.value.common.EmptyMsg
-import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import android.util.Log
 import android.widget.Switch
 import com.lyrebird.rc.controller.ControlAuthority
@@ -18,12 +13,6 @@ import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
 import com.lyrebird.rc.server.SessionServer
 import com.lyrebird.rc.util.NetworkUtils
-import dji.sdk.keyvalue.value.camera.LaserMeasureState
-import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
-import dji.v5.et.action
-import dji.v5.et.get
-import dji.v5.et.set
-import dji.v5.ux.detection.DetectedTarget
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -50,15 +39,8 @@ internal const val AUTONOMOUS_COMMAND_REJECTED =
 internal interface LyrebirdCommandHost {
     val mainHandler: Handler
     val droneName: String
-    val mediaVM: MediaVM
-    val payloadWidgetVM: PayloadWidgetVM
-    val gimbalKey: DJIKey.ActionKey<GimbalAngleRotation, EmptyMsg>
-    val zoomKey: DJIKey<Double>
-    val startRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg>
-    val stopRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg>
-    val isAutoSensingActive: Boolean
-    val currentDetectedTargets: List<DetectedTarget>
-    var lrfTargetLocation: LocationCoordinate3D?
+    val media: LyrebirdMediaPort
+    val detection: LyrebirdDetectionPort
 
     /** Full settings snapshot (app prefs + DJI flight limits) as JSON, for GET /config/settings. */
     fun readSettingsJson(): String
@@ -93,6 +75,10 @@ internal interface LyrebirdCommandHost {
     fun updateManualOverrideUI()
     fun classifyCommandSource(presentedToken: String?): ControlAuthority.Source
     fun readThermalMaxTempNow(): Double?
+
+    fun readLrfMeasurement(): LrfMeasurement
+
+    fun setLrfTarget(target: com.lyrebird.rc.telemetry.GeoPoint3D?)
 
     /** Whether the connected payload has a thermal camera (spot temp + thermal shutter work). */
     fun hasThermalCamera(): Boolean
@@ -245,28 +231,16 @@ internal class LyrebirdHttpCommandHandler(
             // target point are populated only when the laser locks (state == NORMAL, which needs a
             // GPS fix); other states return null alongside the raw state.
             "/send/lrf/measure" to { _ ->
-                val info = Payload.takeFreshLrfReading()
-                val state = info?.laserMeasureState
-                val locked = state == LaserMeasureState.NORMAL
-                val distance = if (locked) info?.distance else null
-                val target = if (locked) {
-                    info?.location3D?.takeIf {
-                        it.latitude != 0.0 || it.longitude != 0.0 || it.altitude != 0.0
-                    }
-                } else {
-                    null
-                }
-                if (locked && target != null) {
-                    // Surfaced on the telemetry stream as lrfTarget.
-                    host.lrfTargetLocation = target
-                }
+                val measurement = host.readLrfMeasurement()
+                val target = measurement.target
+                if (target != null) host.setLrfTarget(target)
                 val targetJson = if (target == null) {
                     "null"
                 } else {
-                    "[${target.latitude}, ${target.longitude}, ${target.altitude}]"
+                    "[${target.latitudeDeg}, ${target.longitudeDeg}, ${target.altitudeM}]"
                 }
-                val stateJson = if (state == null) "null" else "\"$state\""
-                "{\"distance\": ${distance ?: "null"}, \"target\": $targetJson, \"state\": $stateJson}"
+                val stateJson = measurement.state?.let { "\"$it\"" } ?: "null"
+                "{\"distance\": ${measurement.distanceMeters ?: "null"}, \"target\": $targetJson, \"state\": $stateJson}"
             },
             // The detected control profile carries the payload index and the drop widget indices
             // (RIGHT + Unlock 3 / All_Down 5 on the M300 SkyPort payload, PORT_4 on the M400, null
@@ -277,10 +251,7 @@ internal class LyrebirdHttpCommandHandler(
                 when {
                     indexType == null ->
                         "REJECTED: ${profile.displayName} has no payload drop port configured."
-                    Payload.dropPayload(
-                        host.payloadWidgetVM, indexType,
-                        profile.dropArmSwitchIndex, profile.dropReleaseButtonIndex
-                    ) -> "Payload dropped on $indexType"
+                    commandSink.dropPayload().outcome == MavlinkCommandOutcome.ACCEPTED -> "Payload dropped on $indexType"
                     else -> "Payload drop failed"
                 }
             },
@@ -528,10 +499,21 @@ internal class LyrebirdHttpCommandHandler(
                 "AutoSensing stop requested"
             },
             "/get/autoSensing/status" to {
-                """{"active":${host.isAutoSensingActive},"targetCount":${host.currentDetectedTargets.size}}"""
+                """{"active":${host.detection.isAutoSensingActive},"targetCount":${host.detection.currentTargets().size}}"""
             },
             "/get/autoSensing/targets" to {
-                DetectedTarget.listToJsonArray(host.currentDetectedTargets).toString()
+                org.json.JSONArray().apply {
+                    host.detection.currentTargets().forEach { target ->
+                        put(org.json.JSONObject().apply {
+                            put("type", target.type)
+                            put("left", target.left)
+                            put("top", target.top)
+                            put("right", target.right)
+                            put("bottom", target.bottom)
+                            target.confidence?.let { put("confidence", it) }
+                        })
+                    }
+                }.toString()
             },
             "/send/streaming/mode" to { postData ->
                 val modeStr = postData.trim().lowercase()
@@ -721,9 +703,9 @@ internal class SimpleHttpServer(
             return when (request.uri) {
                 "/send/capture" -> {
                     // Airframe-agnostic photo path: one shutter, whichever lens it came from.
-                    val file = Payload.capturePhoto(host.mediaVM)
-                    if (file != null) {
-                        "{\"captured\":true,\"file\":\"${file.fileName}\"}"
+                    val fileName = host.media.capturePhotoFileName()
+                    if (fileName != null) {
+                        "{\"captured\":true,\"file\":\"$fileName\"}"
                     } else {
                         "{\"error\":\"Failed to capture photo\"}"
                     }
@@ -733,8 +715,8 @@ internal class SimpleHttpServer(
                     "{\"thermalMaxTemp\":${maxTemp ?: "null"}}"
                 }
                 "/send/captureThermalImage" ->
-                    Payload.captureThermal(host.mediaVM) ?: "{\"error\":\"Failed to capture thermal image\"}"
-                else -> Payload.listAllMedia(host.mediaVM)
+                    host.media.captureThermalJson() ?: "{\"error\":\"Failed to capture thermal image\"}"
+                else -> host.media.listMediaJson()
             }
         }
 
@@ -760,12 +742,10 @@ internal class SimpleHttpServer(
                     val fileName = request.postData.trim()
                     when {
                         !ControlAuthority.authorizeControlCommand(request.source) ->
-                            Payload.sendErrorResponse(
-                                outputStream, "REJECTED: Safety Computer is in control."
-                            )
+                            host.media.sendErrorResponse("REJECTED: Safety Computer is in control.", outputStream)
                         fileName.isEmpty() ->
                             Payload.sendErrorResponse(outputStream, "Expected body '<fileName>'")
-                        else -> Payload.sendMediaFileByName(host.mediaVM, fileName, outputStream)
+                        else -> host.media.sendMediaFile(fileName, outputStream)
                     }
                     clientSocket.close()
                     return

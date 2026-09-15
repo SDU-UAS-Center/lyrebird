@@ -156,6 +156,7 @@ import dji.v5.ux.detection.DetectionOverlayView
 import dji.v5.ux.map.MapWidget
 import dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity
 import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -312,8 +313,44 @@ class FlightDeckActivity :
     // ViewModels for drone control
     private lateinit var basicAircraftControlVM: BasicAircraftControlVM
     private lateinit var virtualStickVM: VirtualStickVM
-    override lateinit var mediaVM: MediaVM
-    override lateinit var payloadWidgetVM: PayloadWidgetVM
+    lateinit var mediaVM: MediaVM
+    lateinit var payloadWidgetVM: PayloadWidgetVM
+
+    override val media: LyrebirdMediaPort by lazy {
+        object : LyrebirdMediaPort {
+            override fun capturePhotoFileName(): String? = Payload.capturePhoto(mediaVM)?.fileName
+
+            override fun captureThermalJson(): String? = Payload.captureThermal(mediaVM)
+
+            override fun listMediaJson(): String = Payload.listAllMedia(mediaVM)
+
+            override fun sendMediaFile(
+                fileName: String,
+                outputStream: OutputStream,
+            ) {
+                Payload.sendMediaFileByName(mediaVM, fileName, outputStream)
+            }
+
+            override fun sendErrorResponse(
+                message: String,
+                outputStream: OutputStream,
+            ) {
+                Payload.sendErrorResponse(outputStream, message)
+            }
+        }
+    }
+
+    override val detection: LyrebirdDetectionPort by lazy {
+        object : LyrebirdDetectionPort {
+            override val isAutoSensingActive: Boolean
+                get() = this@FlightDeckActivity.isAutoSensingActive
+
+            override fun currentTargets(): List<DetectedTargetSnapshot> =
+                currentDetectedTargets.map {
+                    DetectedTargetSnapshot(it.type, it.left, it.top, it.right, it.bottom, it.confidence)
+                }
+        }
+    }
 
     // Servers
     private var session: LyrebirdSession? = null
@@ -482,13 +519,13 @@ class FlightDeckActivity :
     private var isHomePointSetLatch = false
 
     // ==================== AutoSensing (AI Detection) ====================
-    override var isAutoSensingActive = false
+    var isAutoSensingActive = false
     private var isAutoSensingListenerRegistered = false
     private var edgeDetectionController: EdgeDetectionController? = null
 
     @Volatile private var lastEdgeMetrics = EdgeDetectionMetrics()
 
-    @Volatile override var currentDetectedTargets: List<DetectedTarget> = emptyList()
+    @Volatile var currentDetectedTargets: List<DetectedTarget> = emptyList()
     private var detectionOverlay: DetectionOverlayView? = null
     private var pendingEdgePickerRequestCode: Int? = null
     private val edgeFilePickerLauncher =
@@ -543,10 +580,10 @@ class FlightDeckActivity :
 
     // var, not val: on the M400 these are rebound to LEFT_OR_MAIN once the main-camera video is up
     // (see rebindGimbalKeysForM400). Other aircraft keep the default no-index binding.
-    override var gimbalKey: DJIKey.ActionKey<GimbalAngleRotation, EmptyMsg> = GimbalKey.KeyRotateByAngle.create()
-    override val zoomKey: DJIKey<Double> = CameraKey.KeyCameraZoomRatios.create()
-    override val startRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg> = CameraKey.KeyStartRecord.create()
-    override val stopRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg> = CameraKey.KeyStopRecord.create()
+    var gimbalKey: DJIKey.ActionKey<GimbalAngleRotation, EmptyMsg> = GimbalKey.KeyRotateByAngle.create()
+    val zoomKey: DJIKey<Double> = CameraKey.KeyCameraZoomRatios.create()
+    val startRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg> = CameraKey.KeyStartRecord.create()
+    val stopRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg> = CameraKey.KeyStopRecord.create()
 
     // Aircraft idle (low-power / eco) detection.
     // DJI exposes no arming/eco key here (KeyAreMotorsOn is unreliable — it reports true/null in
@@ -569,7 +606,7 @@ class FlightDeckActivity :
     @Volatile private var idleOverlayVisible = false
     private val showIdleOverlayRunnable = Runnable { onIdleDetectDebounceElapsed() }
 
-    @Volatile override var lrfTargetLocation: LocationCoordinate3D? = null
+    @Volatile var lrfTargetLocation: LocationCoordinate3D? = null
 
     /**
      * Range from the last laser lock, in metres, or null when it has not locked.
@@ -1402,6 +1439,30 @@ class FlightDeckActivity :
             Log.i(TAG_THERMAL, "[capture read] idx=$idx globalMax=$globalMax regionMax=$regionMax -> $maxTemp")
             maxTemp
         }.onFailure { Log.e(TAG_THERMAL, "[capture read] error: ${it.message}", it) }.getOrNull()
+    }
+
+    override fun readLrfMeasurement(): LrfMeasurement {
+        val info = Payload.takeFreshLrfReading()
+        val state = info?.laserMeasureState
+        val locked = state == LaserMeasureState.NORMAL
+        val target =
+            if (locked) {
+                info
+                    ?.location3D
+                    ?.takeIf { it.latitude != 0.0 || it.longitude != 0.0 || it.altitude != 0.0 }
+                    ?.let { GeoPoint3D(it.latitude, it.longitude, it.altitude) }
+            } else {
+                null
+            }
+        return LrfMeasurement(
+            distanceMeters = if (locked) info?.distance else null,
+            state = state?.name,
+            target = target,
+        )
+    }
+
+    override fun setLrfTarget(target: GeoPoint3D?) {
+        lrfTargetLocation = target?.let { LocationCoordinate3D(it.latitudeDeg, it.longitudeDeg, it.altitudeM) }
     }
 
     override fun hasThermalCamera(): Boolean =
