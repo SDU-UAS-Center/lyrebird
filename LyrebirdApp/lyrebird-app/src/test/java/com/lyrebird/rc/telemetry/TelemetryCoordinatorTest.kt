@@ -13,17 +13,22 @@ class TelemetryCoordinatorTest {
         val coordinator = TelemetryCoordinator()
         coordinator.isMockEnabled = false
         coordinator.droneName = "scout_02"
-        coordinator.speed = """{"x":1.1,"y":2.2,"z":3.3}"""
+        coordinator.speed = VelocityNedMps(northMps = 1.1, eastMps = 2.2, downMps = 3.3)
         coordinator.heading = 125.4
-        coordinator.attitude = """{"pitch":4.0,"roll":2.0,"yaw":125.4}"""
-        coordinator.location = """{"latitude":55.123,"longitude":12.456,"altitude":45.2}"""
+        coordinator.attitude = AttitudeDeg(rollDeg = 2.0, pitchDeg = 4.0, yawDeg = 125.4)
+        coordinator.location = GeoPosition(
+            latitudeDeg = 55.123,
+            longitudeDeg = 12.456,
+            altitudeAslM = 45.2,
+            altitudeAglM = 20.5,
+        )
         coordinator.altitudeASL = 45.2
         coordinator.altitudeAGL = 20.5
-        coordinator.gimbalAttitude = """{"pitch":-30.0,"roll":0.0,"yaw":125.4}"""
-        coordinator.gimbalJointAttitude = """{"pitch":-30.0,"roll":0.0,"yaw":125.4}"""
+        coordinator.gimbalAttitude = AttitudeDeg(rollDeg = 0.0, pitchDeg = -30.0, yawDeg = 125.4)
+        coordinator.gimbalJointAttitude = AttitudeDeg(rollDeg = 0.0, pitchDeg = -30.0, yawDeg = 125.4)
         coordinator.batteryLevel = 82
         coordinator.satelliteCount = 18
-        coordinator.homeLocation = """{"latitude":55.122,"longitude":12.455}"""
+        coordinator.homeLocation = GeoPoint(latitudeDeg = 55.122, longitudeDeg = 12.455)
         coordinator.distanceToHome = 12.3
         coordinator.waypointReached = true
         coordinator.intermediaryWaypointReached = false

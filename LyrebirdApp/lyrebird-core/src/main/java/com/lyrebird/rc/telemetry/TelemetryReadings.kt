@@ -96,6 +96,27 @@ data class GeoPoint(
                 !(latitudeDeg == 0.0 && longitudeDeg == 0.0)
 }
 
+/**
+ * A point in space, for a target the aircraft measured rather than the place it is.
+ *
+ * Separate from [GeoPosition] because it carries no height above the take-off point: a laser fix on
+ * a tree is a place on the globe, not a place relative to where the aircraft took off. Forcing it
+ * into [GeoPosition] would mean inventing an AGL of zero, which is a claim about the terrain rather
+ * than an absence of information.
+ */
+data class GeoPoint3D(
+    val latitudeDeg: Double,
+    val longitudeDeg: Double,
+    /** Height in the same reference the aircraft reports its own altitude in. */
+    val altitudeM: Double,
+) {
+    val isPlausible: Boolean
+        get() =
+            latitudeDeg in -90.0..90.0 &&
+                longitudeDeg in -180.0..180.0 &&
+                !(latitudeDeg == 0.0 && longitudeDeg == 0.0 && altitudeM == 0.0)
+}
+
 /** Pack and cell state, as the aircraft reports it. Percentages are 0..100, or -1 when unset. */
 data class BatteryState(
     val percentRemaining: Int,

@@ -113,8 +113,13 @@ import com.lyrebird.rc.server.TelemetryServer
 import com.lyrebird.rc.settings.DroneSettingsProfiles
 import com.lyrebird.rc.settings.LyrebirdOnboarding
 import com.lyrebird.rc.settings.LyrebirdSettingsBackup
+import com.lyrebird.rc.telemetry.AttitudeDeg
+import com.lyrebird.rc.telemetry.GeoPoint
+import com.lyrebird.rc.telemetry.GeoPoint3D
+import com.lyrebird.rc.telemetry.GeoPosition
 import com.lyrebird.rc.telemetry.MockTelemetrySnapshot
 import com.lyrebird.rc.telemetry.TelemetryCoordinator
+import com.lyrebird.rc.telemetry.VelocityNedMps
 import com.lyrebird.rc.util.NetworkUtils
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
@@ -8153,21 +8158,59 @@ class FlightDeckActivity :
         val timeNeededToGoHome = getTimeNeededToGoHome()
         val timeNeededToLand = getTimeNeededToLand()
 
-        telemetryCoordinator.speed = getSpeed()
+        // The SDK→neutral conversion happens here, at the one place that has both: the coordinator
+        // downstream holds only plain values, so the telemetry shape can be tested without an
+        // aircraft and cannot drift with an SDK release.
+        val speed = getSpeed()
+        telemetryCoordinator.speed =
+            VelocityNedMps(
+                northMps = speed.x,
+                eastMps = speed.y,
+                downMps = speed.z,
+            )
         telemetryCoordinator.heading = getHeading()
-        telemetryCoordinator.attitude = getAttitude()
-        telemetryCoordinator.location = location
+        val attitude = getAttitude()
+        telemetryCoordinator.attitude =
+            AttitudeDeg(
+                rollDeg = attitude.roll,
+                pitchDeg = attitude.pitch,
+                yawDeg = attitude.yaw,
+            )
+        val altitudeAgl = getAltitude()
+        telemetryCoordinator.location =
+            GeoPosition(
+                latitudeDeg = location.latitude,
+                longitudeDeg = location.longitude,
+                altitudeAslM = location.altitude,
+                altitudeAglM = altitudeAgl,
+            )
         telemetryCoordinator.altitudeASL = location.altitude
-        telemetryCoordinator.altitudeAGL = getAltitude()
-        telemetryCoordinator.gimbalAttitude = getGimbalAttitude()
-        telemetryCoordinator.gimbalJointAttitude = getGimbalJointAttitude()
+        telemetryCoordinator.altitudeAGL = altitudeAgl
+        val gimbal = getGimbalAttitude()
+        telemetryCoordinator.gimbalAttitude =
+            AttitudeDeg(
+                rollDeg = gimbal.roll,
+                pitchDeg = gimbal.pitch,
+                yawDeg = gimbal.yaw,
+            )
+        val gimbalJoint = getGimbalJointAttitude()
+        telemetryCoordinator.gimbalJointAttitude =
+            AttitudeDeg(
+                rollDeg = gimbalJoint.roll,
+                pitchDeg = gimbalJoint.pitch,
+                yawDeg = gimbalJoint.yaw,
+            )
         telemetryCoordinator.zoomFl = getCameraZoomFocalLength()
         telemetryCoordinator.hybridFl = getCameraHybridFocalLength()
         telemetryCoordinator.opticalFl = getCameraOpticalFocalLength()
         telemetryCoordinator.zoomRatio = zoomKey.get() ?: 1.0
         telemetryCoordinator.batteryLevel = getBatteryLevel()
         telemetryCoordinator.satelliteCount = getSatelliteCount()
-        telemetryCoordinator.homeLocation = homeLocation
+        telemetryCoordinator.homeLocation =
+            GeoPoint(
+                latitudeDeg = homeLocation.latitude,
+                longitudeDeg = homeLocation.longitude,
+            )
         // Zero until home is a real place. DJI reports (0, 0) before it has a home point, and
         // that is a real spot in the Atlantic: measuring to it produced a confident 2,559 km
         // from a stationary aircraft, which is worse than reporting nothing because it looks
@@ -8197,7 +8240,16 @@ class FlightDeckActivity :
         telemetryCoordinator.altitudeSeq = DroneController.getAltitudeSeq()
         telemetryCoordinator.readyToTakeoff = isReadyToTakeoff()
         telemetryCoordinator.takeoffBlockReason = getTakeoffBlockReason()
-        telemetryCoordinator.lrfTarget = lrfTargetLocation
+        // A laser fix is a place on the globe, not a place relative to take-off, so it maps to the
+        // three-field point rather than to the aircraft's own position type.
+        telemetryCoordinator.lrfTarget =
+            lrfTargetLocation?.let {
+                GeoPoint3D(
+                    latitudeDeg = it.latitude,
+                    longitudeDeg = it.longitude,
+                    altitudeM = it.altitude,
+                )
+            }
         telemetryCoordinator.isManualOverrideActive = DroneController.isManualOverrideActive
         telemetryCoordinator.isAutoSensingActive = isAutoSensingActive
 

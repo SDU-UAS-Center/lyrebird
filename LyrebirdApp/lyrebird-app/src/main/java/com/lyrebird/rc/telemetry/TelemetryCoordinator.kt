@@ -3,29 +3,34 @@ package com.lyrebird.rc.telemetry
 /**
  * Thread-safe telemetry coordinator.
  * Manages the caching and formatting of real-time telemetry data.
- * Stay decoupled from DJI SDK class dependencies by holding SDK variables as [Any?].
+ *
+ * Holds the neutral readings from `:lyrebird-core`, not SDK objects behind `Any?`. Holding them as
+ * `Any?` used to keep the imports out of this file while leaving the wire format entirely
+ * dependent on DJI's `toString()` — untestable here, and free to change under the app without a
+ * line of it changing. The values are typed now, and serialised through
+ * [com.lyrebird.rc.telemetry.toWireJson], which is where the wire shape is decided and tested.
  */
 class TelemetryCoordinator {
     @Volatile var isMockEnabled: Boolean = false
     @Volatile var mockSnapshot: MockTelemetrySnapshot? = null
     @Volatile var droneName: String = "drone_1"
-    
+
     // Position & Attitude
-    @Volatile var speed: Any? = null
+    @Volatile var speed: VelocityNedMps? = null
     @Volatile var heading: Double = 0.0
-    @Volatile var attitude: Any? = null
-    @Volatile var location: Any? = null
+    @Volatile var attitude: AttitudeDeg? = null
+    @Volatile var location: GeoPosition? = null
     @Volatile var altitudeASL: Double = 0.0
     @Volatile var altitudeAGL: Double = 0.0
-    @Volatile var gimbalAttitude: Any? = null
-    @Volatile var gimbalJointAttitude: Any? = null
-    
+    @Volatile var gimbalAttitude: AttitudeDeg? = null
+    @Volatile var gimbalJointAttitude: AttitudeDeg? = null
+
     // Battery & Satellites
     @Volatile var batteryLevel: Int = -1
     @Volatile var satelliteCount: Int = -1
-    
+
     // Flight & Mission
-    @Volatile var homeLocation: Any? = null
+    @Volatile var homeLocation: GeoPoint? = null
     @Volatile var distanceToHome: Double = 0.0
     @Volatile var waypointReached: Boolean = false
     @Volatile var intermediaryWaypointReached: Boolean = false
@@ -48,7 +53,7 @@ class TelemetryCoordinator {
     @Volatile var takeoffBlockReason: String = "UNKNOWN"
 
     // Last laser-rangefinder target fix, or null when the LRF has not locked a target.
-    @Volatile var lrfTarget: Any? = null
+    @Volatile var lrfTarget: GeoPoint3D? = null
     
     // Camera Zoom
     @Volatile var zoomFl: Int = -1
@@ -159,7 +164,7 @@ class TelemetryCoordinator {
         val phoneLocationJson = """{"latitude":$phoneLatitude,"longitude":$phoneLongitude,"heading":$phoneHeading,"pressure":$phonePressure,"battery":$phoneBattery,"wifiRssi":$wifiRssi}"""
         val detectionsJson = detectionTelemetryJson()
 
-        return """{"droneName":"$droneName","speed":$speed,"heading":$heading,"attitude":$attitude,"location":$location,"altitude":$altitudeAGL,"lrfTarget":${lrfTarget?.toString() ?: "null"},"phoneLocation":$phoneLocationJson,"webRtc":$webRtcMetricsJson,"detections":$detectionsJson,"streaming":$streamingJson,"gimbalAttitude":$gimbalAttitude,"gimbalJointAttitude":$gimbalJointAttitude,"zoomFl":$zoomFl,"hybridFl":$hybridFl,"opticalFl":$opticalFl,"zoomRatio":$zoomRatio,"batteryLevel":$batteryLevel,"satelliteCount":$satelliteCount,"homeLocation":$homeLocation,"distanceToHome":$distanceToHome,"waypointReached":$waypointReached,"waypointSeq":$waypointSeq,"intermediaryWaypointReached":$intermediaryWaypointReached,"yawReached":$yawReached,"yawSeq":$yawSeq,"altitudeReached":$altitudeReached,"altitudeSeq":$altitudeSeq,"isRecording":$isRecording,"homeSet":$homeSet,"remainingFlightTime":$remainingFlightTime,"timeNeededToGoHome":$timeNeededToGoHome,"timeNeededToLand":$timeNeededToLand,"totalTime":$totalTime,"maxRadiusCanFlyAndGoHome":$maxRadiusCanFlyAndGoHome,"remainingCharge":$remainingCharge,"batteryNeededToLand":$batteryNeededToLand,"batteryNeededToGoHome":$batteryNeededToGoHome,"seriousLowBatteryThreshold":$seriousLowBatteryThreshold,"lowBatteryThreshold":$lowBatteryThreshold,"flightMode":"$flightMode","readyToTakeoff":$readyToTakeoff,"takeoffBlockReason":"$takeoffBlockReason","isManualOverrideActive":$isManualOverrideActive,"autoSensingActive":$isAutoSensingActive,"detectedTargets":$detectedTargetsJson}"""
+        return """{"droneName":"$droneName","speed":${speed.toWireJson()},"heading":$heading,"attitude":${attitude.toWireJson()},"location":${location.toWireJson()},"altitude":$altitudeAGL,"lrfTarget":${lrfTarget.toWireJson()},"phoneLocation":$phoneLocationJson,"webRtc":$webRtcMetricsJson,"detections":$detectionsJson,"streaming":$streamingJson,"gimbalAttitude":${gimbalAttitude.toWireJson()},"gimbalJointAttitude":${gimbalJointAttitude.toWireJson()},"zoomFl":$zoomFl,"hybridFl":$hybridFl,"opticalFl":$opticalFl,"zoomRatio":$zoomRatio,"batteryLevel":$batteryLevel,"satelliteCount":$satelliteCount,"homeLocation":${homeLocation.toWireJson()},"distanceToHome":$distanceToHome,"waypointReached":$waypointReached,"waypointSeq":$waypointSeq,"intermediaryWaypointReached":$intermediaryWaypointReached,"yawReached":$yawReached,"yawSeq":$yawSeq,"altitudeReached":$altitudeReached,"altitudeSeq":$altitudeSeq,"isRecording":$isRecording,"homeSet":$homeSet,"remainingFlightTime":$remainingFlightTime,"timeNeededToGoHome":$timeNeededToGoHome,"timeNeededToLand":$timeNeededToLand,"totalTime":$totalTime,"maxRadiusCanFlyAndGoHome":$maxRadiusCanFlyAndGoHome,"remainingCharge":$remainingCharge,"batteryNeededToLand":$batteryNeededToLand,"batteryNeededToGoHome":$batteryNeededToGoHome,"seriousLowBatteryThreshold":$seriousLowBatteryThreshold,"lowBatteryThreshold":$lowBatteryThreshold,"flightMode":"$flightMode","readyToTakeoff":$readyToTakeoff,"takeoffBlockReason":"$takeoffBlockReason","isManualOverrideActive":$isManualOverrideActive,"autoSensingActive":$isAutoSensingActive,"detectedTargets":$detectedTargetsJson}"""
     }
 
     /**
