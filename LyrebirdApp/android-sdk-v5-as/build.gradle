@@ -52,6 +52,23 @@ def lyrebirdSourceIncludes = [
         'com/lyrebird/rc/FlightDeckActivity.kt',
 ]
 
+// NOTE: the list above is source-root-relative, which is what Detekt matches against. Spotless
+// resolves targets relative to the module directory, so `target lyrebirdSourceIncludes` below
+// matches no file at all: this check passes having inspected nothing.
+//
+// Verified, not inferred: a deliberate trailing-whitespace violation appended to
+// controller/ControlAuthority.kt (a file this list names) still produced BUILD SUCCESSFUL, while
+// the same probe against a correctly-rooted target failed as it should.
+//
+// Two consequences, both deliberately left to their own change rather than bundled here:
+//   - the app's Lyrebird sources have drifted from ktlint's output (DroneControlProfiles.kt is
+//     among the offenders), so repointing the target turns the gate red until they are
+//     reformatted;
+//   - the mavlink sources, now in :lyrebird-core, carry 8 violations the gate never reported:
+//     7 duplicate-KDoc blocks (ktlint standard:no-consecutive-comments) in MavlinkEndpointConfig,
+//     MavlinkInbound, MavlinkMessages, MavlinkMotionSink, MavlinkProtocol, MavlinkSnapshot and
+//     MavlinkTelemetryEndpoint, plus one over-long line in MavlinkSigningTest.
+// :lyrebird-core needs the same treatment, so it is not gated yet either.
 project(':app') {
     apply plugin: 'com.diffplug.spotless'
 
@@ -63,6 +80,9 @@ project(':app') {
     }
 }
 
+// The shared core is not gated either, for the same reason, and adding the block without wiring
+// it into a check task would only look like coverage. Both modules get correctly-rooted targets
+// in the change that also reformats them.
 detekt {
     buildUponDefaultConfig = true
     allRules = false

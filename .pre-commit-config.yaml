@@ -71,8 +71,8 @@ repos:
         files: ^LyrebirdApp/lyrebird-app/.*\.kt$
       - id: android-tests
         name: android tests - compile + unit tests
-        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest'
+        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :lyrebird-core:compileDebugKotlin :lyrebird-core:testDebugUnitTest :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest'
         language: system
         pass_filenames: false
         stages: [manual]
-        files: ^LyrebirdApp/lyrebird-app/.*\.kt$
+        files: ^LyrebirdApp/(lyrebird-app|lyrebird-core)/.*\.kt$

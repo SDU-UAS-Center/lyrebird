@@ -189,6 +189,13 @@ android {
 }
 
 dependencies {
+    /**
+     * <----------------- Shared SDK-free code ------------------>
+     * Protocol, mission model and command contracts shared with any future hardware adapter.
+     * Carries no DJI dependency, so it cannot drift into a specific SDK generation.
+     **/
+    implementation project(':lyrebird-core')
+
     /** <----------------- MSDK dependencies ------------------> **/
     compileOnly deps.aircraftProvided
     implementation deps.aircraft
