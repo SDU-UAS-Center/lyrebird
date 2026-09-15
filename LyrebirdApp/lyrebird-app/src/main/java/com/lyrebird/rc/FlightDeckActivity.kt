@@ -35,6 +35,7 @@ import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.RoiControl
 import com.lyrebird.rc.controller.SafetyLatchStore
 import com.lyrebird.rc.controller.V5FlightSettingsActions
+import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.controller.WaylineMissionHelper
 import com.lyrebird.rc.edge.EdgeDetectionConfig
 import com.lyrebird.rc.edge.EdgeDetectionController
@@ -157,7 +158,6 @@ import dji.v5.ux.detection.DetectionOverlayView
 import dji.v5.ux.map.MapWidget
 import dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity
 import java.io.File
-import java.io.OutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -317,29 +317,7 @@ class FlightDeckActivity :
     lateinit var mediaVM: MediaVM
     lateinit var payloadWidgetVM: PayloadWidgetVM
 
-    override val media: LyrebirdMediaPort by lazy {
-        object : LyrebirdMediaPort {
-            override fun capturePhotoFileName(): String? = Payload.capturePhoto(mediaVM)?.fileName
-
-            override fun captureThermalJson(): String? = Payload.captureThermal(mediaVM)
-
-            override fun listMediaJson(): String = Payload.listAllMedia(mediaVM)
-
-            override fun sendMediaFile(
-                fileName: String,
-                outputStream: OutputStream,
-            ) {
-                Payload.sendMediaFileByName(mediaVM, fileName, outputStream)
-            }
-
-            override fun sendErrorResponse(
-                message: String,
-                outputStream: OutputStream,
-            ) {
-                Payload.sendErrorResponse(outputStream, message)
-            }
-        }
-    }
+    override val media: LyrebirdMediaPort by lazy { V5MediaPort { mediaVM } }
 
     override val detection: LyrebirdDetectionPort by lazy {
         object : LyrebirdDetectionPort {
