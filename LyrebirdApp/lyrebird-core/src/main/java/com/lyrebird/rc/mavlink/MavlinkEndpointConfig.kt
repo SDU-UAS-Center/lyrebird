@@ -23,6 +23,8 @@ data class MavlinkEndpointConfig(
     val mode: Profile = Profile.NORMAL,
     /** Resolved MAVLink system id (1..254). One per aircraft, the way a GCS distinguishes vehicles. */
     val systemId: Int = DEFAULT_SYSTEM_ID,
+    /** Signing key as hex, or empty when signing is not configured. */
+    val signingKeyHex: String = "",
     /**
      * Which of Lyrebird's two path followers flies an uploaded plan. A setting rather than a
      * second mission protocol: MAVLink has one, and a ground station has no way to pick an
@@ -33,27 +35,29 @@ data class MavlinkEndpointConfig(
      * mid-flight. `onboard` remains selectable for a plan that leans on behaviour DJI's wayline
      * engine cannot represent, such as a continuously-tracking region of interest.
      */
-    /** Signing key as hex, or empty when signing is not configured. */
-    val signingKeyHex: String = "",
-    val missionExecutor: MissionExecutor = MissionExecutor.DJI_NATIVE
+
+    val missionExecutor: MissionExecutor = MissionExecutor.DJI_NATIVE,
 ) {
     /**
      * Stream profile, the equivalent of `MAV_n_MODE`. Each profile picks a different set of
      * messages and rates; [MINIMAL] exists for links where bandwidth matters more than smoothness.
      */
-    enum class Profile(val prefValue: String) {
+    enum class Profile(
+        val prefValue: String,
+    ) {
         NORMAL("normal"),
-        MINIMAL("minimal");
+        MINIMAL("minimal"),
+        ;
 
         companion object {
-            fun fromPref(value: String?): Profile =
-                entries.firstOrNull { it.prefValue == value } ?: NORMAL
+            fun fromPref(value: String?): Profile = entries.firstOrNull { it.prefValue == value } ?: NORMAL
         }
     }
 
     companion object {
         /** The port QGroundControl listens on by default. */
         const val DEFAULT_GCS_PORT = 14550
+
         /** 0 = auto-derive the id from the aircraft identity; resolved by [MavlinkSystemId]. */
         const val DEFAULT_SYSTEM_ID = MavlinkSystemId.AUTO
 

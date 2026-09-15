@@ -5,7 +5,6 @@ import java.nio.ByteOrder
 
 /** Message ids for the telemetry set Lyrebird emits. */
 object MavlinkMsgId {
-
     /** Inbound stick input, the standard equivalent of Lyrebird's /send/stick. */
     const val MANUAL_CONTROL = 69
 
@@ -47,6 +46,7 @@ object MavlinkMsgId {
     const val ATTITUDE = 30
     const val GLOBAL_POSITION_INT = 33
     const val VFR_HUD = 74
+
     // MAVLink 2 message id for EXTENDED_SYS_STATE. The message only exists in the MAVLink 2
     // dialect and lives at 245 there; 125 is POWER_STATUS in both dialects. QGroundControl 5.1.3
     // (which is MAVLink 2 only) listens for EXTENDED_SYS_STATE at 245, so sending 125 made its
@@ -281,6 +281,12 @@ object Mav {
     const val ROI_MODE_LOCATION = 3
     const val ROI_MODE_NONE = 0
 
+    /** MAV_DISTANCE_SENSOR_LASER. */
+    const val DISTANCE_SENSOR_TYPE_LASER = 0
+
+    /** MAV_SENSOR_ROTATION_PITCH_270: pointing down, where a gimballed rangefinder looks. */
+    const val SENSOR_ROTATION_PITCH_270 = 25
+
     /**
      * The two Lyrebird-specific commands.
      *
@@ -292,11 +298,6 @@ object Mav {
      * latch, releasing safety back to the Pilot). USER_2 is payload sensing (laser rangefinder,
      * spot temperature, thermal shutter).
      */
-    /** MAV_DISTANCE_SENSOR_LASER. */
-    const val DISTANCE_SENSOR_TYPE_LASER = 0
-
-    /** MAV_SENSOR_ROTATION_PITCH_270: pointing down, where a gimballed rangefinder looks. */
-    const val SENSOR_ROTATION_PITCH_270 = 25
 
     const val CMD_USER_1 = 31010
     const val CMD_USER_2 = 31011
@@ -409,29 +410,47 @@ object Mav {
  * builders in [MavlinkMessages] follow the order generated from `common.xml`; changing the order
  * silently corrupts every field after the change, so the orders are commented per message there.
  */
-class PayloadWriter(capacity: Int = MAX_PAYLOAD) {
+class PayloadWriter(
+    capacity: Int = MAX_PAYLOAD,
+) {
     private val buffer: ByteBuffer =
         ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN)
 
     fun u8(value: Int) = apply { buffer.put((value and 0xFF).toByte()) }
+
     fun i8(value: Int) = apply { buffer.put(value.toByte()) }
+
     fun u16(value: Int) = apply { buffer.putShort((value and 0xFFFF).toShort()) }
+
     fun i16(value: Int) = apply { buffer.putShort(value.toShort()) }
+
     fun u32(value: Long) = apply { buffer.putInt((value and 0xFFFFFFFFL).toInt()) }
+
     fun i32(value: Int) = apply { buffer.putInt(value) }
+
     fun u64(value: Long) = apply { buffer.putLong(value) }
+
     fun f32(value: Float) = apply { buffer.putFloat(value) }
 
-    fun f32Array(values: FloatArray, length: Int) = apply {
+    fun f32Array(
+        values: FloatArray,
+        length: Int,
+    ) = apply {
         for (i in 0 until length) buffer.putFloat(values.getOrElse(i) { 0f })
     }
 
-    fun u16Array(value: Int, length: Int) = apply {
+    fun u16Array(
+        value: Int,
+        length: Int,
+    ) = apply {
         repeat(length) { buffer.putShort((value and 0xFFFF).toShort()) }
     }
 
     /** Fixed-width char field: UTF-8, truncated to [length], zero-padded. */
-    fun chars(text: String, length: Int) = apply {
+    fun chars(
+        text: String,
+        length: Int,
+    ) = apply {
         val bytes = text.toByteArray(Charsets.UTF_8)
         for (i in 0 until length) buffer.put(if (i < bytes.size) bytes[i] else 0)
     }
@@ -439,14 +458,18 @@ class PayloadWriter(capacity: Int = MAX_PAYLOAD) {
     fun zeros(count: Int) = apply { repeat(count) { buffer.put(0) } }
 
     /** Raw bytes, zero-padded to [length] when shorter than it. */
-    fun bytes(data: ByteArray, length: Int) = apply {
+    fun bytes(
+        data: ByteArray,
+        length: Int,
+    ) = apply {
         for (i in 0 until length) buffer.put(if (i < data.size) data[i] else 0)
     }
 
-    fun build(): ByteArray = ByteArray(buffer.position()).also {
-        buffer.flip()
-        buffer.get(it)
-    }
+    fun build(): ByteArray =
+        ByteArray(buffer.position()).also {
+            buffer.flip()
+            buffer.get(it)
+        }
 
     companion object {
         const val MAX_PAYLOAD = 255
@@ -465,13 +488,17 @@ class PayloadWriter(capacity: Int = MAX_PAYLOAD) {
  */
 class MavlinkFramer(
     private val systemId: Int,
-    private val componentId: Int = Mav.COMP_ID_AUTOPILOT1
+    private val componentId: Int = Mav.COMP_ID_AUTOPILOT1,
 ) {
     private var sequence = 0
 
-    fun frame(messageId: Int, payload: ByteArray): ByteArray {
-        val crcExtra = MavlinkCrc.CRC_EXTRA[messageId]
-            ?: error("No CRC_EXTRA registered for message id $messageId")
+    fun frame(
+        messageId: Int,
+        payload: ByteArray,
+    ): ByteArray {
+        val crcExtra =
+            MavlinkCrc.CRC_EXTRA[messageId]
+                ?: error("No CRC_EXTRA registered for message id $messageId")
 
         // MAVLink 2 drops trailing zero bytes from the payload, but never all of them: a
         // zero-length payload is encoded as a single zero byte.

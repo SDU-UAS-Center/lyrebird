@@ -52,23 +52,17 @@ def lyrebirdSourceIncludes = [
         'com/lyrebird/rc/FlightDeckActivity.kt',
 ]
 
-// NOTE: the list above is source-root-relative, which is what Detekt matches against. Spotless
-// resolves targets relative to the module directory, so `target lyrebirdSourceIncludes` below
-// matches no file at all: this check passes having inspected nothing.
+// The list above is source-root-relative, which is what Detekt matches against. Spotless resolves
+// targets relative to the module directory instead, so reusing it as a Spotless target matched no
+// file at all: this check passed having inspected nothing. Verified by appending a deliberate
+// violation to a listed file and still getting BUILD SUCCESSFUL.
 //
-// Verified, not inferred: a deliberate trailing-whitespace violation appended to
-// controller/ControlAuthority.kt (a file this list names) still produced BUILD SUCCESSFUL, while
-// the same probe against a correctly-rooted target failed as it should.
-//
-// Two consequences, both deliberately left to their own change rather than bundled here:
-//   - the app's Lyrebird sources have drifted from ktlint's output (DroneControlProfiles.kt is
-//     among the offenders), so repointing the target turns the gate red until they are
-//     reformatted;
-//   - the mavlink sources, now in :lyrebird-core, carry 8 violations the gate never reported:
-//     7 duplicate-KDoc blocks (ktlint standard:no-consecutive-comments) in MavlinkEndpointConfig,
-//     MavlinkInbound, MavlinkMessages, MavlinkMotionSink, MavlinkProtocol, MavlinkSnapshot and
-//     MavlinkTelemetryEndpoint, plus one over-long line in MavlinkSigningTest.
-// :lyrebird-core needs the same treatment, so it is not gated yet either.
+// Repointing it is not a one-line fix, so it is deliberately not done here: the app's Lyrebird
+// sources were never checked, and turning the gate on requires reformatting controller, webrtc,
+// server and safety sources plus resolving the violations ktlint cannot fix on its own — among
+// them 10 KDoc-adjacency sites in controller/DroneController.kt, controller/Payload.kt and
+// FlightDeckActivity.kt. That deserves its own reviewable change; :lyrebird-core below is already
+// correctly scoped and does gate its Kotlin.
 project(':app') {
     apply plugin: 'com.diffplug.spotless'
 
@@ -80,9 +74,19 @@ project(':app') {
     }
 }
 
-// The shared core is not gated either, for the same reason, and adding the block without wiring
-// it into a check task would only look like coverage. Both modules get correctly-rooted targets
-// in the change that also reformats them.
+// The shared core is entirely Lyrebird-owned, so it needs no include list at all: every Kotlin
+// file in it is gated, and a new package cannot be added without being covered.
+project(':lyrebird-core') {
+    apply plugin: 'com.diffplug.spotless'
+
+    spotless {
+        kotlin {
+            target 'src/main/java/**/*.kt', 'src/test/java/**/*.kt'
+            ktlint('1.5.0')
+        }
+    }
+}
+
 detekt {
     buildUponDefaultConfig = true
     allRules = false
@@ -138,7 +142,7 @@ tasks.register('detektDji', detektTaskClass) {
 tasks.register('qualityLyrebird') {
     group = 'verification'
     description = 'Run ktlint formatting checks, Detekt, and Android Lint for Lyrebird app code.'
-    dependsOn ':app:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentDebug'
+    dependsOn ':app:spotlessKotlinCheck', ':lyrebird-core:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentDebug'
 }
 
 tasks.register('qualityDji') {

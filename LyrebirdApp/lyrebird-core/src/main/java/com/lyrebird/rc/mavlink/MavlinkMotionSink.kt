@@ -15,8 +15,6 @@ package com.lyrebird.rc.mavlink
  *   3. the RC manual-override latch is clear, for the closed-loop commands that fight the pilot.
  */
 interface MavlinkMotionSink {
-
-    /** Begin a takeoff. */
     /**
      * Take off, and climb to [altitudeM] when one was asked for.
      *
@@ -37,7 +35,6 @@ interface MavlinkMotionSink {
     /** Begin return-to-launch. */
     fun returnToHome(): CommandResult
 
-    /** Fly to a position, holding the given heading on arrival. */
     /**
      * Fly to one point.
      *
@@ -51,7 +48,7 @@ interface MavlinkMotionSink {
         longitudeDeg: Double,
         altitudeMeters: Double,
         yawDeg: Double,
-        groundSpeedMps: Double
+        groundSpeedMps: Double,
     ): CommandResult
 
     /** Rotate in place to an absolute yaw, in degrees. */
@@ -77,14 +74,9 @@ interface MavlinkMotionSink {
         tangentialSpeedMps: Double,
         clockwise: Boolean,
         arcDegrees: Double,
-        faceCentre: Boolean
+        faceCentre: Boolean,
     ): CommandResult
 
-    /**
-     * An arming request. DJI has no arm/disarm: motors spin up when a takeoff starts and stop
-     * after touchdown. The request is acknowledged as a no-op (still behind the gate) so a ground
-     * station's takeoff sequence does not abort on a refused arm.
-     */
     /**
      * Stop everything and hold position.
      *
@@ -99,7 +91,12 @@ interface MavlinkMotionSink {
     fun enableOffboard(): CommandResult
 
     /** Stick input, each axis in -1..1. Requires offboard. */
-    fun manualControl(roll: Float, pitch: Float, throttle: Float, yaw: Float): CommandResult
+    fun manualControl(
+        roll: Float,
+        pitch: Float,
+        throttle: Float,
+        yaw: Float,
+    ): CommandResult
 
     /** Climb or descend to an altitude above home, holding position. */
     fun setAltitude(altitudeMeters: Double): CommandResult
@@ -124,6 +121,12 @@ interface MavlinkMotionSink {
      * latch, not by calling back.
      */
     fun pollCompletion(pending: PendingCommand): CommandProgress
+
+    /**
+     * An arming request. DJI has no arm/disarm: motors spin up when a takeoff starts and stop
+     * after touchdown. The request is acknowledged as a no-op (still behind the gate) so a ground
+     * station's takeoff sequence does not abort on a refused arm.
+     */
 
     fun arm(): CommandResult
 

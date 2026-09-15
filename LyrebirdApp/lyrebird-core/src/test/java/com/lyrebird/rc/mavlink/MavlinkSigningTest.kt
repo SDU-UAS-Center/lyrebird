@@ -13,7 +13,6 @@ import org.junit.Test
  * reading of the specification.
  */
 class MavlinkSigningTest {
-
     private val key = ByteArray(32) { it.toByte() }
 
     @Before
@@ -56,7 +55,7 @@ class MavlinkSigningTest {
         val data = bytes(VALID_FIRST)
         assertEquals(
             MavlinkSigning.Origin.UNSIGNED,
-            MavlinkSigning.originOf(data, data.size, key = null)
+            MavlinkSigning.originOf(data, data.size, key = null),
         )
     }
 
@@ -75,13 +74,18 @@ class MavlinkSigningTest {
         return MavlinkSigning.originOf(data, data.size, key)
     }
 
-    private fun bytes(hex: String) =
-        ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    private fun bytes(hex: String) = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
 
     private companion object {
-        const val VALID_FIRST = "fd20010000ffbe4c00000000803f0000000000000000000000000000000000000000000000009001010149d00040420f00000083b453f4492b"
-        const val VALID_SECOND = "fd20010001ffbe4c00000000803f00000000000000000000000000000000000000000000000090010101a79a0041420f000000638d21c1617a"
-        const val TAMPERED = "fd20010001ffbe4c00000000803f00000000000000000000000000000000000000000000000090010101a79a0041420f000000638d21c16185"
+        const val VALID_FIRST =
+            "fd20010000ffbe4c00000000803f0000000000000000000000000000000000000000000000009001" +
+                "010149d00040420f00000083b453f4492b"
+        const val VALID_SECOND =
+            "fd20010001ffbe4c00000000803f0000000000000000000000000000000000000000000000009001" +
+                "0101a79a0041420f000000638d21c1617a"
+        const val TAMPERED =
+            "fd20010001ffbe4c00000000803f0000000000000000000000000000000000000000000000009001" +
+                "0101a79a0041420f000000638d21c16185"
         const val UNSIGNED = "fd20000000ffbe4c00000000803f000000000000000000000000000000000000000000000000900101019e4e"
     }
 }

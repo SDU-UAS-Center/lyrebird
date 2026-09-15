@@ -14,7 +14,6 @@ import kotlin.math.sqrt
  * orders here were generated from upstream `common.xml`.
  */
 object MavlinkMessages {
-
     private const val DEG_TO_E7 = 1e7
     private const val M_TO_MM = 1000.0
     private const val MPS_TO_CMPS = 100.0
@@ -56,11 +55,12 @@ object MavlinkMessages {
             baseMode = baseMode or Mav.MODE_FLAG_STABILIZE_ENABLED
         }
 
-        val systemStatus = when {
-            snapshot.motorsRunning -> Mav.STATE_ACTIVE
-            snapshot.flightMode == "UNKNOWN" -> Mav.STATE_UNINIT
-            else -> Mav.STATE_STANDBY
-        }
+        val systemStatus =
+            when {
+                snapshot.motorsRunning -> Mav.STATE_ACTIVE
+                snapshot.flightMode == "UNKNOWN" -> Mav.STATE_UNINIT
+                else -> Mav.STATE_STANDBY
+            }
 
         return PayloadWriter()
             .u32(mode.customMode.toLong())
@@ -75,12 +75,13 @@ object MavlinkMessages {
     /** vtol_state(u8), landed_state(u8) */
     fun extendedSysState(snapshot: MavlinkSnapshot): ByteArray {
         val mode = modeOf(snapshot)
-        val landedState = when {
-            !snapshot.motorsRunning -> Mav.LANDED_STATE_ON_GROUND
-            mode == MavlinkFlightMode.LAND -> Mav.LANDED_STATE_LANDING
-            mode == MavlinkFlightMode.TAKEOFF -> Mav.LANDED_STATE_TAKEOFF
-            else -> Mav.LANDED_STATE_IN_AIR
-        }
+        val landedState =
+            when {
+                !snapshot.motorsRunning -> Mav.LANDED_STATE_ON_GROUND
+                mode == MavlinkFlightMode.LAND -> Mav.LANDED_STATE_LANDING
+                mode == MavlinkFlightMode.TAKEOFF -> Mav.LANDED_STATE_TAKEOFF
+                else -> Mav.LANDED_STATE_IN_AIR
+            }
         return PayloadWriter()
             .u8(Mav.VTOL_STATE_MC)
             .u8(landedState)
@@ -107,10 +108,11 @@ object MavlinkMessages {
      * battery_remaining(i8)
      */
     fun sysStatus(snapshot: MavlinkSnapshot): ByteArray {
-        var sensors = Mav.SENSOR_3D_GYRO or Mav.SENSOR_3D_ACCEL or Mav.SENSOR_3D_MAG or
-            Mav.SENSOR_ABSOLUTE_PRESSURE or Mav.SENSOR_ATTITUDE_STABILIZATION or
-            Mav.SENSOR_YAW_POSITION or Mav.SENSOR_Z_ALTITUDE_CONTROL or
-            Mav.SENSOR_XY_POSITION_CONTROL or Mav.SENSOR_BATTERY
+        var sensors =
+            Mav.SENSOR_3D_GYRO or Mav.SENSOR_3D_ACCEL or Mav.SENSOR_3D_MAG or
+                Mav.SENSOR_ABSOLUTE_PRESSURE or Mav.SENSOR_ATTITUDE_STABILIZATION or
+                Mav.SENSOR_YAW_POSITION or Mav.SENSOR_Z_ALTITUDE_CONTROL or
+                Mav.SENSOR_XY_POSITION_CONTROL or Mav.SENSOR_BATTERY
         val gpsHealthy = snapshot.satelliteCount >= GPS_FIX_3D_SATELLITES
         sensors = sensors or Mav.SENSOR_GPS
 
@@ -125,7 +127,10 @@ object MavlinkMessages {
             .i16(-1) // current_battery: unknown
             .u16(0) // drop_rate_comm
             .u16(0) // errors_comm
-            .u16(0).u16(0).u16(0).u16(0)
+            .u16(0)
+            .u16(0)
+            .u16(0)
+            .u16(0)
             .i8(snapshot.batteryPercent.coerceIn(MavlinkSnapshot.INVALID_BATTERY, PERCENT_MAX))
             .build()
     }
@@ -134,7 +139,10 @@ object MavlinkMessages {
      * time_usec(u64), lat(i32), lon(i32), alt(i32), eph(u16), epv(u16), vel(u16), cog(u16),
      * fix_type(u8), satellites_visible(u8)
      */
-    fun gpsRawInt(snapshot: MavlinkSnapshot, timeUsec: Long): ByteArray {
+    fun gpsRawInt(
+        snapshot: MavlinkSnapshot,
+        timeUsec: Long,
+    ): ByteArray {
         val groundSpeed = groundSpeedMps(snapshot)
         return PayloadWriter()
             .u64(timeUsec)
@@ -152,21 +160,29 @@ object MavlinkMessages {
     }
 
     /** time_boot_ms(u32), roll(f), pitch(f), yaw(f), rollspeed(f), pitchspeed(f), yawspeed(f) */
-    fun attitude(snapshot: MavlinkSnapshot, timeBootMs: Long): ByteArray =
+    fun attitude(
+        snapshot: MavlinkSnapshot,
+        timeBootMs: Long,
+    ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
             .f32((snapshot.rollDeg * DEG_TO_RAD).toFloat())
             .f32((snapshot.pitchDeg * DEG_TO_RAD).toFloat())
             .f32((wrapPi(snapshot.yawDeg) * DEG_TO_RAD).toFloat())
             // Angular rates are not exposed by the DJI SDK telemetry Lyrebird reads.
-            .f32(0f).f32(0f).f32(0f)
+            .f32(0f)
+            .f32(0f)
+            .f32(0f)
             .build()
 
     /**
      * time_boot_ms(u32), lat(i32), lon(i32), alt(i32), relative_alt(i32),
      * vx(i16), vy(i16), vz(i16), hdg(u16)
      */
-    fun globalPositionInt(snapshot: MavlinkSnapshot, timeBootMs: Long): ByteArray =
+    fun globalPositionInt(
+        snapshot: MavlinkSnapshot,
+        timeBootMs: Long,
+    ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
             .i32(degToE7(snapshot.latitudeDeg))
@@ -228,9 +244,13 @@ object MavlinkMessages {
             .i32(degToE7(snapshot.homeLatitudeDeg))
             .i32(degToE7(snapshot.homeLongitudeDeg))
             .i32(metresToMm(snapshot.homeAltitudeAslM))
-            .f32(0f).f32(0f).f32(0f) // local x/y/z: no local frame is maintained
+            .f32(0f)
+            .f32(0f)
+            .f32(0f) // local x/y/z: no local frame is maintained
             .f32Array(IDENTITY_QUATERNION, QUATERNION_LENGTH)
-            .f32(0f).f32(0f).f32(0f) // approach vector: not defined
+            .f32(0f)
+            .f32(0f)
+            .f32(0f) // approach vector: not defined
             .build()
 
     /**
@@ -255,14 +275,20 @@ object MavlinkMessages {
             .u64(Mav.CAP_MAVLINK2 or Mav.CAP_FTP)
             .u64(0) // uid
             .u32(PX4_COMPAT_FLIGHT_SW_VERSION.toLong())
-            .u32(0).u32(0).u32(0)
-            .u16(0).u16(0)
+            .u32(0)
+            .u32(0)
+            .u32(0)
+            .u16(0)
+            .u16(0)
             .chars("WBbridge", CUSTOM_VERSION_BYTES)
             .zeros(CUSTOM_VERSION_BYTES * 2)
             .build()
 
     /** severity(u8), text(char[50]) */
-    fun statusText(severity: Int, text: String): ByteArray =
+    fun statusText(
+        severity: Int,
+        text: String,
+    ): ByteArray =
         PayloadWriter()
             .u8(severity)
             .chars(text, STATUSTEXT_LENGTH)
@@ -282,7 +308,11 @@ object MavlinkMessages {
      * setting a mode means commanding the aircraft and that belongs with the rest of the command
      * surface.
      */
-    fun availableModes(mode: MavlinkFlightMode, index: Int, total: Int): ByteArray =
+    fun availableModes(
+        mode: MavlinkFlightMode,
+        index: Int,
+        total: Int,
+    ): ByteArray =
         PayloadWriter()
             .u32(mode.customMode.toLong())
             .u32(Mav.MODE_PROPERTY_NOT_USER_SELECTABLE)
@@ -291,9 +321,8 @@ object MavlinkMessages {
             .u8(mode.standardMode)
             .chars(
                 if (mode.standardMode == Mav.STANDARD_MODE_NON_STANDARD) mode.displayName else "",
-                MODE_NAME_LENGTH
-            )
-            .build()
+                MODE_NAME_LENGTH,
+            ).build()
 
     /**
      * custom_mode(u32), intended_custom_mode(u32), standard_mode(u8)
@@ -320,7 +349,7 @@ object MavlinkMessages {
     fun videoStreamStatus(
         framerate: Float,
         widthPx: Int,
-        heightPx: Int
+        heightPx: Int,
     ): ByteArray =
         PayloadWriter()
             .f32(framerate)
@@ -341,7 +370,10 @@ object MavlinkMessages {
      * neutral: the camera object stays null and the QML throws, which breaks the surrounding
      * controls — including the button that swaps the map and video views.
      */
-    fun cameraSettings(timeBootMs: Long, zoomLevel: Float): ByteArray =
+    fun cameraSettings(
+        timeBootMs: Long,
+        zoomLevel: Float,
+    ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
             .u8(Mav.CAMERA_MODE_VIDEO)
@@ -361,8 +393,11 @@ object MavlinkMessages {
     fun storageInformation(timeBootMs: Long): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
-            .f32(0f).f32(0f).f32(0f)
-            .f32(0f).f32(0f)
+            .f32(0f)
+            .f32(0f)
+            .f32(0f)
+            .f32(0f)
+            .f32(0f)
             .u8(STORAGE_ID)
             .u8(1) // storage_count
             .u8(Mav.STORAGE_STATUS_NOT_SUPPORTED)
@@ -375,7 +410,11 @@ object MavlinkMessages {
      * announces a count, we request each index in turn, it answers. Requesting by index rather
      * than streaming is what lets a lost item be retried without restarting the plan.
      */
-    fun missionRequestInt(seq: Int, targetSystem: Int, targetComponent: Int): ByteArray =
+    fun missionRequestInt(
+        seq: Int,
+        targetSystem: Int,
+        targetComponent: Int,
+    ): ByteArray =
         PayloadWriter()
             .u16(seq)
             .u8(targetSystem)
@@ -390,7 +429,11 @@ object MavlinkMessages {
      * item was wrong rather than failing silently — §11's rule that a silently dropped mission
      * item is a flight-safety bug.
      */
-    fun missionAck(result: Int, targetSystem: Int, targetComponent: Int): ByteArray =
+    fun missionAck(
+        result: Int,
+        targetSystem: Int,
+        targetComponent: Int,
+    ): ByteArray =
         PayloadWriter()
             .u8(targetSystem)
             .u8(targetComponent)
@@ -409,7 +452,7 @@ object MavlinkMessages {
         item: MissionItem,
         targetSystem: Int,
         targetComponent: Int,
-        isCurrent: Boolean
+        isCurrent: Boolean,
     ): ByteArray =
         PayloadWriter()
             .f32(item.param1)
@@ -436,7 +479,12 @@ object MavlinkMessages {
      * `mission_id` changes whenever the stored plan changes, which is how a station notices its
      * cached copy is stale.
      */
-    fun missionCurrent(seq: Int, total: Int, state: Int, planId: Int): ByteArray =
+    fun missionCurrent(
+        seq: Int,
+        total: Int,
+        state: Int,
+        planId: Int,
+    ): ByteArray =
         PayloadWriter()
             .u16(seq)
             .u16(total)
@@ -470,16 +518,27 @@ object MavlinkMessages {
      * sent as 30.0 reads back as 1719 degrees. The field was shipped this way once; the
      * regression test pins the radians encoding.
      */
-    fun gimbalDeviceAttitudeStatus(snapshot: MavlinkSnapshot, timeBootMs: Long): ByteArray {
-        val (w, x, y, z) = eulerToQuaternion(
-            snapshot.gimbalRollDeg, snapshot.gimbalPitchDeg, snapshot.gimbalYawDeg
-        )
+    fun gimbalDeviceAttitudeStatus(
+        snapshot: MavlinkSnapshot,
+        timeBootMs: Long,
+    ): ByteArray {
+        val (w, x, y, z) =
+            eulerToQuaternion(
+                snapshot.gimbalRollDeg,
+                snapshot.gimbalPitchDeg,
+                snapshot.gimbalYawDeg,
+            )
         return PayloadWriter()
             .u32(timeBootMs)
-            .f32(w).f32(x).f32(y).f32(z)
+            .f32(w)
+            .f32(x)
+            .f32(y)
+            .f32(z)
             // Angular rates are not reported by DJI. NaN is MAVLink's "unknown" here, which is
             // honest where zero would claim a stationary gimbal.
-            .f32(Float.NaN).f32(Float.NaN).f32(Float.NaN)
+            .f32(Float.NaN)
+            .f32(Float.NaN)
+            .f32(Float.NaN)
             .u32(0) // failure_flags: nothing wrong
             .u16(GIMBAL_FLAGS_YAW_IN_VEHICLE_FRAME)
             .u8(0) // target_system: broadcast
@@ -499,7 +558,10 @@ object MavlinkMessages {
      * without knowing anything about Lyrebird. The geo-referenced target point it computes has
      * no standard home and travels in LYREBIRD_STATUS instead.
      */
-    fun distanceSensor(distanceMeters: Double, timeBootMs: Long): ByteArray =
+    fun distanceSensor(
+        distanceMeters: Double,
+        timeBootMs: Long,
+    ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
             .u16(LRF_MIN_DISTANCE_CM)
@@ -516,13 +578,17 @@ object MavlinkMessages {
      * mavgen — see GroundStation/mavlink/lyrebird.xml, which is the source of truth for both
      * ends and for the CRC_EXTRA of 196.
      */
-    fun lyrebirdStatus(snapshot: MavlinkSnapshot, timeBootMs: Long): ByteArray {
+    fun lyrebirdStatus(
+        snapshot: MavlinkSnapshot,
+        timeBootMs: Long,
+    ): ByteArray {
         var flags = 0
         if (snapshot.manualOverrideActive) flags = flags or LB_FLAG_MANUAL_OVERRIDE
         if (snapshot.readyToTakeoff) flags = flags or LB_FLAG_READY_TO_TAKEOFF
         if (snapshot.homeSet) flags = flags or LB_FLAG_HOME_SET
-        val targetValid = snapshot.lrfTargetLatitudeDeg != null &&
-            snapshot.lrfTargetLongitudeDeg != null
+        val targetValid =
+            snapshot.lrfTargetLatitudeDeg != null &&
+                snapshot.lrfTargetLongitudeDeg != null
         if (targetValid) flags = flags or LB_FLAG_LRF_TARGET_VALID
         if (snapshot.waypointReached) flags = flags or LB_FLAG_WAYPOINT_REACHED
         if (snapshot.yawReached) flags = flags or LB_FLAG_YAW_REACHED
@@ -578,7 +644,11 @@ object MavlinkMessages {
      * sees nothing" are different states and a ground station cannot tell them apart from the
      * absence of target messages alone.
      */
-    fun autoSensingStatus(snapshot: MavlinkSnapshot, timeBootMs: Long, frameId: Long): ByteArray =
+    fun autoSensingStatus(
+        snapshot: MavlinkSnapshot,
+        timeBootMs: Long,
+        frameId: Long,
+    ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
             .u32(frameId)
@@ -601,7 +671,7 @@ object MavlinkMessages {
         index: Int,
         total: Int,
         timeBootMs: Long,
-        frameId: Long
+        frameId: Long,
     ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
@@ -618,14 +688,13 @@ object MavlinkMessages {
             .build()
 
     /** Degrees to centidegrees, clamped to the int16 the wire field is. */
-    private fun degToCentidegrees(degrees: Double): Int =
-        (degrees * 100).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+    private fun degToCentidegrees(degrees: Double): Int = (degrees * 100).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
 
     /** ZYX euler angles in degrees to a MAVLink attitude quaternion. */
     private fun eulerToQuaternion(
         rollDeg: Double,
         pitchDeg: Double,
-        yawDeg: Double
+        yawDeg: Double,
     ): Quaternion {
         val cr = kotlin.math.cos(Math.toRadians(rollDeg) / 2)
         val sr = kotlin.math.sin(Math.toRadians(rollDeg) / 2)
@@ -637,11 +706,16 @@ object MavlinkMessages {
             (cr * cp * cy + sr * sp * sy).toFloat(),
             (sr * cp * cy - cr * sp * sy).toFloat(),
             (cr * sp * cy + sr * cp * sy).toFloat(),
-            (cr * cp * sy - sr * sp * cy).toFloat()
+            (cr * cp * sy - sr * sp * cy).toFloat(),
         )
     }
 
-    private data class Quaternion(val w: Float, val x: Float, val y: Float, val z: Float)
+    private data class Quaternion(
+        val w: Float,
+        val x: Float,
+        val y: Float,
+        val z: Float,
+    )
 
     /** seq(u16) — emitted as each waypoint is reached. */
     fun missionItemReached(seq: Int): ByteArray =
@@ -652,7 +726,12 @@ object MavlinkMessages {
     /**
      * param_value(f), param_count(u16), param_index(u16), param_id(char[16]), param_type(u8)
      */
-    fun paramValue(name: String, value: Float, count: Int, index: Int): ByteArray =
+    fun paramValue(
+        name: String,
+        value: Float,
+        count: Int,
+        index: Int,
+    ): ByteArray =
         PayloadWriter()
             .f32(value)
             .u16(count)
@@ -667,7 +746,11 @@ object MavlinkMessages {
      * The answer to a PARAM_EXT_SET. The value echoed back is what the setting now holds, not
      * what was asked for, so a caller learns from the reply whether the write actually took.
      */
-    fun paramExtAck(name: String, value: String, result: Int): ByteArray =
+    fun paramExtAck(
+        name: String,
+        value: String,
+        result: Int,
+    ): ByteArray =
         PayloadWriter()
             .chars(name, PARAM_ID_LENGTH)
             .chars(value, PARAM_EXT_VALUE_LENGTH)
@@ -679,7 +762,12 @@ object MavlinkMessages {
      * param_count(u16), param_index(u16), param_id(char[16]), param_value(char[128]),
      * param_type(u8)
      */
-    fun paramExtValue(name: String, value: String, count: Int, index: Int): ByteArray =
+    fun paramExtValue(
+        name: String,
+        value: String,
+        count: Int,
+        index: Int,
+    ): ByteArray =
         PayloadWriter()
             .u16(count)
             .u16(index)
@@ -700,7 +788,7 @@ object MavlinkMessages {
         count: Int,
         targetSystem: Int,
         targetComponent: Int,
-        missionType: Int
+        missionType: Int,
     ): ByteArray =
         PayloadWriter()
             .u16(count)
@@ -728,7 +816,7 @@ object MavlinkMessages {
          * rangefinder's distance, the thermal spot temperature — so a caller gets the reading in
          * the ack rather than having to poll telemetry and hope it is looking at the right sample.
          */
-        resultValue: Int = 0
+        resultValue: Int = 0,
     ): ByteArray =
         PayloadWriter()
             .u16(command)
@@ -739,20 +827,6 @@ object MavlinkMessages {
             .u8(targetComponent)
             .build()
 
-    /**
-     * time_boot_ms(u32), firmware_version(u32), focal_length(f), sensor_size_h(f),
-     * sensor_size_v(f), flags(u32), resolution_h(u16), resolution_v(u16),
-     * cam_definition_version(u16), vendor_name(u8[32]), model_name(u8[32]), lens_id(u8),
-     * cam_definition_uri(char[140])
-     *
-     * Claims the video stream plus image and video capture, all of which are now implemented in
-     * [MavlinkCommandSink]. The rule that keeps this honest: a capability flag is a promise about
-     * the whole microservice behind it, so nothing is claimed here until the messages and commands
-     * that support it exist. Capture and recording were deliberately absent until they did.
-     *
-     * `cam_definition_uri` is left empty: a camera definition file is how per-camera settings get
-     * rendered, and there are none to expose until the detection and streaming parameters land.
-     */
     /**
      * time_boot_ms(u32), image_interval(f), recording_time_ms(u32), available_capacity(f),
      * image_status(u8), video_status(u8)
@@ -770,7 +844,7 @@ object MavlinkMessages {
         timeBootMs: Long,
         recording: Boolean,
         capturing: Boolean = false,
-        imageCount: Int = 0
+        imageCount: Int = 0,
     ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
@@ -800,7 +874,7 @@ object MavlinkMessages {
         timeBootMs: Long,
         imageIndex: Int,
         success: Boolean,
-        fileName: String
+        fileName: String,
     ): ByteArray =
         PayloadWriter()
             .u64(0) // time_utc: unknown, receivers fall back to time_boot_ms
@@ -817,22 +891,38 @@ object MavlinkMessages {
             .chars(fileName, FILE_URL_LENGTH)
             .build()
 
+    /**
+     * time_boot_ms(u32), firmware_version(u32), focal_length(f), sensor_size_h(f),
+     * sensor_size_v(f), flags(u32), resolution_h(u16), resolution_v(u16),
+     * cam_definition_version(u16), vendor_name(u8[32]), model_name(u8[32]), lens_id(u8),
+     * cam_definition_uri(char[140])
+     *
+     * Claims the video stream plus image and video capture, all of which are now implemented in
+     * [MavlinkCommandSink]. The rule that keeps this honest: a capability flag is a promise about
+     * the whole microservice behind it, so nothing is claimed here until the messages and commands
+     * that support it exist. Capture and recording were deliberately absent until they did.
+     *
+     * `cam_definition_uri` is left empty: a camera definition file is how per-camera settings get
+     * rendered, and there are none to expose until the detection and streaming parameters land.
+     */
+
     fun cameraInformation(
         timeBootMs: Long,
         vendorName: String,
-        modelName: String
+        modelName: String,
     ): ByteArray =
         PayloadWriter()
             .u32(timeBootMs)
             .u32(0) // firmware_version
             .f32(0f) // focal_length: unknown, varies with the DJI payload fitted
-            .f32(0f).f32(0f) // sensor size: unknown
+            .f32(0f)
+            .f32(0f) // sensor size: unknown
             .u32(
                 Mav.CAMERA_CAP_HAS_VIDEO_STREAM or
                     Mav.CAMERA_CAP_CAPTURE_VIDEO or
-                    Mav.CAMERA_CAP_CAPTURE_IMAGE
-            )
-            .u16(0).u16(0) // still-capture resolution: not applicable while capture is unclaimed
+                    Mav.CAMERA_CAP_CAPTURE_IMAGE,
+            ).u16(0)
+            .u16(0) // still-capture resolution: not applicable while capture is unclaimed
             .u16(0) // cam_definition_version
             .chars(vendorName, NAME_FIELD_LENGTH)
             .chars(modelName, NAME_FIELD_LENGTH)
@@ -854,7 +944,7 @@ object MavlinkMessages {
         name: String,
         framerate: Float,
         widthPx: Int,
-        heightPx: Int
+        heightPx: Int,
     ): ByteArray =
         PayloadWriter()
             .f32(framerate)
@@ -877,15 +967,16 @@ object MavlinkMessages {
     fun groundSpeedMps(snapshot: MavlinkSnapshot): Double =
         sqrt(
             snapshot.velocityNorthMps * snapshot.velocityNorthMps +
-                snapshot.velocityEastMps * snapshot.velocityEastMps
+                snapshot.velocityEastMps * snapshot.velocityEastMps,
         )
 
     /** MAVLink GPS fix type, from satellite count — DJI reports no fix type directly. */
-    fun gpsFixType(satelliteCount: Int): Int = when {
-        satelliteCount >= GPS_FIX_3D_SATELLITES -> GPS_FIX_TYPE_3D
-        satelliteCount >= GPS_FIX_2D_SATELLITES -> GPS_FIX_TYPE_2D
-        else -> GPS_FIX_TYPE_NO_FIX
-    }
+    fun gpsFixType(satelliteCount: Int): Int =
+        when {
+            satelliteCount >= GPS_FIX_3D_SATELLITES -> GPS_FIX_TYPE_3D
+            satelliteCount >= GPS_FIX_2D_SATELLITES -> GPS_FIX_TYPE_2D
+            else -> GPS_FIX_TYPE_NO_FIX
+        }
 
     /**
      * Degrees to the 1e-7 degree integers MAVLink uses, clamped to the valid coordinate range.
@@ -904,8 +995,7 @@ object MavlinkMessages {
 
     private fun metresToMm(metres: Double): Int = (metres * M_TO_MM).roundToLong().toInt()
 
-    private fun mpsToCmps(mps: Double): Int =
-        (mps * MPS_TO_CMPS).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+    private fun mpsToCmps(mps: Double): Int = (mps * MPS_TO_CMPS).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
 
     /** Heading in centidegrees, 0..35999, as GLOBAL_POSITION_INT and GPS_RAW_INT expect. */
     private fun headingCdeg(headingDeg: Double): Int {

@@ -1,7 +1,6 @@
 package com.lyrebird.rc.mavlink
 
 import android.util.Log
-import kotlin.math.abs
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -10,6 +9,7 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
+import kotlin.math.abs
 
 /**
  * MAVLink 2 telemetry endpoint: streams the phase-1 message set over UDP so a stock ground station
@@ -69,7 +69,7 @@ class MavlinkTelemetryEndpoint(
      * log, so a mission flown over MAVLink left no record of having been commanded at all. Two
      * defects were reported from the field before anything logged what had been sent.
      */
-    private val commandLog: (MavlinkCommand, CommandResult) -> Unit = { _, _ -> }
+    private val commandLog: (MavlinkCommand, CommandResult) -> Unit = { _, _ -> },
 ) {
     private val framer = MavlinkFramer(config.systemId)
 
@@ -109,7 +109,9 @@ class MavlinkTelemetryEndpoint(
     private val discoveredTargets: MutableSet<InetSocketAddress> = ConcurrentHashMap.newKeySet()
 
     /** Delimits a detection cycle, so a receiver knows when it has the whole set. */
-    private val detectionFrameId = java.util.concurrent.atomic.AtomicLong(0)
+    private val detectionFrameId =
+        java.util.concurrent.atomic
+            .AtomicLong(0)
 
     /** Set once a peer has been seen, so the UI can show whether a GCS is actually attached. */
     @Volatile
@@ -142,7 +144,9 @@ class MavlinkTelemetryEndpoint(
         get() = commandOrigin == MavlinkSigning.Origin.TRUSTED
 
     /** Photos taken since boot, reported as CAMERA_CAPTURE_STATUS.image_count. */
-    private val imageCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val imageCount =
+        java.util.concurrent.atomic
+            .AtomicInteger(0)
 
     /** True while a shutter is in flight, so capture status reports it honestly. */
     @Volatile
@@ -156,16 +160,23 @@ class MavlinkTelemetryEndpoint(
      * acknowledged immediately and the outcome arrives here, which is exactly the split
      * CAMERA_IMAGE_CAPTURED exists for: `capture_result` reports whether the photo happened.
      */
-    fun reportImageCaptured(success: Boolean, fileName: String) {
+    fun reportImageCaptured(
+        success: Boolean,
+        fileName: String,
+    ) {
         capturing = false
         val index = if (success) imageCount.incrementAndGet() else imageCount.get()
         val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
         sendOnce(
             MavlinkMsgId.CAMERA_IMAGE_CAPTURED,
             MavlinkMessages.cameraImageCaptured(
-                snapshot, timeBootMs(), index, success, fileName
+                snapshot,
+                timeBootMs(),
+                index,
+                success,
+                fileName,
             ),
-            fromCamera = true
+            fromCamera = true,
         )
         Log.i(TAG, "Image captured: success=$success file=$fileName index=$index")
     }
@@ -179,10 +190,11 @@ class MavlinkTelemetryEndpoint(
         if (running) return
         running = true
 
-        senderThread = thread(name = "MavlinkEndpoint-tx", start = true) {
-            runCatching { openSocketAndStream() }
-                .onFailure { error -> Log.e(TAG, "Endpoint stopped: ${error.message}", error) }
-        }
+        senderThread =
+            thread(name = "MavlinkEndpoint-tx", start = true) {
+                runCatching { openSocketAndStream() }
+                    .onFailure { error -> Log.e(TAG, "Endpoint stopped: ${error.message}", error) }
+            }
     }
 
     fun stop() {
@@ -205,7 +217,7 @@ class MavlinkTelemetryEndpoint(
         Log.i(
             TAG,
             "MAVLink 2 endpoint up: sysid=${config.systemId} listen=${config.listenPort} " +
-                "target=${configuredTarget?.toString() ?: "broadcast"} profile=${config.mode.prefValue}"
+                "target=${configuredTarget?.toString() ?: "broadcast"} profile=${config.mode.prefValue}",
         )
 
         receiverThread = thread(name = "MavlinkEndpoint-rx", start = true) { receiveLoop(bound) }
@@ -237,8 +249,11 @@ class MavlinkTelemetryEndpoint(
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
         while (running && !bound.isClosed) {
             val packet = DatagramPacket(buffer, buffer.size)
-            val received = runCatching { bound.receive(packet); true }
-                .getOrElse { error ->
+            val received =
+                runCatching {
+                    bound.receive(packet)
+                    true
+                }.getOrElse { error ->
                     if (running && error !is SocketTimeoutException && bound.isClosed.not()) {
                         Log.d(TAG, "Receive ended: ${error.message}")
                     }
@@ -304,14 +319,17 @@ class MavlinkTelemetryEndpoint(
      * the time it is told how many to expect — the other order would leave it briefly believing
      * targets were missing.
      */
-    private fun sendDetectedTargets(snapshot: MavlinkSnapshot, frameId: Long) {
+    private fun sendDetectedTargets(
+        snapshot: MavlinkSnapshot,
+        frameId: Long,
+    ) {
         val targets = snapshot.detectedTargets
         if (targets.isEmpty()) return
         val now = timeBootMs()
         targets.forEachIndexed { index, target ->
             sendOnce(
                 MavlinkMsgId.AUTOSENSING_TARGET,
-                MavlinkMessages.autoSensingTarget(target, index, targets.size, now, frameId)
+                MavlinkMessages.autoSensingTarget(target, index, targets.size, now, frameId),
             )
         }
     }
@@ -324,7 +342,10 @@ class MavlinkTelemetryEndpoint(
      * zero is MAVLink's broadcast address and also passes, which is what lets a station that does
      * not yet know this vehicle's id ask it for its camera information.
      */
-    private fun isAddressedToThisVehicle(buffer: ByteArray, length: Int): Boolean {
+    private fun isAddressedToThisVehicle(
+        buffer: ByteArray,
+        length: Int,
+    ): Boolean {
         val target = MavlinkInbound.targetSystemOf(buffer, length) ?: return true
         if (target == 0 || target == config.systemId) return true
         Log.d(TAG, "Ignoring a frame addressed to system $target; this vehicle is ${config.systemId}")
@@ -338,7 +359,10 @@ class MavlinkTelemetryEndpoint(
      * MAV_AUTOPILOT_INVALID; anything that flies reports a real autopilot. Lyrebird itself reports
      * PX4, so two Lyrebird aircraft recognise each other here.
      */
-    private fun isVehicleHeartbeat(buffer: ByteArray, length: Int): Boolean {
+    private fun isVehicleHeartbeat(
+        buffer: ByteArray,
+        length: Int,
+    ): Boolean {
         val autopilot = MavlinkInbound.heartbeatAutopilot(buffer, length) ?: return false
         return autopilot != MavlinkInbound.AUTOPILOT_INVALID
     }
@@ -363,10 +387,11 @@ class MavlinkTelemetryEndpoint(
             val elapsedMs = (now - lastTick) / NANOS_PER_MILLI
             lastTick = now
 
-            val snapshot = runCatching { snapshotProvider() }.getOrElse {
-                Log.w(TAG, "Snapshot failed: ${it.message}")
-                MavlinkSnapshot()
-            }
+            val snapshot =
+                runCatching { snapshotProvider() }.getOrElse {
+                    Log.w(TAG, "Snapshot failed: ${it.message}")
+                    MavlinkSnapshot()
+                }
 
             // Field diagnostic: log armed and landed-state transitions. QGC derives its "Flying"
             // indicator and the Land/RTL button enablement from EXTENDED_SYS_STATE, so if a ground
@@ -376,12 +401,13 @@ class MavlinkTelemetryEndpoint(
                 Log.i(TAG, "State change: motors/armed=$lastArmed")
             }
             val mode = MavlinkFlightMode.fromDjiMode(snapshot.flightMode, snapshot.manualOverrideActive)
-            val landed = when {
-                !snapshot.motorsRunning -> Mav.LANDED_STATE_ON_GROUND
-                mode == MavlinkFlightMode.LAND -> Mav.LANDED_STATE_LANDING
-                mode == MavlinkFlightMode.TAKEOFF -> Mav.LANDED_STATE_TAKEOFF
-                else -> Mav.LANDED_STATE_IN_AIR
-            }
+            val landed =
+                when {
+                    !snapshot.motorsRunning -> Mav.LANDED_STATE_ON_GROUND
+                    mode == MavlinkFlightMode.LAND -> Mav.LANDED_STATE_LANDING
+                    mode == MavlinkFlightMode.TAKEOFF -> Mav.LANDED_STATE_TAKEOFF
+                    else -> Mav.LANDED_STATE_IN_AIR
+                }
             if (landed != lastLanded) {
                 lastLanded = landed
                 Log.i(TAG, "State change: landed_state=$landed mode=${mode.name}")
@@ -426,7 +452,7 @@ class MavlinkTelemetryEndpoint(
             Stream(
                 MavlinkMsgId.HOME_POSITION,
                 HOME_INTERVAL_MS,
-                sendIf = { it.homeCoordinatesValid }
+                sendIf = { it.homeCoordinatesValid },
             ) {
                 MavlinkMessages.homePosition(it)
             },
@@ -439,7 +465,7 @@ class MavlinkTelemetryEndpoint(
             Stream(MavlinkMsgId.VFR_HUD, POSITION_INTERVAL_MS) { MavlinkMessages.vfrHud(it) },
             Stream(
                 MavlinkMsgId.ATTITUDE,
-                if (fast) ATTITUDE_INTERVAL_MS else POSITION_INTERVAL_MS
+                if (fast) ATTITUDE_INTERVAL_MS else POSITION_INTERVAL_MS,
             ) { MavlinkMessages.attitude(it, timeBootMs()) },
             Stream(MavlinkMsgId.AUTOPILOT_VERSION, VERSION_INTERVAL_MS) {
                 MavlinkMessages.autopilotVersion()
@@ -449,7 +475,10 @@ class MavlinkTelemetryEndpoint(
             // never notice.
             Stream(MavlinkMsgId.CAMERA_CAPTURE_STATUS, CAPTURE_STATUS_INTERVAL_MS, camera = true) {
                 MavlinkMessages.cameraCaptureStatus(
-                    timeBootMs(), it.isRecording, capturing, imageCount.get()
+                    timeBootMs(),
+                    it.isRecording,
+                    capturing,
+                    imageCount.get(),
                 )
             },
             // Streamed as well as served on request, for the same reason as CAMERA_CAPTURE_STATUS:
@@ -461,7 +490,7 @@ class MavlinkTelemetryEndpoint(
                 MavlinkMsgId.VIDEO_STREAM_INFORMATION,
                 SLOW_INTERVAL_MS,
                 camera = true,
-                sendIf = { videoStreamProvider()?.uri?.isNotBlank() == true }
+                sendIf = { videoStreamProvider()?.uri?.isNotBlank() == true },
             ) {
                 val stream = videoStreamProvider()!!
                 MavlinkMessages.videoStreamInformation(
@@ -469,7 +498,7 @@ class MavlinkTelemetryEndpoint(
                     name = stream.name,
                     framerate = stream.framerate,
                     widthPx = stream.widthPx,
-                    heightPx = stream.heightPx
+                    heightPx = stream.heightPx,
                 )
             },
             // Only once a plan exists: a ground station with no plan does not need telling
@@ -477,13 +506,13 @@ class MavlinkTelemetryEndpoint(
             Stream(
                 MavlinkMsgId.MISSION_CURRENT,
                 MISSION_CURRENT_INTERVAL_MS,
-                sendIf = { missions.count() > 0 }
+                sendIf = { missions.count() > 0 },
             ) {
                 MavlinkMessages.missionCurrent(
                     seq = missions.currentIndex(),
                     total = missions.count(),
                     state = missions.missionState(),
-                    planId = missions.currentPlanId()
+                    planId = missions.currentPlanId(),
                 )
             },
             // The gimbal's pointing direction, from the component that owns the gimbal.
@@ -495,7 +524,7 @@ class MavlinkTelemetryEndpoint(
             Stream(
                 MavlinkMsgId.DISTANCE_SENSOR,
                 DISTANCE_SENSOR_INTERVAL_MS,
-                sendIf = { snapshotProvider().lrfDistanceM != null }
+                sendIf = { snapshotProvider().lrfDistanceM != null },
             ) {
                 MavlinkMessages.distanceSensor(it.lrfDistanceM ?: 0.0, timeBootMs())
             },
@@ -518,14 +547,14 @@ class MavlinkTelemetryEndpoint(
             },
             Stream(MavlinkMsgId.CURRENT_MODE, CURRENT_MODE_INTERVAL_MS) {
                 MavlinkMessages.currentMode(
-                    MavlinkFlightMode.fromDjiMode(it.flightMode, it.manualOverrideActive)
+                    MavlinkFlightMode.fromDjiMode(it.flightMode, it.manualOverrideActive),
                 )
             },
             // The camera component's own heartbeat. Without it QGroundControl never asks for
             // CAMERA_INFORMATION, and the video stream is never discovered.
             Stream(MavlinkMsgId.HEARTBEAT, HEARTBEAT_INTERVAL_MS, camera = true) {
                 MavlinkMessages.cameraHeartbeat()
-            }
+            },
         )
     }
 
@@ -545,38 +574,46 @@ class MavlinkTelemetryEndpoint(
      * are handled or discovery stalls on the retry loop.
      */
     private fun handleCommand(command: MavlinkCommand) {
-        val forCamera = command.targetComponent == Mav.COMP_ID_CAMERA ||
-            command.targetComponent == 0
+        val forCamera =
+            command.targetComponent == Mav.COMP_ID_CAMERA ||
+                command.targetComponent == 0
 
-        val result: CommandResult = when (command.command) {
-            Mav.CMD_REQUEST_MESSAGE -> asResult(sendRequestedMessage(
-                command.param1.toInt(), forCamera, command.param2.toInt()
-            ))
-            Mav.CMD_REQUEST_CAMERA_INFORMATION ->
-                asResult(if (forCamera) sendCameraInformation() else Mav.RESULT_UNSUPPORTED)
-            Mav.CMD_REQUEST_VIDEO_STREAM_INFORMATION ->
-                asResult(if (forCamera) sendVideoStreamInformation() else Mav.RESULT_UNSUPPORTED)
-            Mav.CMD_REQUEST_CAMERA_SETTINGS ->
-                asResult(if (forCamera) sendCameraSettings() else Mav.RESULT_UNSUPPORTED)
-            Mav.CMD_REQUEST_STORAGE_INFORMATION ->
-                asResult(if (forCamera) sendStorageInformation() else Mav.RESULT_UNSUPPORTED)
-            Mav.CMD_REQUEST_VIDEO_STREAM_STATUS ->
-                asResult(if (forCamera) sendVideoStreamStatus() else Mav.RESULT_UNSUPPORTED)
-            Mav.CMD_REQUEST_CAMERA_CAPTURE_STATUS ->
-                asResult(if (forCamera) sendCameraCaptureStatus() else Mav.RESULT_UNSUPPORTED)
-            else -> executeCommand(command)
-        }
+        val result: CommandResult =
+            when (command.command) {
+                Mav.CMD_REQUEST_MESSAGE ->
+                    asResult(
+                        sendRequestedMessage(
+                            command.param1.toInt(),
+                            forCamera,
+                            command.param2.toInt(),
+                        ),
+                    )
+                Mav.CMD_REQUEST_CAMERA_INFORMATION ->
+                    asResult(if (forCamera) sendCameraInformation() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_REQUEST_VIDEO_STREAM_INFORMATION ->
+                    asResult(if (forCamera) sendVideoStreamInformation() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_REQUEST_CAMERA_SETTINGS ->
+                    asResult(if (forCamera) sendCameraSettings() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_REQUEST_STORAGE_INFORMATION ->
+                    asResult(if (forCamera) sendStorageInformation() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_REQUEST_VIDEO_STREAM_STATUS ->
+                    asResult(if (forCamera) sendVideoStreamStatus() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_REQUEST_CAMERA_CAPTURE_STATUS ->
+                    asResult(if (forCamera) sendCameraCaptureStatus() else Mav.RESULT_UNSUPPORTED)
+                else -> executeCommand(command)
+            }
 
         val pending = result.pending
-        val ack = MavlinkMessages.commandAck(
-            // A command that has been accepted but has not arrived yet is acknowledged as
-            // IN_PROGRESS; the final ack follows from watchCompletion when it does.
-            command = command.command,
-            result = if (pending != null) Mav.RESULT_IN_PROGRESS else result.mavResult,
-            targetSystem = command.senderSystem,
-            targetComponent = command.senderComponent,
-            resultValue = result.resultValue
-        )
+        val ack =
+            MavlinkMessages.commandAck(
+                // A command that has been accepted but has not arrived yet is acknowledged as
+                // IN_PROGRESS; the final ack follows from watchCompletion when it does.
+                command = command.command,
+                result = if (pending != null) Mav.RESULT_IN_PROGRESS else result.mavResult,
+                targetSystem = command.senderSystem,
+                targetComponent = command.senderComponent,
+                resultValue = result.resultValue,
+            )
         // The ack must come from the component that was addressed, or the requester will not
         // match it to its request.
         sendOnce(MavlinkMsgId.COMMAND_ACK, ack, fromCamera = forCamera)
@@ -605,15 +642,19 @@ class MavlinkTelemetryEndpoint(
      * acknowledged properly on arrival — but a leg takes far longer than the wait, and the one
      * IN_PROGRESS that had been sent bought a few seconds of it.
      */
-    private fun watchCompletion(command: MavlinkCommand, pending: PendingCommand) {
+    private fun watchCompletion(
+        command: MavlinkCommand,
+        pending: PendingCommand,
+    ) {
         val motion = motionSink ?: return
         thread(name = "MavlinkCommandWatch", isDaemon = true) {
             val deadline = System.currentTimeMillis() + COMMAND_COMPLETION_TIMEOUT_MS
             var progress = CommandProgress.RUNNING
             var nextKeepaliveMs = System.currentTimeMillis() + COMMAND_IN_PROGRESS_REPEAT_MS
             while (running && System.currentTimeMillis() < deadline) {
-                progress = runCatching { motion.pollCompletion(pending) }
-                    .getOrDefault(CommandProgress.ABANDONED)
+                progress =
+                    runCatching { motion.pollCompletion(pending) }
+                        .getOrDefault(CommandProgress.ABANDONED)
                 if (progress != CommandProgress.RUNNING) break
                 if (System.currentTimeMillis() >= nextKeepaliveMs) {
                     nextKeepaliveMs = System.currentTimeMillis() + COMMAND_IN_PROGRESS_REPEAT_MS
@@ -623,8 +664,8 @@ class MavlinkTelemetryEndpoint(
                             command = command.command,
                             result = Mav.RESULT_IN_PROGRESS,
                             targetSystem = command.senderSystem,
-                            targetComponent = command.senderComponent
-                        )
+                            targetComponent = command.senderComponent,
+                        ),
                     )
                 }
                 runCatching { Thread.sleep(COMMAND_COMPLETION_POLL_MS) }.onFailure {
@@ -632,16 +673,17 @@ class MavlinkTelemetryEndpoint(
                     return@thread
                 }
             }
-            val outcome = when (progress) {
-                CommandProgress.ARRIVED -> Mav.RESULT_ACCEPTED
-                // Superseded is not failure: a ground station that re-issues a goto every second
-                // cancels its own previous command constantly, and calling that a failure would
-                // report an ordinary flight as a stream of errors.
-                CommandProgress.SUPERSEDED -> Mav.RESULT_CANCELLED
-                CommandProgress.ABANDONED -> Mav.RESULT_FAILED
-                // Ran out of time without ever resolving.
-                CommandProgress.RUNNING -> Mav.RESULT_FAILED
-            }
+            val outcome =
+                when (progress) {
+                    CommandProgress.ARRIVED -> Mav.RESULT_ACCEPTED
+                    // Superseded is not failure: a ground station that re-issues a goto every second
+                    // cancels its own previous command constantly, and calling that a failure would
+                    // report an ordinary flight as a stream of errors.
+                    CommandProgress.SUPERSEDED -> Mav.RESULT_CANCELLED
+                    CommandProgress.ABANDONED -> Mav.RESULT_FAILED
+                    // Ran out of time without ever resolving.
+                    CommandProgress.RUNNING -> Mav.RESULT_FAILED
+                }
             Log.i(TAG, "Command ${command.command} seq ${pending.seq} finished: $progress")
             sendOnce(
                 MavlinkMsgId.COMMAND_ACK,
@@ -649,11 +691,22 @@ class MavlinkTelemetryEndpoint(
                     command = command.command,
                     result = outcome,
                     targetSystem = command.senderSystem,
-                    targetComponent = command.senderComponent
-                )
+                    targetComponent = command.senderComponent,
+                ),
             )
         }
     }
+
+    /** Wrap a bare MAV_RESULT from the message-request paths, which read nothing back. */
+    private fun asResult(mavResult: Int): CommandResult =
+        CommandResult(
+            when (mavResult) {
+                Mav.RESULT_ACCEPTED -> MavlinkCommandOutcome.ACCEPTED
+                Mav.RESULT_DENIED -> MavlinkCommandOutcome.DENIED
+                Mav.RESULT_UNSUPPORTED -> MavlinkCommandOutcome.UNSUPPORTED
+                else -> MavlinkCommandOutcome.FAILED
+            },
+        )
 
     /**
      * Execute one command, or refuse it.
@@ -662,15 +715,6 @@ class MavlinkTelemetryEndpoint(
      * [MavlinkMotionSink], which is null (and therefore refuses motion) unless the host enables it
      * behind `lb_mav_0_allow_flight`. A command not named here gets `MAV_RESULT_UNSUPPORTED`.
      */
-    /** Wrap a bare MAV_RESULT from the message-request paths, which read nothing back. */
-    private fun asResult(mavResult: Int): CommandResult = CommandResult(
-        when (mavResult) {
-            Mav.RESULT_ACCEPTED -> MavlinkCommandOutcome.ACCEPTED
-            Mav.RESULT_DENIED -> MavlinkCommandOutcome.DENIED
-            Mav.RESULT_UNSUPPORTED -> MavlinkCommandOutcome.UNSUPPORTED
-            else -> MavlinkCommandOutcome.FAILED
-        }
-    )
 
     private fun executeCommand(command: MavlinkCommand): CommandResult {
         val sink = commandSink
@@ -679,149 +723,169 @@ class MavlinkTelemetryEndpoint(
             return CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
         }
         val unsupported = CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
-        val result = runCatching {
-            when (command.command) {
-                // param1 pitch, param2 yaw, both degrees.
-                Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
-                    sink.setGimbal(
-                        GimbalRotation(
-                            mode = GimbalRotationMode.ABSOLUTE,
-                            pitchDeg = command.param1.toDouble(),
-                            rollDeg = 0.0,
-                            yawDeg = command.param2.toDouble(),
-                            // DO_GIMBAL_MANAGER_PITCHYAW sets pitch and yaw; roll is not part of
-                            // the command. An axis the gimbal does not have is a no-op on the
-                            // aircraft, so there is no capability check to make.
-                            pitchIgnored = false,
-                            rollIgnored = true,
-                            yawIgnored = false
+        val result =
+            runCatching {
+                when (command.command) {
+                    // param1 pitch, param2 yaw, both degrees.
+                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
+                        sink.setGimbal(
+                            GimbalRotation(
+                                mode = GimbalRotationMode.ABSOLUTE,
+                                pitchDeg = command.param1.toDouble(),
+                                rollDeg = 0.0,
+                                yawDeg = command.param2.toDouble(),
+                                // DO_GIMBAL_MANAGER_PITCHYAW sets pitch and yaw; roll is not part of
+                                // the command. An axis the gimbal does not have is a no-op on the
+                                // aircraft, so there is no capability check to make.
+                                pitchIgnored = false,
+                                rollIgnored = true,
+                                yawIgnored = false,
+                            ),
                         )
-                    )
 
-                // param2 is the zoom value for MAV_ZOOM_TYPE_RANGE / _CONTINUOUS.
-                Mav.CMD_SET_CAMERA_ZOOM -> sink.setCameraZoom(command.param2)
+                    // param2 is the zoom value for MAV_ZOOM_TYPE_RANGE / _CONTINUOUS.
+                    Mav.CMD_SET_CAMERA_ZOOM -> sink.setCameraZoom(command.param2)
 
-                Mav.CMD_VIDEO_START_CAPTURE -> sink.startVideoRecording()
-                Mav.CMD_VIDEO_STOP_CAPTURE -> sink.stopVideoRecording()
-                Mav.CMD_IMAGE_START_CAPTURE -> sink.captureImage()
+                    Mav.CMD_VIDEO_START_CAPTURE -> sink.startVideoRecording()
+                    Mav.CMD_VIDEO_STOP_CAPTURE -> sink.stopVideoRecording()
+                    Mav.CMD_IMAGE_START_CAPTURE -> sink.captureImage()
 
-                // Flight motion, executed through the host's gated MavlinkMotionSink. A null sink
-                // (motion disabled) is refused, and the gate itself returns DENIED when
-                // lb_mav_0_allow_flight is off or the Safety Computer holds authority.
-                Mav.CMD_MISSION_START -> startStoredMission(command.param1.toInt())
+                    // Flight motion, executed through the host's gated MavlinkMotionSink. A null sink
+                    // (motion disabled) is refused, and the gate itself returns DENIED when
+                    // lb_mav_0_allow_flight is off or the Safety Computer holds authority.
+                    Mav.CMD_MISSION_START -> startStoredMission(command.param1.toInt())
 
-                Mav.CMD_DO_SET_MISSION_CURRENT -> {
-                    missions.setCurrent(command.param1.toInt())
-                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
-                }
-
-                Mav.CMD_NAV_TAKEOFF -> motionSink?.takeoff(
-                    // param7 is the requested altitude; NaN or non-positive means "use the
-                    // aircraft's default", which is what a bare takeoff does.
-                    command.param7.takeIf { it.isFinite() && it > 0f }
-                ) ?: unsupported
-                Mav.CMD_NAV_LAND -> motionSink?.land() ?: unsupported
-                Mav.CMD_NAV_RETURN_TO_LAUNCH -> motionSink?.returnToHome() ?: unsupported
-                Mav.CMD_DO_REPOSITION -> motionSink?.reposition(
-                    // Not param5/param6: those are floats, and a goto deserves the full
-                    // precision a COMMAND_INT actually carried.
-                    latitudeDeg = command.latitudeDeg,
-                    longitudeDeg = command.longitudeDeg,
-                    altitudeMeters = command.param7.toDouble(),
-                    yawDeg = command.param4.toDouble(),
-                    groundSpeedMps = command.param1.toDouble()
-                ) ?: unsupported
-                Mav.CMD_CONDITION_YAW -> motionSink?.setYaw(command.param1.toDouble()) ?: unsupported
-
-                Mav.CMD_DO_ORBIT -> motionSink?.orbit(
-                    latitudeDeg = command.latitudeDeg,
-                    longitudeDeg = command.longitudeDeg,
-                    altitudeMeters = command.param7.toDouble(),
-                    // The direction lives in the sign of the radius, so it is unpacked here
-                    // rather than being carried onward as a negative distance.
-                    radiusMeters = abs(command.param1.toDouble()),
-                    clockwise = command.param1 >= 0f,
-                    // NaN asks for the airframe's own default rather than for no movement, which
-                    // is what a zero would be.
-                    tangentialSpeedMps = command.param2.toDouble()
-                        .takeIf { it.isFinite() && it > 0.0 } ?: ORBIT_DEFAULT_SPEED_MPS,
-                    // param4 is the arc in radians, and zero means orbit until superseded.
-                    arcDegrees = command.param4.toDouble()
-                        .takeIf { it.isFinite() && it > 0.0 }
-                        ?.let { Math.toDegrees(it) } ?: 0.0,
-                    faceCentre = command.param3.toInt() != Mav.ORBIT_YAW_HOLD_INITIAL
-                ) ?: unsupported
-
-                // The gimbal tracks the point; the airframe is not asked to turn, so this is a
-                // payload command and needs no flight gate.
-                Mav.CMD_DO_SET_ROI_LOCATION -> sink.setRegionOfInterest(
-                    command.latitudeDeg, command.longitudeDeg, command.param7.toDouble()
-                )
-                Mav.CMD_DO_SET_ROI_NONE -> sink.clearRegionOfInterest()
-                // The superseded form, still sent by some ground stations, with the position
-                // behind a mode selector.
-                Mav.CMD_DO_SET_ROI -> when (command.param1.toInt()) {
-                    Mav.ROI_MODE_LOCATION -> sink.setRegionOfInterest(
-                        command.latitudeDeg, command.longitudeDeg, command.param7.toDouble()
-                    )
-                    Mav.ROI_MODE_NONE -> sink.clearRegionOfInterest()
-                    // The other MAV_ROI modes name a target this aircraft cannot resolve — a
-                    // waypoint index, another vehicle — rather than a place.
-                    else -> CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
-                }
-
-                // param7 is the target altitude; param1 (rate) is DJI's to choose.
-                Mav.CMD_CONDITION_CHANGE_ALT ->
-                    motionSink?.setAltitude(command.param7.toDouble()) ?: unsupported
-
-                Mav.CMD_DO_GRIPPER ->
-                    if (command.param2.toInt() == Mav.GRIPPER_ACTION_RELEASE) {
-                        sink.dropPayload()
-                    } else {
-                        // Only release is possible: the drop port lets go, it cannot take hold.
-                        CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                    Mav.CMD_DO_SET_MISSION_CURRENT -> {
+                        missions.setCurrent(command.param1.toInt())
+                        CommandResult(MavlinkCommandOutcome.ACCEPTED)
                     }
 
-                Mav.CMD_USER_1 -> when (command.param1) {
-                    Mav.USER1_GIMBAL_RELATIVE ->
-                        sink.setGimbalRelative(command.param2.toDouble(), command.param3.toDouble())
-                    Mav.USER1_RELEASE_MANUAL_OVERRIDE ->
-                        motionSink?.releaseManualOverride() ?: unsupported
-                    Mav.USER1_AUTOSENSING_START -> sink.setAutoSensing(true)
-                    Mav.USER1_AUTOSENSING_STOP -> sink.setAutoSensing(false)
-                    Mav.USER1_RELEASE_SAFETY ->
-                        motionSink?.releaseSafetyControl() ?: unsupported
-                    else -> CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                    Mav.CMD_NAV_TAKEOFF ->
+                        motionSink?.takeoff(
+                            // param7 is the requested altitude; NaN or non-positive means "use the
+                            // aircraft's default", which is what a bare takeoff does.
+                            command.param7.takeIf { it.isFinite() && it > 0f },
+                        ) ?: unsupported
+                    Mav.CMD_NAV_LAND -> motionSink?.land() ?: unsupported
+                    Mav.CMD_NAV_RETURN_TO_LAUNCH -> motionSink?.returnToHome() ?: unsupported
+                    Mav.CMD_DO_REPOSITION ->
+                        motionSink?.reposition(
+                            // Not param5/param6: those are floats, and a goto deserves the full
+                            // precision a COMMAND_INT actually carried.
+                            latitudeDeg = command.latitudeDeg,
+                            longitudeDeg = command.longitudeDeg,
+                            altitudeMeters = command.param7.toDouble(),
+                            yawDeg = command.param4.toDouble(),
+                            groundSpeedMps = command.param1.toDouble(),
+                        ) ?: unsupported
+                    Mav.CMD_CONDITION_YAW -> motionSink?.setYaw(command.param1.toDouble()) ?: unsupported
+
+                    Mav.CMD_DO_ORBIT ->
+                        motionSink?.orbit(
+                            latitudeDeg = command.latitudeDeg,
+                            longitudeDeg = command.longitudeDeg,
+                            altitudeMeters = command.param7.toDouble(),
+                            // The direction lives in the sign of the radius, so it is unpacked here
+                            // rather than being carried onward as a negative distance.
+                            radiusMeters = abs(command.param1.toDouble()),
+                            clockwise = command.param1 >= 0f,
+                            // NaN asks for the airframe's own default rather than for no movement, which
+                            // is what a zero would be.
+                            tangentialSpeedMps =
+                                command.param2
+                                    .toDouble()
+                                    .takeIf { it.isFinite() && it > 0.0 } ?: ORBIT_DEFAULT_SPEED_MPS,
+                            // param4 is the arc in radians, and zero means orbit until superseded.
+                            arcDegrees =
+                                command.param4
+                                    .toDouble()
+                                    .takeIf { it.isFinite() && it > 0.0 }
+                                    ?.let { Math.toDegrees(it) } ?: 0.0,
+                            faceCentre = command.param3.toInt() != Mav.ORBIT_YAW_HOLD_INITIAL,
+                        ) ?: unsupported
+
+                    // The gimbal tracks the point; the airframe is not asked to turn, so this is a
+                    // payload command and needs no flight gate.
+                    Mav.CMD_DO_SET_ROI_LOCATION ->
+                        sink.setRegionOfInterest(
+                            command.latitudeDeg,
+                            command.longitudeDeg,
+                            command.param7.toDouble(),
+                        )
+                    Mav.CMD_DO_SET_ROI_NONE -> sink.clearRegionOfInterest()
+                    // The superseded form, still sent by some ground stations, with the position
+                    // behind a mode selector.
+                    Mav.CMD_DO_SET_ROI ->
+                        when (command.param1.toInt()) {
+                            Mav.ROI_MODE_LOCATION ->
+                                sink.setRegionOfInterest(
+                                    command.latitudeDeg,
+                                    command.longitudeDeg,
+                                    command.param7.toDouble(),
+                                )
+                            Mav.ROI_MODE_NONE -> sink.clearRegionOfInterest()
+                            // The other MAV_ROI modes name a target this aircraft cannot resolve — a
+                            // waypoint index, another vehicle — rather than a place.
+                            else -> CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                        }
+
+                    // param7 is the target altitude; param1 (rate) is DJI's to choose.
+                    Mav.CMD_CONDITION_CHANGE_ALT ->
+                        motionSink?.setAltitude(command.param7.toDouble()) ?: unsupported
+
+                    Mav.CMD_DO_GRIPPER ->
+                        if (command.param2.toInt() == Mav.GRIPPER_ACTION_RELEASE) {
+                            sink.dropPayload()
+                        } else {
+                            // Only release is possible: the drop port lets go, it cannot take hold.
+                            CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                        }
+
+                    Mav.CMD_USER_1 ->
+                        when (command.param1) {
+                            Mav.USER1_GIMBAL_RELATIVE ->
+                                sink.setGimbalRelative(command.param2.toDouble(), command.param3.toDouble())
+                            Mav.USER1_RELEASE_MANUAL_OVERRIDE ->
+                                motionSink?.releaseManualOverride() ?: unsupported
+                            Mav.USER1_AUTOSENSING_START -> sink.setAutoSensing(true)
+                            Mav.USER1_AUTOSENSING_STOP -> sink.setAutoSensing(false)
+                            Mav.USER1_RELEASE_SAFETY ->
+                                motionSink?.releaseSafetyControl() ?: unsupported
+                            else -> CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                        }
+
+                    Mav.CMD_USER_2 ->
+                        when (command.param1) {
+                            Mav.USER2_LRF_MEASURE -> sink.measureLrf()
+                            Mav.USER2_CAPTURE_TEMPERATURE -> sink.captureTemperature()
+                            Mav.USER2_CAPTURE_THERMAL_IMAGE -> sink.captureThermalImage()
+                            else -> CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                        }
+
+                    // DJI has no arm/disarm: the aircraft arms when a takeoff actually starts. QGC's
+                    // PX4 plugin arms right after NAV_TAKEOFF is accepted, so this is acknowledged
+                    // (still behind the gate) rather than refused, or takeoff aborts on the error.
+                    Mav.CMD_COMPONENT_ARM_DISARM ->
+                        if (command.param1 >= 0.5f) {
+                            motionSink?.arm() ?: unsupported
+                        } else {
+                            motionSink?.disarm() ?: unsupported
+                        }
+
+                    // QGC's APM plugin (and some PX4 flows) request modes this way; QGC's PX4 plugin
+                    // normally sends SET_MODE instead — both land in the same mapper. The packed mode
+                    // numbers fit a float exactly (low 16 bits are zero), so the round trip is lossless.
+                    Mav.CMD_DO_SET_MODE -> modeResult(command.param2.toInt())
+
+                    else -> {
+                        Log.d(TAG, "Refusing unsupported command ${command.command}")
+                        CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                    }
                 }
-
-                Mav.CMD_USER_2 -> when (command.param1) {
-                    Mav.USER2_LRF_MEASURE -> sink.measureLrf()
-                    Mav.USER2_CAPTURE_TEMPERATURE -> sink.captureTemperature()
-                    Mav.USER2_CAPTURE_THERMAL_IMAGE -> sink.captureThermalImage()
-                    else -> CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
-                }
-
-                // DJI has no arm/disarm: the aircraft arms when a takeoff actually starts. QGC's
-                // PX4 plugin arms right after NAV_TAKEOFF is accepted, so this is acknowledged
-                // (still behind the gate) rather than refused, or takeoff aborts on the error.
-                Mav.CMD_COMPONENT_ARM_DISARM ->
-                    if (command.param1 >= 0.5f) motionSink?.arm() ?: unsupported
-                    else motionSink?.disarm() ?: unsupported
-
-                // QGC's APM plugin (and some PX4 flows) request modes this way; QGC's PX4 plugin
-                // normally sends SET_MODE instead — both land in the same mapper. The packed mode
-                // numbers fit a float exactly (low 16 bits are zero), so the round trip is lossless.
-                Mav.CMD_DO_SET_MODE -> modeResult(command.param2.toInt())
-
-                else -> {
-                    Log.d(TAG, "Refusing unsupported command ${command.command}")
-                    CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
-                }
+            }.getOrElse { error ->
+                Log.w(TAG, "Command ${command.command} failed: ${error.message}", error)
+                CommandResult(MavlinkCommandOutcome.FAILED)
             }
-        }.getOrElse { error ->
-            Log.w(TAG, "Command ${command.command} failed: ${error.message}", error)
-            CommandResult(MavlinkCommandOutcome.FAILED)
-        }
         if (result.outcome != MavlinkCommandOutcome.UNSUPPORTED) {
             Log.i(TAG, "Command ${command.command} -> ${result.outcome}")
         }
@@ -858,30 +922,31 @@ class MavlinkTelemetryEndpoint(
             Log.d(TAG, "Refusing mode request ${requested.displayName}: motion disabled")
             return CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
         }
-        val result = when (requested) {
-            // A mode request carries no height, unlike MAV_CMD_NAV_TAKEOFF's param7.
-            MavlinkFlightMode.TAKEOFF -> motion.takeoff(altitudeM = null)
-            MavlinkFlightMode.LAND -> motion.land()
-            MavlinkFlightMode.SAFE_RECOVERY -> motion.returnToHome()
+        val result =
+            when (requested) {
+                // A mode request carries no height, unlike MAV_CMD_NAV_TAKEOFF's param7.
+                MavlinkFlightMode.TAKEOFF -> motion.takeoff(altitudeM = null)
+                MavlinkFlightMode.LAND -> motion.land()
+                MavlinkFlightMode.SAFE_RECOVERY -> motion.returnToHome()
 
-            // An abort is a mode change to position hold on this wire; see abortToPositionHold.
-            MavlinkFlightMode.POSITION_HOLD -> motion.abortToPositionHold()
+                // An abort is a mode change to position hold on this wire; see abortToPositionHold.
+                MavlinkFlightMode.POSITION_HOLD -> motion.abortToPositionHold()
 
-            // Offboard is what DJI calls virtual stick: the mode that accepts MANUAL_CONTROL.
-            MavlinkFlightMode.OFFBOARD -> motion.enableOffboard()
+                // Offboard is what DJI calls virtual stick: the mode that accepts MANUAL_CONTROL.
+                MavlinkFlightMode.OFFBOARD -> motion.enableOffboard()
 
-            // Mission mode is the sequencer, and DJI has no standing "mission" state to enter:
-            // the plan only exists while it flies. QGC's PX4 plugin sends SET_MODE(AUTO.MISSION)
-            // before MISSION_START when its Start button is pressed, so entering the mode has to
-            // begin the stored plan or the vehicle never leaves its pre-mission mode and QGC
-            // reports the mission cannot start. The sequencer is idempotent, so the MISSION_START
-            // that follows does not restart it.
-            MavlinkFlightMode.MISSION -> startStoredMission(0)
-            else -> {
-                Log.d(TAG, "Refusing mode request ${requested.displayName}: no DJI equivalent")
-                CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                // Mission mode is the sequencer, and DJI has no standing "mission" state to enter:
+                // the plan only exists while it flies. QGC's PX4 plugin sends SET_MODE(AUTO.MISSION)
+                // before MISSION_START when its Start button is pressed, so entering the mode has to
+                // begin the stored plan or the vehicle never leaves its pre-mission mode and QGC
+                // reports the mission cannot start. The sequencer is idempotent, so the MISSION_START
+                // that follows does not restart it.
+                MavlinkFlightMode.MISSION -> startStoredMission(0)
+                else -> {
+                    Log.d(TAG, "Refusing mode request ${requested.displayName}: no DJI equivalent")
+                    CommandResult(MavlinkCommandOutcome.UNSUPPORTED)
+                }
             }
-        }
         if (result.outcome != MavlinkCommandOutcome.UNSUPPORTED) {
             Log.i(TAG, "Mode request ${requested.displayName} -> ${result.outcome}")
         }
@@ -897,8 +962,9 @@ class MavlinkTelemetryEndpoint(
      * station that pressed start deserves to know why it did not move.
      */
     private fun startStoredMission(startIndex: Int): CommandResult {
-        val sink = missionSink
-            ?: return CommandResult(MavlinkCommandOutcome.UNSUPPORTED, "No mission executor")
+        val sink =
+            missionSink
+                ?: return CommandResult(MavlinkCommandOutcome.UNSUPPORTED, "No mission executor")
         val items = missions.snapshot()
         if (items.isEmpty()) {
             return CommandResult(MavlinkCommandOutcome.DENIED, "No mission stored")
@@ -921,7 +987,10 @@ class MavlinkTelemetryEndpoint(
      * a linear flow. Every reply goes to whoever spoke, not to a remembered peer, so two ground
      * stations cannot end up answering each other's requests.
      */
-    private fun handleMissionFrame(data: ByteArray, length: Int) {
+    private fun handleMissionFrame(
+        data: ByteArray,
+        length: Int,
+    ) {
         MavlinkInbound.parseMissionCount(data, length)?.let { return handleMissionCount(it) }
         MavlinkInbound.parseMissionItem(data, length)?.let { return handleMissionItem(it) }
         if (MavlinkInbound.isMissionClearAll(data, length)) {
@@ -930,8 +999,10 @@ class MavlinkTelemetryEndpoint(
             sendOnce(
                 MavlinkMsgId.MISSION_ACK,
                 MavlinkMessages.missionAck(
-                    MissionResult.ACCEPTED, missionPeerSystem, missionPeerComponent
-                )
+                    MissionResult.ACCEPTED,
+                    missionPeerSystem,
+                    missionPeerComponent,
+                ),
             )
             Log.i(TAG, "Mission cleared")
         }
@@ -980,14 +1051,14 @@ class MavlinkTelemetryEndpoint(
         val next = missions.nextRequestIndex() ?: return
         sendOnce(
             MavlinkMsgId.MISSION_REQUEST_INT,
-            MavlinkMessages.missionRequestInt(next, missionPeerSystem, missionPeerComponent)
+            MavlinkMessages.missionRequestInt(next, missionPeerSystem, missionPeerComponent),
         )
     }
 
     private fun sendMissionAck(result: Int) {
         sendOnce(
             MavlinkMsgId.MISSION_ACK,
-            MavlinkMessages.missionAck(result, missionPeerSystem, missionPeerComponent)
+            MavlinkMessages.missionAck(result, missionPeerSystem, missionPeerComponent),
         )
     }
 
@@ -1002,8 +1073,8 @@ class MavlinkTelemetryEndpoint(
                 count = items.size,
                 targetSystem = request.senderSystem,
                 targetComponent = request.senderComponent,
-                missionType = request.missionType
-            )
+                missionType = request.missionType,
+            ),
         )
         // The stored items are returned verbatim, which is why a download reproduces exactly what
         // was uploaded even when the executor had to translate them to fly.
@@ -1012,29 +1083,33 @@ class MavlinkTelemetryEndpoint(
             sendOnce(
                 MavlinkMsgId.MISSION_ITEM_INT,
                 MavlinkMessages.missionItemInt(
-                    item, request.senderSystem, request.senderComponent, item.seq == current
-                )
+                    item,
+                    request.senderSystem,
+                    request.senderComponent,
+                    item.seq == current,
+                ),
             )
         }
     }
 
     /** Progress from the executor, turned into the messages a ground station watches. */
-    private val missionProgress = object : MissionProgressListener {
-        override fun onItemStarted(seq: Int) {
-            missions.setCurrent(seq)
-        }
+    private val missionProgress =
+        object : MissionProgressListener {
+            override fun onItemStarted(seq: Int) {
+                missions.setCurrent(seq)
+            }
 
-        override fun onItemReached(seq: Int) {
-            sendOnce(MavlinkMsgId.MISSION_ITEM_REACHED, MavlinkMessages.missionItemReached(seq))
-        }
+            override fun onItemReached(seq: Int) {
+                sendOnce(MavlinkMsgId.MISSION_ITEM_REACHED, MavlinkMessages.missionItemReached(seq))
+            }
 
-        override fun onMissionFinished(completed: Boolean) {
-            missions.setState(
-                if (completed) MissionState.COMPLETE else MissionState.PAUSED
-            )
-            Log.i(TAG, "Mission finished: completed=$completed")
+            override fun onMissionFinished(completed: Boolean) {
+                missions.setState(
+                    if (completed) MissionState.COMPLETE else MissionState.PAUSED,
+                )
+                Log.i(TAG, "Mission finished: completed=$completed")
+            }
         }
-    }
 
     /**
      * Answer a parameter or plan list request.
@@ -1080,11 +1155,12 @@ class MavlinkTelemetryEndpoint(
             Log.d(TAG, "Refusing parameter write ${request.name}: commands disabled")
             return
         }
-        val result = runCatching { sink.setParameter(request.name, request.value) }
-            .getOrElse { error ->
-                Log.w(TAG, "Parameter write ${request.name} failed: ${error.message}", error)
-                CommandResult(MavlinkCommandOutcome.FAILED)
-            }
+        val result =
+            runCatching { sink.setParameter(request.name, request.value) }
+                .getOrElse { error ->
+                    Log.w(TAG, "Parameter write ${request.name} failed: ${error.message}", error)
+                    CommandResult(MavlinkCommandOutcome.FAILED)
+                }
         Log.i(TAG, "Parameter write ${request.name}=${request.value} -> ${result.outcome}")
 
         val parameters = runCatching { parameterProvider() }.getOrDefault(emptyList())
@@ -1096,8 +1172,11 @@ class MavlinkTelemetryEndpoint(
         sendOnce(
             MavlinkMsgId.PARAM_VALUE,
             MavlinkMessages.paramValue(
-                parameters[index].first, parameters[index].second, parameters.size, index
-            )
+                parameters[index].first,
+                parameters[index].second,
+                parameters.size,
+                index,
+            ),
         )
     }
 
@@ -1114,20 +1193,22 @@ class MavlinkTelemetryEndpoint(
             Log.d(TAG, "Refusing text parameter write ${request.name}: commands disabled")
             return
         }
-        val result = runCatching { sink.setTextParameter(request.name, request.value) }
-            .getOrElse { error ->
-                Log.w(TAG, "Text parameter ${request.name} failed: ${error.message}", error)
-                CommandResult(MavlinkCommandOutcome.FAILED)
-            }
+        val result =
+            runCatching { sink.setTextParameter(request.name, request.value) }
+                .getOrElse { error ->
+                    Log.w(TAG, "Text parameter ${request.name} failed: ${error.message}", error)
+                    CommandResult(MavlinkCommandOutcome.FAILED)
+                }
         Log.i(TAG, "Text parameter ${request.name}=${request.value} -> ${result.outcome}")
-        val ackResult = when (result.outcome) {
-            MavlinkCommandOutcome.ACCEPTED -> Mav.PARAM_ACK_ACCEPTED
-            MavlinkCommandOutcome.DENIED -> Mav.PARAM_ACK_VALUE_UNSUPPORTED
-            else -> Mav.PARAM_ACK_FAILED
-        }
+        val ackResult =
+            when (result.outcome) {
+                MavlinkCommandOutcome.ACCEPTED -> Mav.PARAM_ACK_ACCEPTED
+                MavlinkCommandOutcome.DENIED -> Mav.PARAM_ACK_VALUE_UNSUPPORTED
+                else -> Mav.PARAM_ACK_FAILED
+            }
         sendOnce(
             MavlinkMsgId.PARAM_EXT_ACK,
-            MavlinkMessages.paramExtAck(request.name, result.detail.orEmpty(), ackResult)
+            MavlinkMessages.paramExtAck(request.name, result.detail.orEmpty(), ackResult),
         )
     }
 
@@ -1137,7 +1218,7 @@ class MavlinkTelemetryEndpoint(
         parameters.forEachIndexed { index, (name, value) ->
             sendOnce(
                 MavlinkMsgId.PARAM_EXT_VALUE,
-                MavlinkMessages.paramExtValue(name, value, parameters.size, index)
+                MavlinkMessages.paramExtValue(name, value, parameters.size, index),
             )
         }
         Log.i(TAG, "Published ${parameters.size} text parameters")
@@ -1152,7 +1233,7 @@ class MavlinkTelemetryEndpoint(
         parameters.forEachIndexed { index, (name, value) ->
             sendOnce(
                 MavlinkMsgId.PARAM_VALUE,
-                MavlinkMessages.paramValue(name, value, parameters.size, index)
+                MavlinkMessages.paramValue(name, value, parameters.size, index),
             )
         }
         Log.i(TAG, "Published ${parameters.size} parameters")
@@ -1171,57 +1252,59 @@ class MavlinkTelemetryEndpoint(
     private fun sendRequestedMessage(
         messageId: Int,
         forCamera: Boolean,
-        modeIndex: Int = 0
-    ): Int = when {
-        messageId == MavlinkMsgId.AUTOPILOT_VERSION -> {
-            sendOnce(MavlinkMsgId.AUTOPILOT_VERSION, MavlinkMessages.autopilotVersion())
-            Mav.RESULT_ACCEPTED
-        }
-
-        messageId == MavlinkMsgId.HOME_POSITION -> {
-            val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
-            if (snapshot.homeCoordinatesValid) {
-                sendOnce(MavlinkMsgId.HOME_POSITION, MavlinkMessages.homePosition(snapshot))
+        modeIndex: Int = 0,
+    ): Int =
+        when {
+            messageId == MavlinkMsgId.AUTOPILOT_VERSION -> {
+                sendOnce(MavlinkMsgId.AUTOPILOT_VERSION, MavlinkMessages.autopilotVersion())
                 Mav.RESULT_ACCEPTED
-            } else {
-                // Honest refusal beats a fabricated home point.
-                Mav.RESULT_DENIED
+            }
+
+            messageId == MavlinkMsgId.HOME_POSITION -> {
+                val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
+                if (snapshot.homeCoordinatesValid) {
+                    sendOnce(MavlinkMsgId.HOME_POSITION, MavlinkMessages.homePosition(snapshot))
+                    Mav.RESULT_ACCEPTED
+                } else {
+                    // Honest refusal beats a fabricated home point.
+                    Mav.RESULT_DENIED
+                }
+            }
+
+            messageId == MavlinkMsgId.CAMERA_INFORMATION && forCamera -> sendCameraInformation()
+
+            messageId == MavlinkMsgId.VIDEO_STREAM_INFORMATION && forCamera ->
+                sendVideoStreamInformation()
+
+            messageId == MavlinkMsgId.AVAILABLE_MODES -> sendAvailableModes(modeIndex)
+
+            messageId == MavlinkMsgId.CURRENT_MODE -> {
+                val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
+                sendOnce(
+                    MavlinkMsgId.CURRENT_MODE,
+                    MavlinkMessages.currentMode(
+                        MavlinkFlightMode.fromDjiMode(
+                            snapshot.flightMode,
+                            snapshot.manualOverrideActive,
+                        ),
+                    ),
+                )
+                Mav.RESULT_ACCEPTED
+            }
+
+            messageId == MavlinkMsgId.CAMERA_SETTINGS && forCamera -> sendCameraSettings()
+
+            messageId == MavlinkMsgId.CAMERA_CAPTURE_STATUS && forCamera -> sendCameraCaptureStatus()
+
+            messageId == MavlinkMsgId.VIDEO_STREAM_STATUS && forCamera -> sendVideoStreamStatus()
+
+            messageId == MavlinkMsgId.STORAGE_INFORMATION && forCamera -> sendStorageInformation()
+
+            else -> {
+                Log.d(TAG, "Refusing request for message $messageId")
+                Mav.RESULT_UNSUPPORTED
             }
         }
-
-        messageId == MavlinkMsgId.CAMERA_INFORMATION && forCamera -> sendCameraInformation()
-
-        messageId == MavlinkMsgId.VIDEO_STREAM_INFORMATION && forCamera ->
-            sendVideoStreamInformation()
-
-        messageId == MavlinkMsgId.AVAILABLE_MODES -> sendAvailableModes(modeIndex)
-
-        messageId == MavlinkMsgId.CURRENT_MODE -> {
-            val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
-            sendOnce(
-                MavlinkMsgId.CURRENT_MODE,
-                MavlinkMessages.currentMode(
-                    MavlinkFlightMode.fromDjiMode(
-                        snapshot.flightMode, snapshot.manualOverrideActive
-                    )
-                )
-            )
-            Mav.RESULT_ACCEPTED
-        }
-
-        messageId == MavlinkMsgId.CAMERA_SETTINGS && forCamera -> sendCameraSettings()
-
-        messageId == MavlinkMsgId.CAMERA_CAPTURE_STATUS && forCamera -> sendCameraCaptureStatus()
-
-        messageId == MavlinkMsgId.VIDEO_STREAM_STATUS && forCamera -> sendVideoStreamStatus()
-
-        messageId == MavlinkMsgId.STORAGE_INFORMATION && forCamera -> sendStorageInformation()
-
-        else -> {
-            Log.d(TAG, "Refusing request for message $messageId")
-            Mav.RESULT_UNSUPPORTED
-        }
-    }
 
     private fun sendCameraInformation(): Int {
         val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
@@ -1230,9 +1313,9 @@ class MavlinkTelemetryEndpoint(
             MavlinkMessages.cameraInformation(
                 timeBootMs = timeBootMs(),
                 vendorName = CAMERA_VENDOR,
-                modelName = snapshot.droneName.ifBlank { CAMERA_MODEL_FALLBACK }
+                modelName = snapshot.droneName.ifBlank { CAMERA_MODEL_FALLBACK },
             ),
-            fromCamera = true
+            fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
     }
@@ -1252,9 +1335,12 @@ class MavlinkTelemetryEndpoint(
         sendOnce(
             MavlinkMsgId.CAMERA_CAPTURE_STATUS,
             MavlinkMessages.cameraCaptureStatus(
-                timeBootMs(), snapshot.isRecording, capturing, imageCount.get()
+                timeBootMs(),
+                snapshot.isRecording,
+                capturing,
+                imageCount.get(),
             ),
-            fromCamera = true
+            fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
     }
@@ -1263,7 +1349,7 @@ class MavlinkTelemetryEndpoint(
         sendOnce(
             MavlinkMsgId.CAMERA_SETTINGS,
             MavlinkMessages.cameraSettings(timeBootMs(), zoomLevel = 1f),
-            fromCamera = true
+            fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
     }
@@ -1273,16 +1359,17 @@ class MavlinkTelemetryEndpoint(
      */
     private fun sendAvailableModes(requestedIndex: Int): Int {
         val modes = MavlinkFlightMode.ADVERTISED
-        val selected = if (requestedIndex <= 0) {
-            modes.indices.toList()
-        } else {
-            listOf(requestedIndex - 1).filter { it in modes.indices }
-        }
+        val selected =
+            if (requestedIndex <= 0) {
+                modes.indices.toList()
+            } else {
+                listOf(requestedIndex - 1).filter { it in modes.indices }
+            }
         if (selected.isEmpty()) return Mav.RESULT_DENIED
         selected.forEach { i ->
             sendOnce(
                 MavlinkMsgId.AVAILABLE_MODES,
-                MavlinkMessages.availableModes(modes[i], index = i + 1, total = modes.size)
+                MavlinkMessages.availableModes(modes[i], index = i + 1, total = modes.size),
             )
         }
         return Mav.RESULT_ACCEPTED
@@ -1294,7 +1381,7 @@ class MavlinkTelemetryEndpoint(
         sendOnce(
             MavlinkMsgId.VIDEO_STREAM_STATUS,
             MavlinkMessages.videoStreamStatus(stream.framerate, stream.widthPx, stream.heightPx),
-            fromCamera = true
+            fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
     }
@@ -1303,7 +1390,7 @@ class MavlinkTelemetryEndpoint(
         sendOnce(
             MavlinkMsgId.STORAGE_INFORMATION,
             MavlinkMessages.storageInformation(timeBootMs()),
-            fromCamera = true
+            fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
     }
@@ -1328,9 +1415,9 @@ class MavlinkTelemetryEndpoint(
                 name = stream.name,
                 framerate = stream.framerate,
                 widthPx = stream.widthPx,
-                heightPx = stream.heightPx
+                heightPx = stream.heightPx,
             ),
-            fromCamera = true
+            fromCamera = true,
         )
         Log.i(TAG, "Advertised video stream ${stream.uri}")
         return Mav.RESULT_ACCEPTED
@@ -1345,7 +1432,7 @@ class MavlinkTelemetryEndpoint(
         ftpPayload: ByteArray,
         targetSystem: Int,
         targetComponent: Int,
-        from: DatagramPacket
+        from: DatagramPacket,
     ) {
         val bound = socket ?: return
         if (bound.isClosed) return
@@ -1365,22 +1452,28 @@ class MavlinkTelemetryEndpoint(
         }
     }
 
-    private fun sendOnce(messageId: Int, payload: ByteArray, fromCamera: Boolean = false) {
+    private fun sendOnce(
+        messageId: Int,
+        payload: ByteArray,
+        fromCamera: Boolean = false,
+    ) {
         val bound = socket ?: return
         if (bound.isClosed) return
-        val frame = if (fromCamera) {
-            cameraFramer.frame(messageId, payload)
-        } else {
-            framer.frame(messageId, payload)
-        }
+        val frame =
+            if (fromCamera) {
+                cameraFramer.frame(messageId, payload)
+            } else {
+                framer.frame(messageId, payload)
+            }
         // HEARTBEAT (repeating) and the one-off boot STATUSTEXT always broadcast: both are the
         // low-rate discovery/announcement traffic a ground station needs before it is known,
         // unlike the full telemetry stream below.
-        val targets = if (messageId == MavlinkMsgId.HEARTBEAT || messageId == MavlinkMsgId.STATUSTEXT) {
-            heartbeatDestinations()
-        } else {
-            dataDestinations()
-        }
+        val targets =
+            if (messageId == MavlinkMsgId.HEARTBEAT || messageId == MavlinkMsgId.STATUSTEXT) {
+                heartbeatDestinations()
+            } else {
+                dataDestinations()
+            }
         for (destination in targets) {
             runCatching {
                 bound.send(DatagramPacket(frame, frame.size, destination))
@@ -1418,8 +1511,7 @@ class MavlinkTelemetryEndpoint(
         return targets.toList()
     }
 
-    private fun broadcastTarget(): InetSocketAddress =
-        InetSocketAddress(InetAddress.getByName(BROADCAST_ADDRESS), config.targetPort)
+    private fun broadcastTarget(): InetSocketAddress = InetSocketAddress(InetAddress.getByName(BROADCAST_ADDRESS), config.targetPort)
 
     private fun timeBootMs(): Long = (System.nanoTime() - bootNanos) / NANOS_PER_MILLI
 
@@ -1433,7 +1525,7 @@ class MavlinkTelemetryEndpoint(
         val camera: Boolean = false,
         /** Skip this tick entirely when the snapshot has nothing truthful to report. */
         private val sendIf: (MavlinkSnapshot) -> Boolean = { true },
-        private val builder: (MavlinkSnapshot) -> ByteArray
+        private val builder: (MavlinkSnapshot) -> ByteArray,
     ) {
         fun shouldSend(snapshot: MavlinkSnapshot): Boolean = sendIf(snapshot)
 

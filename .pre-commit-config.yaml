@@ -65,10 +65,10 @@ repos:
 
       - id: android-spotless
         name: android spotless - Lyrebird-owned Kotlin format
-        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:spotlessKotlinCheck'
+        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck'
         language: system
         pass_filenames: false
-        files: ^LyrebirdApp/lyrebird-app/.*\.kt$
+        files: ^LyrebirdApp/(lyrebird-app|lyrebird-core)/.*\.kt$
       - id: android-tests
         name: android tests - compile + unit tests
         entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :lyrebird-core:compileDebugKotlin :lyrebird-core:testDebugUnitTest :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest'
