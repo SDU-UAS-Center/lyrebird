@@ -40,6 +40,7 @@ import com.lyrebird.rc.controller.WaylineMissionHelper
 import com.lyrebird.rc.edge.EdgeDetectionConfig
 import com.lyrebird.rc.edge.EdgeDetectionController
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
+import com.lyrebird.rc.edge.V5DetectionPort
 import com.lyrebird.rc.fleet.FleetBeacon
 import com.lyrebird.rc.fleet.FleetDeckController
 import com.lyrebird.rc.fleet.FleetStripView
@@ -320,15 +321,14 @@ class FlightDeckActivity :
     override val media: LyrebirdMediaPort by lazy { V5MediaPort { mediaVM } }
 
     override val detection: LyrebirdDetectionPort by lazy {
-        object : LyrebirdDetectionPort {
-            override val isAutoSensingActive: Boolean
-                get() = this@FlightDeckActivity.isAutoSensingActive
-
-            override fun currentTargets(): List<DetectedTargetSnapshot> =
+        V5DetectionPort(
+            activeProvider = { isAutoSensingActive },
+            targetsProvider = {
                 currentDetectedTargets.map {
                     DetectedTargetSnapshot(it.type, it.left, it.top, it.right, it.bottom, it.confidence)
                 }
-        }
+            },
+        )
     }
 
     override val flight: LyrebirdFlightPort by lazy {
