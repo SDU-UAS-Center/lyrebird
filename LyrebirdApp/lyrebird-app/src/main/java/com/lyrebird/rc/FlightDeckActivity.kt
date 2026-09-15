@@ -108,6 +108,7 @@ import com.lyrebird.rc.webrtc.TelemetryProvider
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
 import com.lyrebird.rc.webrtc.WebRTCStreamer
+import com.lyrebird.rc.webrtc.WhipEndpoint
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.key.FlightControllerKey
@@ -3033,35 +3034,12 @@ class FlightDeckActivity :
             )
     }
 
-    private fun buildWhipUrl(clientIp: String): String {
-        val safeDroneName =
-            droneName.trim().ifEmpty {
-                LyrebirdSettings.DEFAULT_DRONE_NAME
-            }
-
-        val configuredServer =
-            sharedPreferences
-                .getString(LyrebirdSettings.PREF_MEDIAMTX_SERVER, "")
-                ?.trim()
-                .orEmpty()
-
-        val hostAndPort =
-            if (configuredServer.isEmpty()) {
-                "$clientIp:$MEDIAMTX_WHIP_PORT"
-            } else {
-                var normalized =
-                    configuredServer
-                        .removePrefix("http://")
-                        .removePrefix("https://")
-                        .trimEnd('/')
-                if (!normalized.contains(':')) {
-                    normalized = "$normalized:$MEDIAMTX_WHIP_PORT"
-                }
-                normalized
-            }
-
-        return "http://$hostAndPort/$safeDroneName/whip"
-    }
+    private fun buildWhipUrl(clientIp: String): String =
+        WhipEndpoint.url(
+            clientIp = clientIp,
+            droneName = droneName,
+            configuredServer = settings.getMediamtxServer(),
+        )
 
     private fun startLocationUpdates() {
         if (!deviceStatusSource.startLocationUpdates()) {
