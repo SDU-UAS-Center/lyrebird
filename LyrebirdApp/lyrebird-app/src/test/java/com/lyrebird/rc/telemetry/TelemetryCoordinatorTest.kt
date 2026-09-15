@@ -11,7 +11,6 @@ class TelemetryCoordinatorTest {
     @Test
     fun realTelemetryJsonBuildsCorrectlyWithDecoupledProperties() {
         val coordinator = TelemetryCoordinator()
-        coordinator.isMockEnabled = false
         coordinator.droneName = "scout_02"
         coordinator.speed = VelocityNedMps(northMps = 1.1, eastMps = 2.2, downMps = 3.3)
         coordinator.heading = 125.4
@@ -104,48 +103,5 @@ class TelemetryCoordinatorTest {
         val targets = detections.getJSONArray("targets")
         assertEquals(1, targets.length())
         assertEquals("person", targets.getJSONObject(0).getString("label"))
-    }
-
-    @Test
-    fun mockTelemetryJsonBuildsWithoutDJISDKDependencies() {
-        val coordinator = TelemetryCoordinator()
-        coordinator.isMockEnabled = true
-        coordinator.mockSnapshot = MockTelemetrySnapshot(
-            velocity = """{"x":1.0,"y":2.0,"z":3.0}""",
-            heading = 90.0,
-            attitude = """{"pitch":0.0,"roll":0.0,"yaw":90.0}""",
-            location = """{"latitude":55.0,"longitude":12.0,"altitude":20.0}""",
-            altitudeAGL = 20.0,
-            gimbalAttitude = """{"pitch":-15.0,"roll":0.0,"yaw":90.0}""",
-            batteryPercent = 90,
-            satelliteCount = 15,
-            flightMode = "GPS_NORMAL",
-            isFlying = true,
-            locationLatitude = 55.0,
-            locationLongitude = 12.0
-        )
-        coordinator.droneName = "mock_drone"
-        coordinator.phoneLatitude = 1.0
-        coordinator.phoneLongitude = 2.0
-        coordinator.rebuildTelemetryCache()
-
-        val jsonString = coordinator.getTelemetryJson()
-        val json = JSONObject(jsonString)
-
-        assertEquals("mock_drone", json.getString("droneName"))
-
-        assertEquals(20.0, json.getDouble("altitude"), 0.001)
-        
-        val speedObj = json.getJSONObject("speed")
-        assertEquals(1.0, speedObj.getDouble("x"), 0.001)
-        
-        val phone = json.getJSONObject("phoneLocation")
-        assertEquals(1.0, phone.getDouble("latitude"), 0.001)
-        assertEquals(2.0, phone.getDouble("longitude"), 0.001)
-
-        // Verify some mock telemetry fallback values are generated correctly
-        val detections = json.getJSONObject("detections")
-        assertEquals("none", detections.getString("source"))
-        assertFalse(detections.getBoolean("enabled"))
     }
 }

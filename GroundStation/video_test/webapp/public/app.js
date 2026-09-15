@@ -724,7 +724,7 @@ function renderSettingsValues(card, name, s) {
 
   const fields = [
     { key: 'droneName', label: 'Drone name', type: 'text', value: s.droneName },
-    { key: 'videoSource', label: 'Video source', type: 'select', options: ['drone', 'phone', 'mock'], value: s.videoSource },
+    { key: 'videoSource', label: 'Video source', type: 'select', options: ['drone'], value: s.videoSource },
     { key: 'streamingMode', label: 'Streaming protocol', type: 'select', options: ['webrtc', 'rtsp', 'rtmp', 'agora', 'gb28181'], value: s.streamingMode, endpoint: '/streaming/mode', payloadKey: 'mode' },
     { key: 'webrtcResolution', label: 'WebRTC resolution', type: 'select', options: ['auto', '1080p', '720p', '480p'], value: s.webrtcResolution },
     { key: 'webrtcFps', label: 'WebRTC FPS', type: 'select', options: ['5', '10', '15', '20', '25', '30'], value: s.webrtcFps != null ? String(s.webrtcFps) : '' },

@@ -65,7 +65,6 @@ internal object FleetSettingsShare {
         "webrtc_fps",
         "webrtc_resolution",
         "streaming_mode",
-        "video_source",
         "detections_enabled",
         "detection_source",
         "edge_detection_enabled",

@@ -11,8 +11,6 @@ package com.lyrebird.rc.telemetry
  * [com.lyrebird.rc.telemetry.toWireJson], which is where the wire shape is decided and tested.
  */
 class TelemetryCoordinator {
-    @Volatile var isMockEnabled: Boolean = false
-    @Volatile var mockSnapshot: MockTelemetrySnapshot? = null
     @Volatile var droneName: String = "drone_1"
 
     // Position & Attitude
@@ -161,14 +159,7 @@ class TelemetryCoordinator {
     }
 
     fun buildTelemetryJson(): String {
-        val mock = mockSnapshot
         val streamingJson = streamingTelemetryJson()
-        if (isMockEnabled && mock != null) {
-            val phoneLocationJson = """{"latitude":$phoneLatitude,"longitude":$phoneLongitude,"heading":$phoneHeading,"pressure":$phonePressure,"battery":$phoneBattery,"wifiRssi":$wifiRssi}"""
-            val detectionsJson = detectionTelemetryJson()
-
-            return """{"droneName":"$droneName","speed":${mock.velocity},"heading":${mock.heading},"attitude":${mock.attitude},"location":${mock.location},"altitude":${mock.altitudeAGL},"lrfTarget":null,"phoneLocation":$phoneLocationJson,"webRtc":$webRtcMetricsJson,"detections":$detectionsJson,"streaming":$streamingJson,"gimbalAttitude":${mock.gimbalAttitude},"gimbalJointAttitude":${mock.gimbalAttitude},"zoomFl":24,"hybridFl":24,"opticalFl":24,"zoomRatio":1.0,"batteryLevel":${mock.batteryPercent},"satelliteCount":${mock.satelliteCount},"homeLocation":{"latitude":${mock.locationLatitude},"longitude":${mock.locationLongitude}},"distanceToHome":0.0,"waypointReached":false,"waypointSeq":0,"intermediaryWaypointReached":false,"yawReached":true,"yawSeq":0,"altitudeReached":true,"altitudeSeq":0,"isRecording":true,"homeSet":true,"remainingFlightTime":1320,"timeNeededToGoHome":45,"timeNeededToLand":18,"totalTime":63,"maxRadiusCanFlyAndGoHome":900,"remainingCharge":${mock.batteryPercent},"batteryNeededToLand":12,"batteryNeededToGoHome":18,"seriousLowBatteryThreshold":10,"lowBatteryThreshold":20,"flightMode":"${mock.flightMode}","readyToTakeoff":false,"takeoffBlockReason":"MOCK_IN_FLIGHT","isManualOverrideActive":false,"autoSensingActive":$isAutoSensingActive,"detectedTargets":$detectedTargetsJson}"""
-        }
 
         val phoneLocationJson = """{"latitude":$phoneLatitude,"longitude":$phoneLongitude,"heading":$phoneHeading,"pressure":$phonePressure,"battery":$phoneBattery,"wifiRssi":$wifiRssi}"""
         val detectionsJson = detectionTelemetryJson()

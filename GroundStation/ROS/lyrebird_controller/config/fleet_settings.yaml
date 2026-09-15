@@ -46,9 +46,8 @@ fleet_settings:
   distanceLimitEnabled: true
 
   # Camera feed source used for the video stream.
-  # Valid values: drone | phone | mock
-  # mock is the built-in test pattern (Mock MP4) -- useful for testing streamingMode: webrtc
-  # (or any other transport below) end-to-end without a live drone feed.
+  # Valid values: drone -- the aircraft camera is the only source (the phone-camera and
+  # Mock MP4 test patterns were removed from the app).
   videoSource: drone
 
   # Live video transport. "webrtc" here means WebRTC via WHIP push (see WhipPublisher) -- DJI

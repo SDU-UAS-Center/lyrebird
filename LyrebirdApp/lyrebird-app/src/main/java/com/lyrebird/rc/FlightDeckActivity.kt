@@ -8,27 +8,14 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
-import android.graphics.ImageFormat
-import android.graphics.Matrix
-import android.graphics.RectF
-import android.graphics.SurfaceTexture
 import android.graphics.drawable.ColorDrawable
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.params.OutputConfiguration
-import android.hardware.camera2.params.SessionConfiguration
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.media.ImageReader
-import android.media.MediaPlayer
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -37,7 +24,6 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
-import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.DocumentsContract
@@ -46,8 +32,6 @@ import android.util.TypedValue
 import android.view.Choreographer
 import android.view.Menu
 import android.view.MenuItem
-import android.view.Surface
-import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
@@ -117,19 +101,16 @@ import com.lyrebird.rc.telemetry.AttitudeDeg
 import com.lyrebird.rc.telemetry.GeoPoint
 import com.lyrebird.rc.telemetry.GeoPoint3D
 import com.lyrebird.rc.telemetry.GeoPosition
-import com.lyrebird.rc.telemetry.MockTelemetrySnapshot
 import com.lyrebird.rc.telemetry.TelemetryCoordinator
 import com.lyrebird.rc.telemetry.VelocityNedMps
 import com.lyrebird.rc.util.NetworkUtils
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
-import com.lyrebird.rc.webrtc.SharedPhoneCameraFrameSource
 import com.lyrebird.rc.webrtc.TelemetryProvider
 import com.lyrebird.rc.webrtc.WebRTCMediaOptions
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
 import com.lyrebird.rc.webrtc.WebRTCStreamer
-import com.lyrebird.rc.webrtc.WebRTCStreamer.VideoSourceMode
 import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJIKey
@@ -309,6 +290,14 @@ class FlightDeckActivity :
          */
         private const val PARAM_DRONE_NAME = "LB_DRONE_NAME"
         private const val PARAM_VIDEO_SOURCE = "LB_VIDEO_SRC"
+
+        /**
+         * The one video source there is.
+         *
+         * Named rather than inlined because three surfaces publish it: the settings JSON, the
+         * edge detector's source label, and the LB_VIDEO_SRC parameter.
+         */
+        private const val VIDEO_SOURCE_LABEL = "drone"
         private const val PARAM_MEDIAMTX = "LB_MEDIAMTX"
         private const val PARAM_DETECTION_SOURCE = "LB_DETECT_SRC"
         private const val PARAM_RC_CONTROL_MODE = "LB_RC_MODE"
@@ -331,12 +320,10 @@ class FlightDeckActivity :
         private const val SAFETY_TOKEN = "98"
         private const val PREF_WEBRTC_FPS = "webrtc_fps"
         private const val PREF_WEBRTC_RESOLUTION = "webrtc_resolution"
-        private const val PREF_MOCK_VIDEO_ENABLED = "mock_video_enabled"
         private const val PREF_MAP_EXPANDED = "map_expanded"
         private const val PREF_DETECTIONS_ENABLED = "detections_enabled"
         private const val PREF_DETECTION_SOURCE = "detection_source"
         private const val PREF_EDGE_DETECTION_ENABLED = "edge_detection_enabled"
-        private const val PREF_VIDEO_SOURCE = "video_source"
         private const val PREF_EDGE_MODEL_URI = "edge_model_uri"
         private const val PREF_EDGE_MODEL_NAME = "edge_model_name"
         private const val PREF_EDGE_LABELS_URI = "edge_labels_uri"
@@ -367,7 +354,6 @@ class FlightDeckActivity :
                 PREF_WEBRTC_RESOLUTION,
                 PREF_DETECTIONS_ENABLED,
                 PREF_DETECTION_SOURCE,
-                PREF_VIDEO_SOURCE,
                 PREF_STREAMING_MODE,
                 // lb_mav_0_sysid: 0 (the default) derives the id from the serial, so it needs no
                 // stored value; an operator-pinned manual id is per-drone and travels with it.
@@ -390,10 +376,8 @@ class FlightDeckActivity :
         private const val PREF_GB_PASSWORD = "gb_password"
         private const val DEFAULT_WEBRTC_FPS = 10
         private const val DEFAULT_EDGE_CONFIDENCE_THRESHOLD = 0.25f
-        private const val REQUEST_PHONE_CAMERA_SOURCE = 2
         private const val REQUEST_EDGE_MODEL_FILE = 3
         private const val REQUEST_EDGE_LABELS_FILE = 4
-        private const val PHONE_EDGE_FRAME_INTERVAL_NS = 200_000_000L
         private val EDGE_CONFIDENCE_OPTIONS =
             floatArrayOf(
                 0.10f,
@@ -543,7 +527,6 @@ class FlightDeckActivity :
         override fun onLocationChanged(location: Location) {
             val activity = activityRef.get() ?: return
             activity.phoneLocation = location
-            activity.refreshMockTelemetryMode()
         }
 
         override fun onStatusChanged(
@@ -567,7 +550,6 @@ class FlightDeckActivity :
     // publishing device. Acquired when streaming starts, released in onDestroy.
     private var lowLatencyWifiLock: WifiManager.WifiLock? = null
     private var batteryManager: BatteryManager? = null
-    private var mockPreviewPlayer: MediaPlayer? = null
 
     @Volatile private var lastWebRTCMetrics = WebRTCStreamMetrics()
 
@@ -619,16 +601,6 @@ class FlightDeckActivity :
 
     @Volatile override var currentDetectedTargets: List<DetectedTarget> = emptyList()
     private var detectionOverlay: DetectionOverlayView? = null
-    private var pendingVideoSourceAfterPermission: VideoSourceMode? = null
-    private var phoneCameraDevice: CameraDevice? = null
-    private var phoneCameraSession: CameraCaptureSession? = null
-    private var phoneCameraThread: HandlerThread? = null
-    private var phoneCameraHandler: Handler? = null
-    private var phonePreviewSurface: Surface? = null
-    private var phoneImageReader: ImageReader? = null
-    private val phoneInferenceBusy = AtomicBoolean(false)
-
-    @Volatile private var lastPhoneEdgeFrameNs = 0L
     private var pendingEdgePickerRequestCode: Int? = null
     private val edgeFilePickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -897,9 +869,6 @@ class FlightDeckActivity :
         updateDetectionTelemetryState()
         setupAircraftConnectionListener()
         setupAircraftIdleMonitor()
-        setupVideoSourceState()
-        setupMockVideoPreview()
-        setupPhoneVideoPreview()
         setupMapExpandToggle()
 
         setupDetectedDroneProfileListener()
@@ -1118,9 +1087,6 @@ class FlightDeckActivity :
         finish()
     }
 
-    private fun getVideoSourceMode(): VideoSourceMode =
-        VideoSourceMode.fromPref(sharedPreferences.getString(PREF_VIDEO_SOURCE, VideoSourceMode.DJI.prefValue))
-
     private fun getStreamingMode(): StreamingMode =
         StreamingMode.fromPref(sharedPreferences.getString(PREF_STREAMING_MODE, StreamingMode.WEBRTC.prefValue))
 
@@ -1211,76 +1177,6 @@ class FlightDeckActivity :
     private fun getGbPassword(): String = sharedPreferences.getString(PREF_GB_PASSWORD, "") ?: ""
 
     private fun setGbPassword(pwd: String) = sharedPreferences.edit().putString(PREF_GB_PASSWORD, pwd).apply()
-
-    private fun setupVideoSourceState() {
-        if (!sharedPreferences.contains(PREF_VIDEO_SOURCE)) {
-            val legacyMock = sharedPreferences.getBoolean(PREF_MOCK_VIDEO_ENABLED, false)
-            sharedPreferences
-                .edit()
-                .putString(
-                    PREF_VIDEO_SOURCE,
-                    if (legacyMock) VideoSourceMode.MOCK.prefValue else VideoSourceMode.DJI.prefValue,
-                ).apply()
-        }
-        updateMockVideoVisibility()
-        updatePhonePreviewVisibility()
-        refreshMockTelemetryMode()
-    }
-
-    private fun setVideoSourceMode(mode: VideoSourceMode) {
-        if (mode == VideoSourceMode.PHONE && !ensureCameraPermissionForPhoneSource(mode)) return
-        sharedPreferences
-            .edit()
-            .putString(PREF_VIDEO_SOURCE, mode.prefValue)
-            .putBoolean(PREF_MOCK_VIDEO_ENABLED, mode == VideoSourceMode.MOCK)
-            .apply()
-        webRTCStreamer?.setVideoSourceMode(mode)
-        updateMockVideoVisibility()
-        updatePhonePreviewVisibility()
-        refreshMockTelemetryMode()
-        invalidateOptionsMenu()
-        val label = "Video source: ${mode.menuLabel}"
-        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
-        Log.i(TAG, label)
-        if (activeDetectionSource() == DetectionSource.YOLO_ON_PHONE) {
-            stopEdgeDetection()
-            startEdgeDetection()
-        }
-    }
-
-    private fun ensureCameraPermissionForPhoneSource(mode: VideoSourceMode): Boolean {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            return true
-        }
-        pendingVideoSourceAfterPermission = mode
-        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), REQUEST_PHONE_CAMERA_SOURCE)
-        Toast.makeText(this, "Camera permission is needed for phone video source", Toast.LENGTH_SHORT).show()
-        return false
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_PHONE_CAMERA_SOURCE) {
-            val pendingMode = pendingVideoSourceAfterPermission
-            pendingVideoSourceAfterPermission = null
-            if (pendingMode == VideoSourceMode.PHONE &&
-                grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-            ) {
-                setVideoSourceMode(VideoSourceMode.PHONE)
-            } else {
-                Toast
-                    .makeText(
-                        this,
-                        "Phone camera source unavailable without camera permission",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-            }
-        }
-    }
 
     private fun storeEdgeModelSelection(uri: Uri) {
         val displayName = storeEdgeFileSelection(uri, PREF_EDGE_MODEL_URI, PREF_EDGE_MODEL_NAME, "Edge model")
@@ -1572,11 +1468,6 @@ class FlightDeckActivity :
         edgeFilePickerLauncher.launch(intent)
     }
 
-    private fun isMockVideoEnabled(): Boolean = getVideoSourceMode() == VideoSourceMode.MOCK
-
-    private fun shouldUseMockTelemetry(): Boolean =
-        getVideoSourceMode() == VideoSourceMode.MOCK || getVideoSourceMode() == VideoSourceMode.PHONE
-
     // ===== M400: rebind gimbal keys to PORT_3 once the PORT_3 camera video is up =====
     // The no-index gimbal keys can resolve to the wrong gimbal on the multi-port M400. We wait for
     // the first frame on the PORT_3 camera (proof that gimbal/camera is live), then recreate the
@@ -1722,7 +1613,11 @@ class FlightDeckActivity :
             append("\"droneName\":\"${jsonEscape(droneName)}\",")
             append("\"aircraftSerialNumber\":\"${jsonEscape(droneSerialNumber)}\",")
             append("\"mavlinkSystemId\":${currentMavlinkSystemId()},")
-            append("\"videoSource\":\"${getVideoSourceMode().prefValue}\",")
+            // Kept as a published field even though the drone camera is now the only source:
+            // the dashboard, the Python client, the ROS fleet config, and the LB_VIDEO_SRC
+            // parameter bridge all read it, and a constant is honest where dropping the key
+            // would look like a missing setting.
+            append("\"videoSource\":\"$VIDEO_SOURCE_LABEL\",")
             append("\"streamingMode\":\"${getStreamingMode().prefValue}\",")
             append("\"webrtcResolution\":\"${getWebRTCResolutionPreset().prefValue}\",")
             append("\"webrtcFps\":${getWebRTCFps()},")
@@ -1811,8 +1706,10 @@ class FlightDeckActivity :
     }
 
     override fun setVideoSource(value: String): Boolean {
-        val mode = VideoSourceMode.entries.firstOrNull { it.prefValue.equals(value, ignoreCase = true) } ?: return false
-        mainHandler.post { setVideoSourceMode(mode) }
+        // The phone-camera and mock-MP4 sources are gone, so the drone camera is all this can
+        // be. Accepting the same value a client already had keeps the existing surface working;
+        // anything else is refused rather than silently ignored.
+        if (!value.equals(VIDEO_SOURCE_LABEL, ignoreCase = true)) return false
         return true
     }
 
@@ -1888,7 +1785,7 @@ class FlightDeckActivity :
         // powered down. The flight-controller key is the aircraft-side connection signal and also
         // matches the DJI top-bar "Aircraft disconnected" state.
         val initialConnectionState = isAircraftPresent()
-        applyAircraftConnectionState(initialConnectionState, forceDroneSourceDefault = initialConnectionState)
+        applyAircraftConnectionState(initialConnectionState)
 
         fun refreshConnectionState() {
             mainHandler.post {
@@ -1913,10 +1810,7 @@ class FlightDeckActivity :
 
     private fun isAircraftPresent(): Boolean = flightControllerConnectionKey.get(false)
 
-    private fun applyAircraftConnectionState(
-        isConnected: Boolean,
-        forceDroneSourceDefault: Boolean = false,
-    ) {
+    private fun applyAircraftConnectionState(isConnected: Boolean) {
         val wasConnected = aircraftConnected
         aircraftConnected = isConnected
         logConnectionKeySnapshot("flightController listener fired: $wasConnected -> $isConnected")
@@ -1925,14 +1819,6 @@ class FlightDeckActivity :
             // normal RC case); re-fetch on connect so this aircraft's settings profile — name,
             // manual sysid, streaming — is restored for exactly the drone that connected.
             fetchDroneSerialNumber()
-        }
-        if (shouldSwitchToDroneVideoSource(isConnected, wasConnected, forceDroneSourceDefault)) {
-            sharedPreferences
-                .edit()
-                .putString(PREF_VIDEO_SOURCE, VideoSourceMode.DJI.prefValue)
-                .putBoolean(PREF_MOCK_VIDEO_ENABLED, false)
-                .apply()
-            webRTCStreamer?.setVideoSourceMode(VideoSourceMode.DJI)
         }
         if (!isConnected && isDetectionsEnabled() && getDetectionSource() == DetectionSource.DJI_ONBOARD) {
             setDetectionsEnabled(false)
@@ -1966,389 +1852,9 @@ class FlightDeckActivity :
             gimbalKeysReboundForM400 = false
             disarmThermalMeasurement()
         }
-        if (isConnected && sharedPreferences.getBoolean(PREF_MOCK_VIDEO_ENABLED, false)) {
-            sharedPreferences.edit().putBoolean(PREF_MOCK_VIDEO_ENABLED, false).apply()
-            webRTCStreamer?.setMockVideoEnabled(false)
-        }
-        updateMockVideoVisibility()
-        updatePhonePreviewVisibility()
-        refreshMockTelemetryMode()
         invalidateOptionsMenu()
         updateDroneStatusView(DroneController.droneStatus)
         reevaluateAircraftIdle()
-    }
-
-    private fun shouldSwitchToDroneVideoSource(
-        isConnected: Boolean,
-        wasConnected: Boolean,
-        forceDroneSourceDefault: Boolean,
-    ): Boolean {
-        val shouldSelectDroneSource = forceDroneSourceDefault || !wasConnected
-        return isConnected && shouldSelectDroneSource && getVideoSourceMode() != VideoSourceMode.DJI
-    }
-
-    private fun updateMockVideoVisibility() {
-        findViewById<Switch>(R.id.sw_mock_video)?.let { switch ->
-            switch.visibility = android.view.View.GONE
-            switch.isChecked = isMockVideoEnabled()
-            updateMockVideoToggleUi(switch.isChecked)
-        }
-        updateMockPreviewVisibility()
-    }
-
-    private fun setupPhoneVideoPreview() {
-        findViewById<TextureView>(R.id.phone_camera_preview)?.surfaceTextureListener =
-            object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int,
-                ) {
-                    updatePhonePreviewVisibility()
-                }
-
-                override fun onSurfaceTextureSizeChanged(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int,
-                ) = Unit
-
-                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                    stopPhoneCameraPreview()
-                    return true
-                }
-
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
-            }
-        updatePhonePreviewVisibility()
-    }
-
-    private fun updatePhonePreviewVisibility() {
-        val preview = findViewById<TextureView>(R.id.phone_camera_preview)
-        val shouldShow = getVideoSourceMode() == VideoSourceMode.PHONE
-        preview?.visibility = if (shouldShow) android.view.View.VISIBLE else android.view.View.GONE
-        findViewById<TextView>(R.id.phone_camera_preview_label)?.visibility =
-            if (shouldShow) android.view.View.VISIBLE else android.view.View.GONE
-        if (shouldShow && preview?.isAvailable == true) {
-            detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_CROP)
-            startPhoneCameraPreview(preview.surfaceTexture ?: return)
-        } else if (!shouldShow) {
-            stopPhoneCameraPreview()
-        }
-    }
-
-    private fun configurePhonePreviewTransform(
-        preview: TextureView,
-        sourceWidth: Int,
-        sourceHeight: Int,
-    ) {
-        val viewWidth = preview.width.toFloat().takeIf { it > 0f } ?: return
-        val viewHeight = preview.height.toFloat().takeIf { it > 0f } ?: return
-        // Context.getDisplay() is API 30+; ContextCompat.getDisplayOrDefault returns null
-        // below that (no crash on API 24-29 devices, which lint flagged as a NewApi crash risk).
-        val rotation = ContextCompat.getDisplayOrDefault(this)?.rotation ?: Surface.ROTATION_0
-        val matrix = Matrix()
-        val viewRect = RectF(0f, 0f, viewWidth, viewHeight)
-        val centerX = viewRect.centerX()
-        val centerY = viewRect.centerY()
-        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
-            val bufferRect =
-                RectF(0f, 0f, sourceHeight.toFloat(), sourceWidth.toFloat()).apply {
-                    offset(centerX - centerX(), centerY - centerY())
-                }
-            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
-            val scale = maxOf(viewHeight / sourceHeight.toFloat(), viewWidth / sourceWidth.toFloat())
-            matrix.postScale(scale, scale, centerX, centerY)
-            matrix.postRotate(90f * (rotation - 2), centerX, centerY)
-        } else {
-            val scale = maxOf(viewWidth / sourceWidth.toFloat(), viewHeight / sourceHeight.toFloat())
-            matrix.postScale(scale, scale, centerX, centerY)
-        }
-        preview.setTransform(matrix)
-    }
-
-    private fun startPhoneCameraPreview(surfaceTexture: SurfaceTexture) {
-        val canStart =
-            getVideoSourceMode() == VideoSourceMode.PHONE &&
-                ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-                phoneCameraDevice == null
-        if (!canStart) return
-
-        runCatching {
-            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId =
-                cameraManager.cameraIdList.firstOrNull { id ->
-                    cameraManager
-                        .getCameraCharacteristics(id)
-                        .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-                } ?: cameraManager.cameraIdList.firstOrNull()
-
-            if (cameraId == null) {
-                Log.e(TAG, "No phone camera available for preview")
-                stopPhoneCameraPreview()
-            } else {
-                val characteristics = cameraManager.getCameraCharacteristics(cameraId)
-                val previewSize =
-                    characteristics
-                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                        ?.getOutputSizes(SurfaceTexture::class.java)
-                        ?.sortedWith(
-                            compareBy(
-                                { kotlin.math.abs(it.width - 1920) + kotlin.math.abs(it.height - 1080) },
-                                { it.width * it.height },
-                            ),
-                        )?.firstOrNull()
-                val phoneFrameSize =
-                    characteristics
-                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                        ?.getOutputSizes(ImageFormat.YUV_420_888)
-                        ?.sortedWith(
-                            compareBy(
-                                { kotlin.math.abs(it.width - 1280) + kotlin.math.abs(it.height - 720) },
-                                { it.width * it.height },
-                            ),
-                        )?.firstOrNull()
-
-                val width = previewSize?.width ?: 1920
-                val height = previewSize?.height ?: 1080
-                surfaceTexture.setDefaultBufferSize(width, height)
-                val surface = Surface(surfaceTexture)
-                phonePreviewSurface = surface
-                findViewById<TextureView>(R.id.phone_camera_preview)?.let {
-                    configurePhonePreviewTransform(it, width, height)
-                }
-
-                val thread = HandlerThread("LyrebirdPhonePreview").also { it.start() }
-                phoneCameraThread = thread
-                phoneCameraHandler = Handler(thread.looper)
-                val frameWidth = phoneFrameSize?.width ?: 1280
-                val frameHeight = phoneFrameSize?.height ?: 720
-                detectionOverlay?.setSourceFrameSize(frameWidth, frameHeight)
-                phoneImageReader =
-                    ImageReader.newInstance(frameWidth, frameHeight, ImageFormat.YUV_420_888, 3).apply {
-                        setOnImageAvailableListener({ reader -> handlePhoneInferenceImage(reader) }, phoneCameraHandler)
-                    }
-                Log.i(TAG, "Phone shared frame reader configured: ${frameWidth}x$frameHeight")
-
-                cameraManager.openCamera(
-                    cameraId,
-                    object : CameraDevice.StateCallback() {
-                        override fun onOpened(camera: CameraDevice) {
-                            phoneCameraDevice = camera
-                            createPhonePreviewSession(camera, surface)
-                            Log.i(TAG, "Phone camera preview opened: $cameraId ${width}x$height")
-                        }
-
-                        override fun onDisconnected(camera: CameraDevice) {
-                            Log.w(TAG, "Phone camera preview disconnected")
-                            stopPhoneCameraPreview()
-                        }
-
-                        override fun onError(
-                            camera: CameraDevice,
-                            error: Int,
-                        ) {
-                            Log.e(TAG, "Phone camera preview error: $error")
-                            stopPhoneCameraPreview()
-                        }
-                    },
-                    phoneCameraHandler,
-                )
-            }
-        }.onFailure { error ->
-            Log.e(TAG, "Failed to start phone camera preview: ${error.message}", error)
-            stopPhoneCameraPreview()
-        }
-    }
-
-    private fun createPhonePreviewSession(
-        camera: CameraDevice,
-        surface: Surface,
-    ) {
-        runCatching {
-            val request =
-                camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                    addTarget(surface)
-                    phoneImageReader?.surface?.let { addTarget(it) }
-                    set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-                }
-            val surfaces = listOfNotNull(surface, phoneImageReader?.surface)
-            val callback =
-                object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        phoneCameraSession = session
-                        runCatching { session.setRepeatingRequest(request.build(), null, phoneCameraHandler) }
-                            .onFailure { Log.e(TAG, "Failed to start phone preview repeating request: ${it.message}", it) }
-                    }
-
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
-                        Log.e(TAG, "Phone camera preview session configure failed")
-                        stopPhoneCameraPreview()
-                    }
-                }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val outputConfigs = surfaces.map { OutputConfiguration(it) }
-                val executor =
-                    phoneCameraHandler?.let { handler ->
-                        java.util.concurrent.Executor { command -> handler.post(command) }
-                    } ?: mainExecutor
-                val sessionConfig =
-                    SessionConfiguration(
-                        SessionConfiguration.SESSION_REGULAR,
-                        outputConfigs,
-                        executor,
-                        callback,
-                    )
-                camera.createCaptureSession(sessionConfig)
-            } else {
-                @Suppress("DEPRECATION")
-                camera.createCaptureSession(surfaces, callback, phoneCameraHandler)
-            }
-        }.onFailure { error ->
-            Log.e(TAG, "Failed to create phone camera preview session: ${error.message}", error)
-            stopPhoneCameraPreview()
-        }
-    }
-
-    private fun stopPhoneCameraPreview() {
-        runCatching { phoneCameraSession?.stopRepeating() }
-        runCatching { phoneCameraSession?.close() }
-        phoneCameraSession = null
-        runCatching { phoneCameraDevice?.close() }
-        phoneCameraDevice = null
-        runCatching { phoneImageReader?.close() }
-        phoneImageReader = null
-        runCatching { phonePreviewSurface?.release() }
-        phonePreviewSurface = null
-        phoneCameraThread?.quitSafely()
-        phoneCameraThread = null
-        phoneCameraHandler = null
-        phoneInferenceBusy.set(false)
-        lastPhoneEdgeFrameNs = 0L
-    }
-
-    private fun handlePhoneInferenceImage(reader: ImageReader) {
-        val image = reader.acquireLatestImage() ?: return
-        val timestampNs = System.nanoTime()
-        val isPhoneSource = getVideoSourceMode() == VideoSourceMode.PHONE
-        if (!isPhoneSource) {
-            image.close()
-        } else {
-            SharedPhoneCameraFrameSource.offerImage(image, timestampNs)
-            val controller = edgeDetectionController
-            val canRunInference =
-                controller != null &&
-                    timestampNs - lastPhoneEdgeFrameNs >= PHONE_EDGE_FRAME_INTERVAL_NS &&
-                    phoneInferenceBusy.compareAndSet(false, true)
-            if (!canRunInference) {
-                image.close()
-            } else {
-                lastPhoneEdgeFrameNs = timestampNs
-                controller.onYuv420Image(image, timestampNs) {
-                    phoneInferenceBusy.set(false)
-                }
-            }
-        }
-    }
-
-    private fun setupMockVideoPreview() {
-        findViewById<TextureView>(R.id.mock_video_preview)?.surfaceTextureListener =
-            object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int,
-                ) {
-                    updateMockPreviewVisibility()
-                }
-
-                override fun onSurfaceTextureSizeChanged(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int,
-                ) = Unit
-
-                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                    stopMockVideoPreview()
-                    return true
-                }
-
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
-            }
-        updateMockPreviewVisibility()
-    }
-
-    private fun updateMockPreviewVisibility() {
-        val preview = findViewById<TextureView>(R.id.mock_video_preview)
-        val label = findViewById<TextView>(R.id.mock_video_preview_label)
-        val shouldShow = isMockVideoEnabled()
-        preview?.visibility = if (shouldShow) android.view.View.VISIBLE else android.view.View.GONE
-        label?.visibility = if (shouldShow) android.view.View.VISIBLE else android.view.View.GONE
-        if (shouldShow && preview?.isAvailable == true) {
-            startMockVideoPreview(preview.surfaceTexture ?: return)
-        } else if (!shouldShow) {
-            stopMockVideoPreview()
-        }
-    }
-
-    private fun startMockVideoPreview(surfaceTexture: SurfaceTexture) {
-        if (!isMockVideoEnabled()) return
-        if (mockPreviewPlayer != null) {
-            runCatching { mockPreviewPlayer?.start() }
-            return
-        }
-
-        runCatching {
-            val descriptor = assets.openFd("mock_video/jellyfish_1080_10s_5mb.mp4")
-            val surface = Surface(surfaceTexture)
-            mockPreviewPlayer =
-                MediaPlayer().apply {
-                    setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
-                    setSurface(surface)
-                    isLooping = true
-                    setOnPreparedListener { player -> player.start() }
-                    setOnErrorListener { _, what, extra ->
-                        Log.e(TAG, "Mock preview player error: what=$what extra=$extra")
-                        true
-                    }
-                    prepareAsync()
-                }
-            descriptor.close()
-            surface.release()
-        }.onFailure { error ->
-            Log.e(TAG, "Failed to start mock preview: ${error.message}", error)
-            stopMockVideoPreview()
-        }
-    }
-
-    private fun stopMockVideoPreview() {
-        mockPreviewPlayer?.let { player ->
-            runCatching {
-                player.stop()
-            }
-            runCatching {
-                player.reset()
-                player.release()
-            }
-        }
-        mockPreviewPlayer = null
-    }
-
-    private fun updateMockVideoToggleUi(isEnabled: Boolean) {
-        findViewById<Switch>(R.id.sw_mock_video)?.let { switch ->
-            switch.text = if (isEnabled) "MOCK VIDEO" else "DJI VIDEO"
-            switch.setTextColor(if (isEnabled) 0xFFFFD166.toInt() else 0xFFDDDDDD.toInt())
-        }
-    }
-
-    private fun refreshMockTelemetryMode() {
-        TelemetryProvider.configureMockTelemetry(
-            enabled = shouldUseMockTelemetry(),
-            baseLatitude = phoneLocation?.latitude,
-            baseLongitude = phoneLocation?.longitude,
-            baseAltitude = phoneLocation?.altitude,
-        )
-        rebuildTelemetryCache()
     }
 
     private fun setupDetectedDroneProfileListener() {
@@ -2382,9 +1888,7 @@ class FlightDeckActivity :
 
     private fun updateWebRTCMetricsView(metrics: WebRTCStreamMetrics) {
         lastWebRTCMetrics = metrics
-        if (getVideoSourceMode() == VideoSourceMode.DJI) {
-            detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_INSIDE)
-        }
+        detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_INSIDE)
         if (metrics.sourceWidth > 0 && metrics.sourceHeight > 0) {
             detectionOverlay?.setSourceFrameSize(metrics.sourceWidth, metrics.sourceHeight)
         }
@@ -2867,7 +2371,6 @@ class FlightDeckActivity :
 
     private fun updateDetectionTelemetryState() {
         val source = activeDetectionSource()
-        val isMock = shouldUseMockTelemetry()
         val selectedSource = getDetectionSource()
 
         TelemetryProvider.currentDetectionSource = source.prefValue
@@ -2888,7 +2391,6 @@ class FlightDeckActivity :
                 else -> null
             }
 
-        telemetryCoordinator.isMockEnabled = isMock
         telemetryCoordinator.isDetectionsEnabled = isDetectionsEnabled()
         telemetryCoordinator.detectionSource = source.prefValue
         telemetryCoordinator.selectedDetectionSource = selectedSource.prefValue
@@ -3058,21 +2560,14 @@ class FlightDeckActivity :
 
     private sealed interface EdgeDetectionStartCheck {
         data class Ready(
-            val sourceMode: VideoSourceMode,
             val modelUri: Uri,
-        ) : EdgeDetectionStartCheck
-
-        data class UnsupportedSource(
-            val sourceMode: VideoSourceMode,
         ) : EdgeDetectionStartCheck
 
         data class UnsupportedStreamingMode(
             val streamingMode: StreamingMode,
         ) : EdgeDetectionStartCheck
 
-        data class MissingModel(
-            val sourceMode: VideoSourceMode,
-        ) : EdgeDetectionStartCheck
+        object MissingModel : EdgeDetectionStartCheck
 
         object WaitingForDjiVideo : EdgeDetectionStartCheck
     }
@@ -3080,7 +2575,7 @@ class FlightDeckActivity :
     private fun startEdgeDetection() {
         if (edgeDetectionController != null) return
 
-        val startCheck = edgeDetectionStartCheck(getVideoSourceMode(), getEdgeModelUri(), webRTCStreamer)
+        val startCheck = edgeDetectionStartCheck(getEdgeModelUri(), webRTCStreamer)
         if (startCheck !is EdgeDetectionStartCheck.Ready) {
             handleEdgeDetectionStartFailure(startCheck)
             return
@@ -3091,17 +2586,16 @@ class FlightDeckActivity :
         val controller = createEdgeDetectionController(startCheck)
         edgeDetectionController = controller
 
-        configureDetectionOverlay(startCheck.sourceMode)
+        configureDetectionOverlay()
         controller.start()
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
 
-        attachEdgeDetectionSource(startCheck.sourceMode, controller)
+        attachEdgeDetectionSource(controller)
         showEdgeDetectionEnabledMessage()
     }
 
     private fun edgeDetectionStartCheck(
-        sourceMode: VideoSourceMode,
         modelUri: Uri?,
         streamer: WebRTCStreamer?,
     ): EdgeDetectionStartCheck =
@@ -3109,17 +2603,14 @@ class FlightDeckActivity :
             getStreamingMode() != StreamingMode.WEBRTC -> {
                 EdgeDetectionStartCheck.UnsupportedStreamingMode(getStreamingMode())
             }
-            sourceMode == VideoSourceMode.MOCK -> {
-                EdgeDetectionStartCheck.UnsupportedSource(sourceMode)
-            }
             modelUri == null -> {
-                EdgeDetectionStartCheck.MissingModel(sourceMode)
+                EdgeDetectionStartCheck.MissingModel
             }
-            sourceMode == VideoSourceMode.DJI && streamer == null -> {
+            streamer == null -> {
                 EdgeDetectionStartCheck.WaitingForDjiVideo
             }
             else -> {
-                EdgeDetectionStartCheck.Ready(sourceMode = sourceMode, modelUri = modelUri)
+                EdgeDetectionStartCheck.Ready(modelUri = modelUri)
             }
         }
 
@@ -3134,22 +2625,10 @@ class FlightDeckActivity :
                         Toast.LENGTH_LONG,
                     ).show()
             }
-            is EdgeDetectionStartCheck.UnsupportedSource -> {
-                setDetectionsEnabled(false)
-                updateEdgeMetricsView(
-                    EdgeDetectionMetrics(status = "source", source = startCheck.sourceMode.prefValue),
-                )
-                Toast
-                    .makeText(
-                        this,
-                        "Edge detection supports drone and phone camera sources",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-            }
             is EdgeDetectionStartCheck.MissingModel -> {
                 setDetectionsEnabled(false)
                 updateEdgeMetricsView(
-                    EdgeDetectionMetrics(status = "no-model", source = startCheck.sourceMode.prefValue),
+                    EdgeDetectionMetrics(status = "no-model", source = VIDEO_SOURCE_LABEL),
                 )
                 showEdgeFilePicker(REQUEST_EDGE_MODEL_FILE, "Select YOLO TFLite model")
                 Toast.makeText(this, "Select a YOLO .tflite model first", Toast.LENGTH_SHORT).show()
@@ -3168,7 +2647,7 @@ class FlightDeckActivity :
                 EdgeDetectionConfig(
                     modelUri = startCheck.modelUri,
                     labels = getEdgeLabels(),
-                    sourceLabel = startCheck.sourceMode.prefValue,
+                    sourceLabel = VIDEO_SOURCE_LABEL,
                     confidenceThreshold = getEdgeConfidenceThreshold(),
                 ),
             onTargets = { targets ->
@@ -3182,33 +2661,16 @@ class FlightDeckActivity :
             },
         )
 
-    private fun configureDetectionOverlay(sourceMode: VideoSourceMode) {
-        when (sourceMode) {
-            VideoSourceMode.DJI -> {
-                detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_INSIDE)
-                detectionOverlay?.setSourceFrameSize(
-                    lastWebRTCMetrics.sourceWidth.takeIf { it > 0 } ?: 16,
-                    lastWebRTCMetrics.sourceHeight.takeIf { it > 0 } ?: 9,
-                )
-            }
-            VideoSourceMode.PHONE -> {
-                detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_CROP)
-            }
-            VideoSourceMode.MOCK -> Unit
-        }
+    private fun configureDetectionOverlay() {
+        detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_INSIDE)
+        detectionOverlay?.setSourceFrameSize(
+            lastWebRTCMetrics.sourceWidth.takeIf { it > 0 } ?: 16,
+            lastWebRTCMetrics.sourceHeight.takeIf { it > 0 } ?: 9,
+        )
     }
 
-    private fun attachEdgeDetectionSource(
-        sourceMode: VideoSourceMode,
-        controller: EdgeDetectionController,
-    ) {
-        if (sourceMode == VideoSourceMode.DJI) {
-            webRTCStreamer?.setEdgeDetectionFrameListener(controller)
-            return
-        }
-        webRTCStreamer?.setEdgeDetectionFrameListener(null)
-        stopPhoneCameraPreview()
-        updatePhonePreviewVisibility()
+    private fun attachEdgeDetectionSource(controller: EdgeDetectionController) {
+        webRTCStreamer?.setEdgeDetectionFrameListener(controller)
     }
 
     private fun showEdgeDetectionEnabledMessage() {
@@ -3222,11 +2684,6 @@ class FlightDeckActivity :
         controller.dispose()
         edgeDetectionController = null
         clearAutoSensingState()
-        phoneInferenceBusy.set(false)
-        if (getVideoSourceMode() == VideoSourceMode.PHONE) {
-            stopPhoneCameraPreview()
-            updatePhonePreviewVisibility()
-        }
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
         updateEdgeMetricsView(EdgeDetectionMetrics(status = "off"))
@@ -3520,9 +2977,6 @@ class FlightDeckActivity :
         addCockpitSection(videoColumn, "VIDEO / STREAM")
         addCockpitRow(videoColumn, "Protocol", getStreamingMode().menuLabel) {
             showBrandedStreamSettingsPage()
-        }
-        addCockpitRow(videoColumn, "Video source", getVideoSourceMode().menuLabel) {
-            showBrandedVideoSourcePage()
         }
         addCockpitRow(videoColumn, "Resolution", getWebRTCResolutionPreset().menuLabel) {
             showBrandedResolutionPage()
@@ -4255,9 +3709,6 @@ class FlightDeckActivity :
                     addBrandedSettingsRow(container, "WHIP server", server.ifEmpty { "Auto" }) {
                         showBrandedMediamtxServerPage()
                     }
-                    addBrandedSettingsRow(container, "Video source", getVideoSourceMode().menuLabel) {
-                        showBrandedVideoSourcePage()
-                    }
                     addBrandedSettingsRow(container, "Frame rate", "${getWebRTCFps()} fps") {
                         showBrandedFpsPage()
                     }
@@ -4353,19 +3804,6 @@ class FlightDeckActivity :
                 sharedPreferences.edit().putString(PREF_WEBRTC_RESOLUTION, presets[index].prefValue).apply()
                 webRTCStreamer?.changeMediaOptions(buildWebRTCOptions())
             },
-            returnPage = ::showBrandedStreamSettingsPage,
-            onBack = ::showBrandedStreamSettingsPage,
-        )
-    }
-
-    private fun showBrandedVideoSourcePage() {
-        val sources = WebRTCStreamer.VideoSourceMode.entries.toList()
-        showBrandedChoicePage(
-            "VIDEO SOURCE",
-            "Choose the pixels supplied to the stream",
-            sources.map { it.menuLabel },
-            sources.indexOf(getVideoSourceMode()).coerceAtLeast(0),
-            onSelected = { index -> setVideoSourceMode(sources[index]) },
             returnPage = ::showBrandedStreamSettingsPage,
             onBack = ::showBrandedStreamSettingsPage,
         )
@@ -4867,29 +4305,6 @@ class FlightDeckActivity :
             .show()
     }
 
-    private fun showVideoSourceDialog() {
-        val sources = VideoSourceMode.entries.toTypedArray()
-        val labels =
-            sources
-                .map { source ->
-                    when (source) {
-                        VideoSourceMode.DJI -> "Drone camera"
-                        VideoSourceMode.PHONE -> "Phone back camera"
-                        VideoSourceMode.MOCK -> "Mock MP4"
-                    }
-                }.toTypedArray()
-        val checkedIndex = sources.indexOf(getVideoSourceMode()).coerceAtLeast(0)
-
-        AlertDialog
-            .Builder(this)
-            .setTitle("Video source")
-            .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
-                setVideoSourceMode(sources[which])
-                dialog.dismiss()
-            }.setNegativeButton("Cancel", null)
-            .show()
-    }
-
     private fun showStreamSettingsDialog() {
         val mode = getStreamingMode()
         val rows = mutableListOf<SettingsActionRow>()
@@ -4900,7 +4315,6 @@ class FlightDeckActivity :
                 val configuredServer = sharedPreferences.getString(PREF_MEDIAMTX_SERVER, "")?.trim().orEmpty()
                 val serverLabel = configuredServer.ifEmpty { "Auto" }
                 rows.add(SettingsActionRow("WHIP server", serverLabel))
-                rows.add(SettingsActionRow("Video source", getVideoSourceMode().menuLabel))
                 rows.add(SettingsActionRow("WebRTC FPS", "${getWebRTCFps()} fps"))
                 rows.add(SettingsActionRow("WebRTC resolution", getWebRTCResolutionPreset().menuLabel))
                 rows.add(
@@ -4944,10 +4358,9 @@ class FlightDeckActivity :
                         StreamingMode.WEBRTC -> {
                             when (which) {
                                 1 -> showMediamtxServerDialog()
-                                2 -> showVideoSourceDialog()
-                                3 -> showWebRTCFpsDialog()
-                                4 -> showWebRTCResolutionDialog()
-                                5 -> toggleDjiSurfaceH264Encoder()
+                                2 -> showWebRTCFpsDialog()
+                                3 -> showWebRTCResolutionDialog()
+                                4 -> toggleDjiSurfaceH264Encoder()
                             }
                         }
                         StreamingMode.RTMP -> showRtmpConfigDialog()
@@ -5534,9 +4947,7 @@ class FlightDeckActivity :
                     cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
                     droneName = droneName,
                     options = buildWebRTCOptions(),
-                    mockVideoEnabled = isMockVideoEnabled(),
                 )
-            webRTCStreamer?.setVideoSourceMode(getVideoSourceMode())
             webRTCStreamer?.listener =
                 object : WebRTCStreamer.WebRTCStreamerListener {
                     override fun onServerStarted(
@@ -5635,7 +5046,6 @@ class FlightDeckActivity :
             // Stop AutoSensing
             stopAutoSensing()
 
-            stopMockVideoPreview()
             stopEdgeDetection()
 
             // Stop all servers
@@ -5712,7 +5122,6 @@ class FlightDeckActivity :
             DroneSettingsProfiles.saveCurrentProfile(sharedPreferences, PER_DRONE_PROFILE_KEYS)
 
             mainHandler.removeCallbacksAndMessages(null)
-            stopPhoneCameraPreview()
 
             Log.i(TAG, "All servers stopped")
         } finally {
@@ -5783,7 +5192,6 @@ class FlightDeckActivity :
                     { showEdgeFilePicker(REQUEST_EDGE_LABELS_FILE, "Select model labels") }
                 }
                 13 -> ::showEdgeConfidenceDialog
-                6 -> ::showVideoSourceDialog
                 3 -> {
                     { showFormatStorageDialog(CameraStorageLocation.SDCARD, "SD card") }
                 }
@@ -6087,8 +5495,6 @@ class FlightDeckActivity :
     private fun getGapTelemetryJson(): String = telemetryCoordinator.getGapTelemetryJson()
 
     private fun rebuildTelemetryCache() {
-        val isMock = shouldUseMockTelemetry()
-        telemetryCoordinator.isMockEnabled = isMock
         telemetryCoordinator.droneName = droneName
 
         // Streaming Config
@@ -6119,29 +5525,10 @@ class FlightDeckActivity :
             }
         telemetryCoordinator.consumptionPath = path
 
-        if (isMock) {
-            val sdkMock = TelemetryProvider.currentMockTelemetry(droneName)
-            telemetryCoordinator.mockSnapshot =
-                MockTelemetrySnapshot(
-                    velocity = sdkMock.velocity.toString(),
-                    heading = sdkMock.heading,
-                    attitude = sdkMock.attitude.toString(),
-                    location = sdkMock.location.toString(),
-                    altitudeAGL = sdkMock.altitudeAGL,
-                    gimbalAttitude = sdkMock.gimbalAttitude.toString(),
-                    batteryPercent = sdkMock.batteryPercent,
-                    satelliteCount = sdkMock.satelliteCount,
-                    flightMode = sdkMock.flightMode,
-                    isFlying = sdkMock.isFlying,
-                    locationLatitude = sdkMock.location.latitude,
-                    locationLongitude = sdkMock.location.longitude,
-                )
-        } else {
-            telemetryCoordinator.mockSnapshot = null
-            rebuildRealTelemetryCache()
-        }
+        rebuildRealTelemetryCache()
 
-        // Phone Status (always updated for both mock and real modes)
+        // Phone Status: the RC's own sensors, which are real readings rather than a stand-in
+        // for aircraft state.
         telemetryCoordinator.phoneLatitude = phoneLocation?.latitude ?: 0.0
         telemetryCoordinator.phoneLongitude = phoneLocation?.longitude ?: 0.0
         telemetryCoordinator.phoneHeading = phoneHeading
@@ -6994,7 +6381,7 @@ class FlightDeckActivity :
             override fun textParameters(): List<Pair<String, String>> =
                 listOf(
                     PARAM_DRONE_NAME to droneName,
-                    PARAM_VIDEO_SOURCE to getVideoSourceMode().prefValue,
+                    PARAM_VIDEO_SOURCE to VIDEO_SOURCE_LABEL,
                     PARAM_MEDIAMTX to getMediamtxServer(),
                     PARAM_DETECTION_SOURCE to getDetectionSource().prefValue,
                     PARAM_RC_CONTROL_MODE to DroneController.getRcControlMode(),

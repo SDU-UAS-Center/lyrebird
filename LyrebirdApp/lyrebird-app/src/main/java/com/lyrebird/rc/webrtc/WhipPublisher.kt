@@ -164,8 +164,6 @@ class WhipPublisher(
         when (videoCapturer) {
             is DJIV5VideoCapturer -> videoCapturer.changeResolution(width, height)
             is SharedVideoCapturerHandle -> videoCapturer.changeResolution(width, height)
-            is MockMp4VideoCapturer -> videoCapturer.changeResolution(width, height)
-            is SharedPhoneVideoCapturerHandle -> videoCapturer.changeCaptureFormat(width, height, currentFps)
         }
     }
 
@@ -179,12 +177,6 @@ class WhipPublisher(
                 boundedFps
             )
             is SharedVideoCapturerHandle -> videoCapturer.changeFrameRate(boundedFps)
-            is MockMp4VideoCapturer -> videoCapturer.changeFrameRate(boundedFps)
-            is SharedPhoneVideoCapturerHandle -> videoCapturer.changeCaptureFormat(
-                options.videoResolutionWidth,
-                options.videoResolutionHeight,
-                boundedFps
-            )
         }
         peerConnection?.senders?.firstOrNull()?.let { configureVideoSenderForStability(it) }
         Log.d(TAG, "WHIP frame rate changed to $boundedFps fps")
@@ -746,24 +738,6 @@ private fun createFirstFrameGate(capturer: VideoCapturer): WhipFirstFrameGate? {
             unavailableMessage = "No DJI video frames available for WHIP publishing",
             recoverBeforeRetry = { capturer.recoverCapture("no frames before WHIP offer") },
             recoveryLogMessage = "No DJI video frames before WHIP offer; recovering capture"
-        )
-        is MockMp4VideoCapturer -> WhipFirstFrameGate(
-            waiter = object : WhipFirstFrameWaiter {
-                override fun totalOutputFrames(): Long = capturer.totalOutputFrames()
-                override fun waitForOutputFrameAfter(frameCount: Long, timeoutMs: Long): Boolean {
-                    return capturer.waitForOutputFrameAfter(frameCount, timeoutMs)
-                }
-            },
-            unavailableMessage = "No mock MP4 video frames available for WHIP publishing"
-        )
-        is SharedPhoneVideoCapturerHandle -> WhipFirstFrameGate(
-            waiter = object : WhipFirstFrameWaiter {
-                override fun totalOutputFrames(): Long = capturer.totalOutputFrames()
-                override fun waitForOutputFrameAfter(frameCount: Long, timeoutMs: Long): Boolean {
-                    return capturer.waitForOutputFrameAfter(frameCount, timeoutMs)
-                }
-            },
-            unavailableMessage = "No shared phone camera frames available for WHIP publishing"
         )
         else -> null
     }
