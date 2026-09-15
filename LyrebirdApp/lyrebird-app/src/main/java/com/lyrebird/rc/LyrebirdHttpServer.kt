@@ -16,6 +16,7 @@ import com.lyrebird.rc.mavlink.GimbalRotation
 import com.lyrebird.rc.mavlink.GimbalRotationMode
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
+import com.lyrebird.rc.server.SessionServer
 import com.lyrebird.rc.util.NetworkUtils
 import dji.sdk.keyvalue.value.camera.LaserMeasureState
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
@@ -590,37 +591,45 @@ internal class SimpleHttpServer(
     private val port: Int,
     private val host: LyrebirdCommandHost,
     private val commandSink: MavlinkCommandSink
-) {
+) : SessionServer {
+        override val label = "commands"
         private var serverSocket: ServerSocket? = null
         private val executor = Executors.newFixedThreadPool(10)
         private val commandHandler = LyrebirdHttpCommandHandler(host, commandSink)
         @Volatile
         private var isRunning = false
 
-        fun start() {
-            if (isRunning) return
-            thread {
-                try {
-                    serverSocket = ServerSocket(port)
-                    isRunning = true
-                    Log.i("SimpleHttpServer", "Server started on port $port")
-                    while (isRunning && !serverSocket!!.isClosed) {
-                        try {
-                            val clientSocket = serverSocket!!.accept()
-                            executor.submit { handleRequest(clientSocket) }
-                        } catch (e: IOException) {
-                            if (isRunning) {
-                                Log.e("SimpleHttpServer", "Error accepting connection: ${e.message}", e)
-                            }
+        override fun start(): Boolean {
+            if (isRunning) return true
+
+            // Bind here, on the caller's thread, so the caller learns whether the port was taken
+            // before it decides what to advertise. The old order bound on a background thread and
+            // logged the failure after the aircraft had already announced itself as serving.
+            val listening =
+                runCatching { ServerSocket(port) }.getOrElse { error ->
+                    Log.e("SimpleHttpServer", "Could not bind port $port: ${error.message}")
+                    return false
+                }
+            serverSocket = listening
+            isRunning = true
+            Log.i("SimpleHttpServer", "Server started on port $port")
+
+            thread(name = "SimpleHttpServer-$port") {
+                while (isRunning && !listening.isClosed) {
+                    try {
+                        val clientSocket = listening.accept()
+                        executor.submit { handleRequest(clientSocket) }
+                    } catch (e: IOException) {
+                        if (isRunning) {
+                            Log.e("SimpleHttpServer", "Error accepting connection: ${e.message}", e)
                         }
                     }
-                } catch (e: IOException) {
-                    Log.e("SimpleHttpServer", "Server error: ${e.message}", e)
                 }
             }
+            return true
         }
 
-        fun stop() {
+        override fun stop() {
             isRunning = false
             runCatching {
                 serverSocket?.close()

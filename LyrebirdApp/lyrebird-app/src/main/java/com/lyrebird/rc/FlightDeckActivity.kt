@@ -92,7 +92,10 @@ import com.lyrebird.rc.models.PayloadWidgetVM
 import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.server.DiscoveryAdvertiser
 import com.lyrebird.rc.server.LyrebirdDiscoveryManager
+import com.lyrebird.rc.server.LyrebirdSession
+import com.lyrebird.rc.server.SessionLease
 import com.lyrebird.rc.server.TelemetryServer
 import com.lyrebird.rc.settings.DroneSettingsProfiles
 import com.lyrebird.rc.settings.LyrebirdOnboarding
@@ -455,8 +458,7 @@ class FlightDeckActivity :
     override lateinit var payloadWidgetVM: PayloadWidgetVM
 
     // Servers
-    private var httpServer: SimpleHttpServer? = null
-    private var telemetryServer: TelemetryServer? = null
+    private var session: LyrebirdSession? = null
 
     /**
      * MAVLink 2 telemetry endpoint. On by default (`lb_mav_0_enabled`), following PX4's pattern
@@ -2837,7 +2839,7 @@ class FlightDeckActivity :
     private fun updateMavlinkHttpStatusView() {
         val statusTv = findViewById<TextView>(R.id.text_mavlink_http_status) ?: return
         val mavlinkUp = mavlinkEndpoint != null
-        val httpUp = httpServer != null
+        val httpUp = session?.status?.httpPort != null
         val mavlinkColor = if (mavlinkUp) 0xFF2196F3.toInt() else 0xFFFF1744.toInt()
         val httpColor = if (httpUp) 0xFF4CAF50.toInt() else 0xFFFF1744.toInt()
 
@@ -3756,7 +3758,7 @@ class FlightDeckActivity :
             modes.indexOf(getStreamingMode()).coerceAtLeast(0),
             onSelected = { index ->
                 setStreamingMode(modes[index])
-                if (telemetryServer?.hasClients() == true || lastWhipUrl != null) restartActiveStreaming()
+                if (session?.hasTelemetryClients() == true || lastWhipUrl != null) restartActiveStreaming()
             },
             returnPage = ::showBrandedStreamSettingsPage,
             onBack = ::showBrandedStreamSettingsPage,
@@ -4385,7 +4387,7 @@ class FlightDeckActivity :
                 val selectedMode = modes[which]
                 setStreamingMode(selectedMode)
                 dialog.dismiss()
-                if (telemetryServer?.hasClients() == true || lastWhipUrl != null) {
+                if (session?.hasTelemetryClients() == true || lastWhipUrl != null) {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
@@ -4406,7 +4408,7 @@ class FlightDeckActivity :
             .setPositiveButton("Save") { _, _ ->
                 val url = input.text.toString().trim()
                 setRtmpUrl(url)
-                if (url.isNotEmpty() && (telemetryServer?.hasClients() == true || lastWhipUrl != null)) {
+                if (url.isNotEmpty() && (session?.hasTelemetryClients() == true || lastWhipUrl != null)) {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
@@ -4454,7 +4456,7 @@ class FlightDeckActivity :
                 setRtspPort(port)
                 setRtspUsername(userInput.text.toString())
                 setRtspPassword(pwdInput.text.toString())
-                if (telemetryServer?.hasClients() == true || lastWhipUrl != null) {
+                if (session?.hasTelemetryClients() == true || lastWhipUrl != null) {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
@@ -4499,7 +4501,7 @@ class FlightDeckActivity :
                 setAgoraChannel(channelInput.text.toString())
                 setAgoraToken(tokenInput.text.toString())
                 setAgoraUid(uidInput.text.toString())
-                if (telemetryServer?.hasClients() == true || lastWhipUrl != null) {
+                if (session?.hasTelemetryClients() == true || lastWhipUrl != null) {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
@@ -4585,7 +4587,7 @@ class FlightDeckActivity :
                 setGbChannel(channelInput.text.toString())
                 setGbLocalPort(localPortInput.text.toString().toIntOrNull() ?: 5061)
                 setGbPassword(pwdInput.text.toString())
-                if (telemetryServer?.hasClients() == true || lastWhipUrl != null) {
+                if (session?.hasTelemetryClients() == true || lastWhipUrl != null) {
                     restartActiveStreaming()
                 }
                 showStreamSettingsDialog()
@@ -4886,11 +4888,24 @@ class FlightDeckActivity :
     private fun startServers() {
         val deviceIp = NetworkUtils.getDeviceIpAddress()
 
-        // Start mDNS/Zeroconf service registration (RECOMMENDED for discovery)
-        discoveryManager.registerMdnsService(droneSerialNumber, HTTP_PORT, TELEMETRY_PORT)
-
-        // Start Discovery Server (UDP broadcast/multicast fallback)
-        discoveryManager.startDiscoveryServer()
+        // The lease, the servers, then the announcement — the order is the point. The aircraft
+        // used to register mDNS and open its discovery sockets before finding out whether the
+        // command and telemetry ports could even be bound, so a failed bind left a standing
+        // advertisement for a service nobody was listening on.
+        session =
+            LyrebirdSession(
+                lease = SessionLease(),
+                http = SimpleHttpServer(HTTP_PORT, this, mavlinkCommandSink),
+                telemetry = buildTelemetryServer(),
+                advertiser = DiscoveryAdvertiser(discoveryManager) { droneSerialNumber },
+                httpPort = HTTP_PORT,
+                telemetryPort = TELEMETRY_PORT,
+            )
+        val sessionStatus = session?.start()
+        Log.i(TAG, "Session on $deviceIp: ${sessionStatus?.summary()}")
+        sessionStatus?.takeIf { it.blockedByAnotherSession }?.let {
+            ToastUtils.showLongToast(it.summary())
+        }
 
         // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
         // same question asked between aircraft, which nothing on the device could answer before.
@@ -4899,43 +4914,11 @@ class FlightDeckActivity :
         // Obstacle guard. Opt-in, and silent unless it fires.
         startObstacleGuard()
 
-        // Start HTTP Command Server
-        if (!NetworkUtils.isPortInUse(HTTP_PORT)) {
-            runCatching {
-                httpServer = SimpleHttpServer(HTTP_PORT, this, mavlinkCommandSink)
-                httpServer?.start()
-                Log.i(TAG, "HTTP server started on $deviceIp:$HTTP_PORT")
-            }.onFailure { error ->
-                Log.e(TAG, "Error starting HTTP server: ${error.message}", error)
-            }
-        } else {
-            Log.w(TAG, "HTTP port $HTTP_PORT already in use")
-        }
-
-        // Start Telemetry Server
-        if (!NetworkUtils.isPortInUse(TELEMETRY_PORT)) {
-            runCatching {
-                telemetryServer = TelemetryServer(TELEMETRY_PORT, ::getTelemetryJson, ::getGapTelemetryJson)
-                telemetryServer?.onFirstClientConnected = { clientIp ->
-                    Log.i(TAG, "First telemetry client from $clientIp — starting active streaming")
-                    mainHandler.post {
-                        startStreamingForClient(clientIp)
-                    }
-                }
-                telemetryServer?.start()
-                Log.i(TAG, "Telemetry server started on $deviceIp:$TELEMETRY_PORT")
-            }.onFailure { error ->
-                Log.e(TAG, "Error starting telemetry server: ${error.message}", error)
-            }
-        } else {
-            Log.w(TAG, "Telemetry port $TELEMETRY_PORT already in use")
-        }
-
         // Start the MAVLink 2 telemetry endpoint (no-op unless enabled by preference).
         startMavlinkEndpoint()
 
-        // Both server-start attempts above have now either succeeded or logged why not, so this
-        // is the first point where httpServer/mavlinkEndpoint reflect what actually came up.
+        // The endpoint has now either bound or logged why not, so this is the first point where
+        // the status line reflects what actually came up.
         updateMavlinkHttpStatusView()
 
         // WebRTC video via WHIP — create the shared frame source/publisher.
@@ -5004,6 +4987,22 @@ class FlightDeckActivity :
         }
     }
 
+    /**
+     * The telemetry server, with the bridge-attached callback the session cannot know about.
+     *
+     * The first ground station to attach is what starts active streaming, so this wiring stays
+     * here while the server's lifecycle belongs to the session.
+     */
+    private fun buildTelemetryServer(): TelemetryServer =
+        TelemetryServer(TELEMETRY_PORT, ::getTelemetryJson, ::getGapTelemetryJson).apply {
+            onFirstClientConnected = { clientIp ->
+                Log.i(TAG, "First telemetry client from $clientIp — starting active streaming")
+                mainHandler.post {
+                    startStreamingForClient(clientIp)
+                }
+            }
+        }
+
     private fun showServerInfo() {
         val deviceIp = NetworkUtils.getDeviceIpAddress() ?: "Unknown"
         val message =
@@ -5048,9 +5047,11 @@ class FlightDeckActivity :
 
             stopEdgeDetection()
 
-            // Stop all servers
-            telemetryServer?.onFirstClientConnected = null
-            telemetryServer?.stop()
+            // Stop the session: it withdraws the advertisement, stops both servers, and gives
+            // the lease back, in that order. Stopping the servers by hand here is what used to
+            // leave the mDNS registration standing with nothing behind it.
+            session?.stop()
+            session = null
             mavlinkEndpoint?.stop()
             mavlinkEndpoint = null
             captureExecutor.shutdownNow()
@@ -5066,24 +5067,11 @@ class FlightDeckActivity :
             webRTCStreamer?.listener = null
             stopActiveStreaming()
             WebRTCPeerFactory.reset()
-            // Before the discovery server: both hold multicast sockets, and the fleet link also
-            // holds a repeating main-thread callback that must not outlive the activity.
+            // The fleet link holds a repeating main-thread callback that must not outlive the
+            // activity. Its sockets are its own; the session's discovery sockets are already down.
             stopObstacleGuard()
             stopFleetMesh()
-            discoveryManager.stopDiscoveryServer()
-            // Must stop the HTTP server, not just drop the reference: its accept thread and
-            // worker pool hold this activity via the command handler. Without stop() the
-            // threads keep the destroyed activity alive forever (LeakCanary: recurring
-            // FlightDeckActivity + MediaVM leaks via SimpleHttpServer).
-            httpServer?.stop()
-            httpServer = null
-            telemetryServer = null
             webRTCStreamer = null
-
-            // Unregister mDNS service
-            discoveryManager.unregisterMdnsService()
-
-            // (location + sensor listeners already unregistered at the top of onDestroy)
 
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {
@@ -7520,9 +7508,14 @@ class FlightDeckActivity :
                     mainHandler.post { startStreamingForClient(peerIp) }
                 }
             }
-            endpoint.start()
-            mavlinkEndpoint = endpoint
-            mavlinkFtpServer = ftpServer
+            // Only claim the endpoint once it actually holds its socket: the status line and the
+            // command log both read this field, and a taken UDP port must not read as MAVLink up.
+            if (endpoint.start()) {
+                mavlinkEndpoint = endpoint
+                mavlinkFtpServer = ftpServer
+            } else {
+                Log.w(TAG, "MAVLink endpoint did not start; UDP ${config.listenPort} is not ours")
+            }
         }.onFailure { error ->
             Log.e(TAG, "Error starting MAVLink endpoint: ${error.message}", error)
         }

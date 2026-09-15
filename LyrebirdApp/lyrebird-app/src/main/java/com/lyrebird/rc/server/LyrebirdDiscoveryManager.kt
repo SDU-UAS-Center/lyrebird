@@ -183,10 +183,14 @@ class LyrebirdDiscoveryManager(
     // ==================== mDNS (Zeroconf) ====================
 
     /**
-     * Registers Zeroconf/mDNS service for drone HTTP, telemetry, and WHIP publish.
+     * Registers Zeroconf/mDNS service for the drone's HTTP, telemetry, and WHIP publish.
+     *
+     * @param telemetryPort the telemetry port, or null when that server is not answering — the
+     *   attribute is then left out rather than published as a port nothing is listening on. A
+     *   reader that does not find it should fall back to the default port.
      */
     @Suppress("TooGenericExceptionCaught")
-    fun registerMdnsService(droneSerialNumber: String, httpPort: Int, telemetryPort: Int) {
+    fun registerMdnsService(droneSerialNumber: String, httpPort: Int, telemetryPort: Int?) {
         val droneName = droneNameProvider()
         try {
             nsdManager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -199,7 +203,7 @@ class LyrebirdDiscoveryManager(
                 setAttribute("name", droneName)
                 setAttribute("serial", droneSerialNumber)
                 setAttribute("http", httpPort.toString())
-                setAttribute("telemetry", telemetryPort.toString())
+                telemetryPort?.let { setAttribute("telemetry", it.toString()) }
                 setAttribute("video", "whip")
             }
 
@@ -209,7 +213,7 @@ class LyrebirdDiscoveryManager(
                 NsdManager.PROTOCOL_DNS_SD,
                 registrationListener
             )
-            Log.i(TAG, "Registering mDNS service: $droneName.$MDNS_SERVICE_TYPE")
+            Log.i(TAG, "Registering mDNS service: $droneName.$MDNS_SERVICE_TYPE (telemetry=$telemetryPort)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register mDNS service: ${e.message}", e)
             isMdnsRegistrationRequested = false

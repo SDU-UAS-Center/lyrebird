@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
-class TelemetryServer(
+internal class TelemetryServer(
     private val port: Int,
     private val telemetryProvider: () -> String,
     /**
@@ -27,8 +27,10 @@ class TelemetryServer(
      * that consume high-rate telemetry over this socket; note that per-frame metadata
      * on the WebRTC path comes from TelemetryProvider and is unaffected by this value.
      */
-    private val sendIntervalMs: Long = DEFAULT_SEND_INTERVAL_MS
-) {
+    private val sendIntervalMs: Long = DEFAULT_SEND_INTERVAL_MS,
+) : ClientAwareServer {
+    override val label = "telemetry"
+
     private var serverSocket: ServerSocket? = null
     private val executor = Executors.newCachedThreadPool()
     @Volatile
@@ -39,7 +41,7 @@ class TelemetryServer(
     /** Callback invoked when a bridge client connects. Receives the client's IP address. */
     var onFirstClientConnected: ((clientIp: String) -> Unit)? = null
 
-    fun hasClients(): Boolean = clients.isNotEmpty()
+    override fun hasClients(): Boolean = clients.isNotEmpty()
 
     /** One connected socket and whether it asked for the trimmed, MAVLink-gap-only stream. */
     private class ClientConnection(val writer: PrintWriter) {
@@ -65,30 +67,37 @@ class TelemetryServer(
         const val MODE_DETECT_TIMEOUT_MS = 200
     }
 
-    fun start() {
-        if (isRunning) return
+    override fun start(): Boolean {
+        if (isRunning) return true
 
-        serverThread = thread(name = "TelemetryServer-$port", start = true) {
-            runCatching {
-                serverSocket = ServerSocket(port)
-                isRunning = true
-                Log.i("TelemetryServer", "Server started on port $port")
+        // Bind here rather than inside the thread: the caller has to know whether the port was
+        // taken before it decides what to advertise, and a failure on a background thread cannot
+        // be reported to it.
+        val listening =
+            runCatching { ServerSocket(port) }.getOrElse { error ->
+                Log.e("TelemetryServer", "Could not bind telemetry port $port: ${error.message}")
+                return false
+            }
+        serverSocket = listening
+        isRunning = true
+        Log.i("TelemetryServer", "Server started on port $port")
 
+        serverThread =
+            thread(name = "TelemetryServer-$port", start = true) {
                 // Start a thread to periodically send telemetry data to all connected clients
                 executor.submit { sendTelemetryData() }
 
-                while (isRunning && !serverSocket!!.isClosed) {
+                while (isRunning && !listening.isClosed) {
                     acceptNextClient()
                 }
-            }.onFailure { error ->
-                Log.e("TelemetryServer", "Server error: ${error.message}")
             }
-        }
+        return true
     }
 
     private fun acceptNextClient() {
+        val listening = serverSocket ?: return
         runCatching {
-            val clientSocket = serverSocket!!.accept()
+            val clientSocket = listening.accept()
             val clientIp = clientSocket.inetAddress.hostAddress ?: "unknown"
             Log.i("TelemetryServer", "Client connected: $clientIp")
             val connection = ClientConnection(PrintWriter(clientSocket.getOutputStream(), true))
@@ -157,7 +166,7 @@ class TelemetryServer(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         isRunning = false
         onFirstClientConnected = null
         runCatching {

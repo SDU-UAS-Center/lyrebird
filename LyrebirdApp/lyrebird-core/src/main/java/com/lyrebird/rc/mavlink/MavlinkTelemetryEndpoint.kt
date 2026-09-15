@@ -186,15 +186,32 @@ class MavlinkTelemetryEndpoint(
         capturing = true
     }
 
-    fun start() {
-        if (running) return
+    /**
+     * Binds the listen socket and starts streaming.
+     *
+     * @return true when the socket is bound and the endpoint is running, false when the port could
+     *   not be taken. The bind happens here, on the caller's thread: when it happened on the sender
+     *   thread instead, a taken port produced a logged error and a still-"running" endpoint, so
+     *   whoever was drawing the link status could only report MAVLink as up.
+     */
+    fun start(): Boolean {
+        if (running) return true
+
+        val bound =
+            runCatching { DatagramSocket(config.listenPort).apply { broadcast = true } }
+                .getOrElse { error ->
+                    Log.e(TAG, "Could not bind MAVLink UDP ${config.listenPort}: ${error.message}")
+                    return false
+                }
+        socket = bound
         running = true
 
         senderThread =
             thread(name = "MavlinkEndpoint-tx", start = true) {
-                runCatching { openSocketAndStream() }
+                runCatching { openSocketAndStream(bound) }
                     .onFailure { error -> Log.e(TAG, "Endpoint stopped: ${error.message}", error) }
             }
+        return true
     }
 
     fun stop() {
@@ -210,9 +227,7 @@ class MavlinkTelemetryEndpoint(
         senderThread = null
     }
 
-    private fun openSocketAndStream() {
-        val bound = DatagramSocket(config.listenPort).apply { broadcast = true }
-        socket = bound
+    private fun openSocketAndStream(bound: DatagramSocket) {
         configuredTarget = resolveConfiguredTarget()
         Log.i(
             TAG,

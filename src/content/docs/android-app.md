@@ -12,13 +12,21 @@ Everything below starts automatically the moment the app launches — there is n
 
 | Service | Port / channel | Started | Purpose |
 |---|---|---|---|
-| HTTP command & status server | TCP 8080 | Always | `POST /send/...` commands, `GET /config` and status endpoints — see [HTTP API](/http-api/) |
-| TCP telemetry stream | TCP 8081 | Always | Newline-delimited JSON, one line per tick, to every connected socket — see [Telemetry](/telemetry/) |
+| HTTP command & status server | TCP 8080 | Always, once this app owns the session | `POST /send/...` commands, `GET /config` and status endpoints — see [HTTP API](/http-api/) |
+| TCP telemetry stream | TCP 8081 | Always, once this app owns the session | Newline-delimited JSON, one line per tick, to every connected socket — see [Telemetry](/telemetry/) |
 | MAVLink 2 endpoint | UDP 14550 | On by default (`lb_mav_0_enabled`) | Full MAVLink 2 vehicle: telemetry, commands, missions, parameters, FTP — see [MAVLink 2](/mavlink/) |
-| UDP discovery responder | UDP 30000 | Always | Answers broadcast discovery requests with the aircraft's name and IP, plus mDNS and subnet-scan fallbacks |
+| UDP discovery responder | UDP 30000 | Always, once this app owns the session | Answers broadcast discovery requests with the aircraft's name and IP, plus mDNS and subnet-scan fallbacks |
 | WHIP video publisher | via MediaMTX | Once a ground station connects | Publishes the DJI camera feed for WHEP playback — see [Ground Station](/groundstation/#groundstation-video-dashboard) |
 
 Two of these are worth calling out specifically because of how they behave when nobody is using them: the MAVLink endpoint never broadcasts its full telemetry stream onto the subnet — only its 1&nbsp;Hz heartbeat does, until a real ground station has been heard from — and the TCP telemetry stream sends nothing at all to sockets nobody has opened. An idle aircraft with both protocols enabled costs the network almost nothing.
+
+### One session owner per device
+
+Two Lyrebird APKs can be installed side by side (one per DJI SDK version), and both would otherwise bind the same ports and answer the same discovery probes, which produces two half-working ground-station links instead of one working one. Each app therefore takes a device-local lease on TCP 3900 before serving: whoever binds it serves, and the other app says so on screen rather than competing. A session that cannot bind either server gives the lease back instead of holding it while serving nothing.
+
+The lease is cooperative and narrow. It is not an aircraft authority — it cannot stop another app from touching the SDK, the RC accessory, or the aircraft — and it keys on the *network* session only.
+
+Services are brought up in the order that keeps the announcement honest: lease, then the servers bind, then mDNS and UDP discovery publish only the ports that came up. Discovery used to start first, so a failed bind left the aircraft advertising a port nobody was listening on.
 
 ## Core capabilities
 
