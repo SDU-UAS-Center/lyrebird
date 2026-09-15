@@ -5629,24 +5629,21 @@ class FlightDeckActivity : DefaultLayoutActivity(), LyrebirdCommandHost {
         telemetryCoordinator.streamingMode = activeMode.prefValue
         telemetryCoordinator.rtspPort = getRtspPort()
         telemetryCoordinator.rtspUser = getRtspUsername()
-        telemetryCoordinator.rtspPwd = getRtspPassword()
+        telemetryCoordinator.streamRequiresAuth = activeMode == StreamingMode.RTSP &&
+            getRtspUsername().isNotEmpty() && getRtspPassword().isNotEmpty()
         val serverIp = lastClientIp ?: "127.0.0.1"
         telemetryCoordinator.rtmpUrl = getRtmpUrl(serverIp)
 
-        // Compute exact consumption path dynamically for backend and telemetry exposure
+        // Compute exact consumption path dynamically for backend and telemetry exposure.
+        // No credentials in the published URL: the path describes where the stream is, and the
+        // client that pulls it authenticates with credentials held on its own side — which is
+        // what the bridge does. Telemetry reaches every client that connects to the port, so
+        // anything embedded here is disclosed to all of them.
         val phoneIp = NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
-        val user = getRtspUsername()
-        val pwd = getRtspPassword()
         val port = getRtspPort()
         val path = when (activeMode) {
             StreamingMode.WEBRTC -> "whip"
-            StreamingMode.RTSP -> {
-                if (user.isNotEmpty() && pwd.isNotEmpty()) {
-                    "rtsp://$user:$pwd@$phoneIp:$port$DJI_RTSP_STREAM_PATH"
-                } else {
-                    "rtsp://$phoneIp:$port$DJI_RTSP_STREAM_PATH"
-                }
-            }
+            StreamingMode.RTSP -> "rtsp://$phoneIp:$port$DJI_RTSP_STREAM_PATH"
             StreamingMode.RTMP -> getRtmpUrl(serverIp)
             StreamingMode.AGORA -> "agora://${getAgoraChannel()}"
             StreamingMode.GB28181 -> "gb28181://${getGbServerIp()}:${getGbServerPort()}/${getGbChannel()}"

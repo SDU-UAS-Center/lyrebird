@@ -1930,11 +1930,26 @@ function updateModalForDrone(name) {
     modalStreamingSelect.value = telemetry.streaming?.mode?.toLowerCase() || 'webrtc';
   }
   if (modalStreamingPath) {
-    modalStreamingPath.textContent = getConsumptionPath(drone);
+    // Async: the RTSP branch reads this bridge's configured credentials before rendering.
+    getConsumptionPath(drone).then(text => { modalStreamingPath.textContent = text; });
   }
 }
 
-function getConsumptionPath(drone) {
+// This bridge's RTSP credentials (LB_RTSP_USER / LB_RTSP_PASSWORD), fetched once and cached.
+// The endpoint reports the username and only whether a password is set — never the password.
+let bridgeRtspCredentials = null;
+async function getBridgeRtspCredentials() {
+  if (bridgeRtspCredentials) return bridgeRtspCredentials;
+  try {
+    const response = await fetch('/api/rtsp-credentials');
+    if (response.ok) bridgeRtspCredentials = await response.json();
+  } catch (err) {
+    console.warn('RTSP credentials unavailable:', err);
+  }
+  return bridgeRtspCredentials;
+}
+
+async function getConsumptionPath(drone) {
   const telemetry = drone.lastTelemetry || {};
   const mode = telemetry.streaming?.mode?.toLowerCase() || 'webrtc';
   const droneIp = drone.ip || 'PHONE_IP';
@@ -1946,10 +1961,14 @@ function getConsumptionPath(drone) {
       info = `WHIP Ingest (Phone) → MediaMTX relay WHEP (Browser): ${getRelayWhepUrl(drone.streamName)}`;
       break;
     case 'rtsp': {
+      // The phone no longer broadcasts its RTSP password, so the URL shown here uses this
+      // bridge's locally configured credentials (LB_RTSP_USER / LB_RTSP_PASSWORD on the
+      // webapp container) — the same ones MediaMTX pulls with. The password itself is never
+      // displayed; only that one is configured.
       const rtspPort = telemetry.streaming?.rtspPort || 8554;
-      const rtspUser = telemetry.streaming?.rtspUser || 'admin';
-      const rtspPwd  = telemetry.streaming?.rtspPwd  || 'lyrebird';
-      info = `RTSP Server (Phone): rtsp://${rtspUser}:${rtspPwd}@${droneIp}:${rtspPort}/streaming/live/1 → MediaMTX pulling & bridging to WHEP`;
+      const cred = await getBridgeRtspCredentials();
+      const credPart = cred?.user ? (cred.hasPassword ? `${cred.user}:***@` : `${cred.user}@`) : '';
+      info = `RTSP Server (Phone): rtsp://${credPart}${droneIp}:${rtspPort}/streaming/live/1 → MediaMTX pulling & bridging to WHEP`;
       break;
     }
     case 'rtmp':
@@ -2085,7 +2104,7 @@ if (modalStreamingSelect) {
       const drone = getDrone(selectedDroneName);
       if (drone) {
         modalStreamingSelect.value = drone.lastTelemetry?.streaming?.mode?.toLowerCase() || 'webrtc';
-        modalStreamingPath.textContent = getConsumptionPath(drone);
+        getConsumptionPath(drone).then(text => { modalStreamingPath.textContent = text; });
       }
     } finally {
       modalStreamingSelect.disabled = false;

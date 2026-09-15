@@ -73,6 +73,13 @@ DISCOVERY_INTERVAL_MS = int(os.environ.get("DISCOVERY_INTERVAL_MS", "5000"))
 MEDIAMTX_API_URL = os.environ.get("MEDIAMTX_API_URL", "http://127.0.0.1:9997").rstrip("/")
 MEDIAMTX_WEBRTC_URL = os.environ.get("MEDIAMTX_WEBRTC_URL", "http://127.0.0.1:8889").rstrip("/")
 
+# RTSP credentials this bridge authenticates with, matching the ones configured on the phone's
+# DJI RTSP server (`admin`/`lyrebird` on a default Lyrebird setup). Held here rather than read
+# from drone telemetry: the phone deliberately no longer broadcasts its password, so a pulling
+# client brings its own.
+RTSP_USER = os.environ.get("LB_RTSP_USER", "admin")
+RTSP_PASSWORD = os.environ.get("LB_RTSP_PASSWORD", "lyrebird")
+
 ALLOWED_URL_SCHEMES = ("http", "https")
 
 
@@ -440,7 +447,9 @@ def _rtsp_source_url(name, streaming):
     """Work out the RTSP URL to pull a drone's stream from.
 
     Prefers the consumptionPath the drone reports, normalising the two shapes DJI's own RTSP
-    server produces, and falls back to building the URL from the drone's IP and credentials.
+    server produces, and falls back to building the URL from the drone's IP. Credentials come
+    from this bridge's own configuration, never from the telemetry: the phone no longer
+    broadcasts its RTSP password, so a client that needs to authenticate brings its own.
     """
     source_url = streaming.get("consumptionPath")
     if isinstance(source_url, str):
@@ -454,9 +463,7 @@ def _rtsp_source_url(name, streaming):
 
     ip = drones[name].get("ip")
     port = streaming.get("rtspPort", 8554)
-    user = streaming.get("rtspUser", "")
-    pwd = streaming.get("rtspPwd", "")
-    credentials = f"{user}:{pwd}@" if user and pwd else ""
+    credentials = f"{RTSP_USER}:{RTSP_PASSWORD}@" if RTSP_USER and RTSP_PASSWORD else ""
     return f"rtsp://{credentials}{ip}:{port}/streaming/live/1"
 
 
@@ -881,6 +888,16 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/logs": lambda: self.send_json(200, {"eventLog": str(EVENT_LOG)}),
             "/api/ros-status": lambda: self.send_json(200, ros_status_snapshot()),
             "/api/mavlink-coverage": lambda: self.send_json(200, mavlink_coverage()),
+            # The bridge's own RTSP credentials for pulling the phone's stream. The username is
+            # included so the dashboard can show the pull URL it actually uses; only whether a
+            # password is set is reported, never the password itself.
+            "/api/rtsp-credentials": lambda: self.send_json(
+                200,
+                {
+                    "user": RTSP_USER,
+                    "hasPassword": bool(RTSP_PASSWORD),
+                },
+            ),
         }
         handler = exact.get(path)
         if handler is not None:

@@ -55,6 +55,15 @@ class TelemetryCoordinator {
     @Volatile var hybridFl: Int = -1
     @Volatile var opticalFl: Int = -1
     @Volatile var zoomRatio: Double = 1.0
+
+    /**
+     * Whether the stream the consumption path points at is password-protected.
+     *
+     * Published instead of the password itself: the TCP stream feeds any client that connects,
+     * so a credential there is a credential handed to whoever asks. A ground station that needs
+     * to authenticate sends the configured user/password to the media server itself.
+     */
+    @Volatile var streamRequiresAuth: Boolean = false
     
     // Battery assessment info
     @Volatile var remainingFlightTime: Int = 0
@@ -96,7 +105,6 @@ class TelemetryCoordinator {
     @Volatile var streamingMode: String = "webrtc"
     @Volatile var rtspPort: Int = 8554
     @Volatile var rtspUser: String = ""
-    @Volatile var rtspPwd: String = ""
     @Volatile var rtmpUrl: String = ""
     @Volatile var consumptionPath: String = ""
 
@@ -131,7 +139,11 @@ class TelemetryCoordinator {
     }
 
     fun streamingTelemetryJson(): String {
-        return """{"mode":"$streamingMode","rtspPort":$rtspPort,"rtspUser":"${escapeJson(rtspUser)}","rtspPwd":"${escapeJson(rtspPwd)}","rtmpUrl":"${escapeJson(rtmpUrl)}","consumptionPath":"${escapeJson(consumptionPath)}"}"""
+        // rtspPwd is deliberately absent: this object goes to every client that connects to the
+        // telemetry port, so it describes the configuration without disclosing the credential.
+        // The bridge that pulls the RTSP stream holds the password on its own side (see the
+        // video_test webapp), exactly as any other media client would.
+        return """{"mode":"$streamingMode","rtspPort":$rtspPort,"rtspUser":"${escapeJson(rtspUser)}","requiresAuth":$streamRequiresAuth,"rtmpUrl":"${escapeJson(rtmpUrl)}","consumptionPath":"${escapeJson(consumptionPath)}"}"""
     }
 
     fun buildTelemetryJson(): String {
