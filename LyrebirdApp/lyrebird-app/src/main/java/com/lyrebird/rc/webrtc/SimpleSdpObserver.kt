@@ -10,9 +10,8 @@ import org.webrtc.SessionDescription
 open class SimpleSdpObserver(
     private val tag: String = "SimpleSdpObserver",
     private val onSuccess: ((SessionDescription?) -> Unit)? = null,
-    private val onFailure: ((String) -> Unit)? = null
+    private val onFailure: ((String) -> Unit)? = null,
 ) : SdpObserver {
-
     override fun onCreateSuccess(sessionDescription: SessionDescription?) {
         Log.d(tag, "onCreateSuccess: ${sessionDescription?.type}")
         onSuccess?.invoke(sessionDescription)

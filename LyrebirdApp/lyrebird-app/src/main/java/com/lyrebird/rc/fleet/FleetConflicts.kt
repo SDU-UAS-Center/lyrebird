@@ -50,7 +50,7 @@ internal enum class ConflictKind {
      * logic, and two aircraft returning into the same column of air at the same time is the
      * least supervised moment of the flight.
      */
-    HOME_POINT_OVERLAP
+    HOME_POINT_OVERLAP,
 }
 
 internal enum class ConflictSeverity { INFO, WARNING, CRITICAL }
@@ -61,17 +61,18 @@ internal data class FleetConflict(
     /** One line, already written for the operator rather than for a log. */
     val summary: String,
     /** Drone names involved, own aircraft included, in display order. */
-    val involved: List<String>
+    val involved: List<String>,
 ) {
     /** Very short label for the Flight Deck strip, where there is room for a word. */
     val shortLabel: String
-        get() = when (kind) {
-            ConflictKind.DUPLICATE_SYSTEM_ID -> "SYSID"
-            ConflictKind.DUPLICATE_DRONE_NAME -> "NAME"
-            ConflictKind.DUPLICATE_VIDEO_PATH -> "VIDEO"
-            ConflictKind.MISMATCHED_VIDEO_SERVER -> "SERVER"
-            ConflictKind.HOME_POINT_OVERLAP -> "HOME"
-        }
+        get() =
+            when (kind) {
+                ConflictKind.DUPLICATE_SYSTEM_ID -> "SYSID"
+                ConflictKind.DUPLICATE_DRONE_NAME -> "NAME"
+                ConflictKind.DUPLICATE_VIDEO_PATH -> "VIDEO"
+                ConflictKind.MISMATCHED_VIDEO_SERVER -> "SERVER"
+                ConflictKind.HOME_POINT_OVERLAP -> "HOME"
+            }
 }
 
 /**
@@ -81,7 +82,6 @@ internal data class FleetConflict(
  * without a phone, a radio, or a second aircraft.
  */
 internal object FleetConflicts {
-
     /** Home points closer than this share enough airspace that return paths can meet. */
     const val HOME_OVERLAP_RADIUS_M = 20.0
 
@@ -92,7 +92,10 @@ internal object FleetConflicts {
      * device is as likely to be the misconfigured one as any peer, and a warning that quietly
      * assumes otherwise sends the operator to the wrong RC.
      */
-    fun detect(own: FleetBeacon, peers: List<FleetBeacon>): List<FleetConflict> {
+    fun detect(
+        own: FleetBeacon,
+        peers: List<FleetBeacon>,
+    ): List<FleetConflict> {
         if (peers.isEmpty()) return emptyList()
         val everyone = listOf(own) + peers.filter { it.deviceId != own.deviceId }
         val conflicts = mutableListOf<FleetConflict>()
@@ -105,30 +108,34 @@ internal object FleetConflicts {
     }
 
     private fun duplicateSystemIds(everyone: List<FleetBeacon>): List<FleetConflict> =
-        everyone.filter { it.systemId > 0 }
+        everyone
+            .filter { it.systemId > 0 }
             .groupBy { it.systemId }
             .filterValues { it.size > 1 }
             .map { (systemId, clashing) ->
                 FleetConflict(
                     kind = ConflictKind.DUPLICATE_SYSTEM_ID,
                     severity = ConflictSeverity.CRITICAL,
-                    summary = "MAVLink ID $systemId is claimed by ${nameList(clashing)}. " +
-                        "A ground station will see them as one vehicle.",
-                    involved = clashing.map { it.displayName() }
+                    summary =
+                        "MAVLink ID $systemId is claimed by ${nameList(clashing)}. " +
+                            "A ground station will see them as one vehicle.",
+                    involved = clashing.map { it.displayName() },
                 )
             }
 
     private fun duplicateDroneNames(everyone: List<FleetBeacon>): List<FleetConflict> =
-        everyone.filter { it.droneName.isNotBlank() }
+        everyone
+            .filter { it.droneName.isNotBlank() }
             .groupBy { it.droneName.trim().lowercase() }
             .filterValues { it.size > 1 }
             .map { (_, clashing) ->
                 FleetConflict(
                     kind = ConflictKind.DUPLICATE_DRONE_NAME,
                     severity = ConflictSeverity.CRITICAL,
-                    summary = "${clashing.size} aircraft are named " +
-                        "\"${clashing.first().droneName}\". Rename all but one.",
-                    involved = clashing.map { it.displayName() }
+                    summary =
+                        "${clashing.size} aircraft are named " +
+                            "\"${clashing.first().droneName}\". Rename all but one.",
+                    involved = clashing.map { it.displayName() },
                 )
             }
 
@@ -138,16 +145,18 @@ internal object FleetConflicts {
      * consequences, and nothing guarantees the derivation stays the same.
      */
     private fun duplicateVideoPaths(everyone: List<FleetBeacon>): List<FleetConflict> =
-        everyone.filter { it.videoPath.isNotBlank() }
+        everyone
+            .filter { it.videoPath.isNotBlank() }
             .groupBy { it.videoPath.trim().lowercase() }
             .filterValues { it.size > 1 }
             .map { (path, clashing) ->
                 FleetConflict(
                     kind = ConflictKind.DUPLICATE_VIDEO_PATH,
                     severity = ConflictSeverity.WARNING,
-                    summary = "${nameList(clashing)} all publish video to \"$path\". " +
-                        "Only the last one to connect will be visible.",
-                    involved = clashing.map { it.displayName() }
+                    summary =
+                        "${nameList(clashing)} all publish video to \"$path\". " +
+                            "Only the last one to connect will be visible.",
+                    involved = clashing.map { it.displayName() },
                 )
             }
 
@@ -163,10 +172,11 @@ internal object FleetConflicts {
             FleetConflict(
                 kind = ConflictKind.MISMATCHED_VIDEO_SERVER,
                 severity = ConflictSeverity.WARNING,
-                summary = "The fleet points at ${distinct.size} different video servers " +
-                    "(${distinct.joinToString(", ")}). Push one profile to align them.",
-                involved = configured.map { it.displayName() }
-            )
+                summary =
+                    "The fleet points at ${distinct.size} different video servers " +
+                        "(${distinct.joinToString(", ")}). Push one profile to align them.",
+                involved = configured.map { it.displayName() },
+            ),
         )
     }
 
@@ -177,27 +187,31 @@ internal object FleetConflicts {
             for (second in first + 1 until withHome.size) {
                 val a = withHome[first]
                 val b = withHome[second]
-                val separationM = FleetGeo.horizontalDistanceM(
-                    a.homeLatitudeDeg, a.homeLongitudeDeg, b.homeLatitudeDeg, b.homeLongitudeDeg
-                )
+                val separationM =
+                    FleetGeo.horizontalDistanceM(
+                        a.homeLatitudeDeg,
+                        a.homeLongitudeDeg,
+                        b.homeLatitudeDeg,
+                        b.homeLongitudeDeg,
+                    )
                 if (separationM > HOME_OVERLAP_RADIUS_M) continue
-                conflicts += FleetConflict(
-                    kind = ConflictKind.HOME_POINT_OVERLAP,
-                    severity = ConflictSeverity.INFO,
-                    summary = "${a.displayName()} and ${b.displayName()} have home points " +
-                        "${separationM.toInt()}m apart. Their return paths overlap.",
-                    involved = listOf(a.displayName(), b.displayName())
-                )
+                conflicts +=
+                    FleetConflict(
+                        kind = ConflictKind.HOME_POINT_OVERLAP,
+                        severity = ConflictSeverity.INFO,
+                        summary =
+                            "${a.displayName()} and ${b.displayName()} have home points " +
+                                "${separationM.toInt()}m apart. Their return paths overlap.",
+                        involved = listOf(a.displayName(), b.displayName()),
+                    )
             }
         }
         return conflicts
     }
 
-    private fun nameList(beacons: List<FleetBeacon>): String =
-        beacons.joinToString(" and ") { it.displayName() }
+    private fun nameList(beacons: List<FleetBeacon>): String = beacons.joinToString(" and ") { it.displayName() }
 }
 
-internal fun FleetBeacon.displayName(): String =
-    droneName.trim().ifEmpty { deviceId.takeLast(SHORT_ID_LENGTH) }
+internal fun FleetBeacon.displayName(): String = droneName.trim().ifEmpty { deviceId.takeLast(SHORT_ID_LENGTH) }
 
 private const val SHORT_ID_LENGTH = 6

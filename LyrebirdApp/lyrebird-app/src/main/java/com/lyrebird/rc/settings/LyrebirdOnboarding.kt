@@ -22,7 +22,6 @@ import com.lyrebird.rc.logger.FlightLogStorage
  * a fallback for paths that reach it directly; the per-process guards make that a no-op.
  */
 object LyrebirdOnboarding {
-
     private const val TAG = "LyrebirdSettings"
     private const val PREF_DRONE_NAME = "drone_name"
     private const val PREF_STORAGE_PROMPT_DECLINED = "storage_prompt_declined"
@@ -68,7 +67,8 @@ object LyrebirdOnboarding {
         storagePromptShown = true
 
         Log.w(TAG, "MANAGE_EXTERNAL_STORAGE not granted — explaining before requesting")
-        AlertDialog.Builder(activity)
+        AlertDialog
+            .Builder(activity)
             .setTitle("Allow file access?")
             .setMessage(
                 "Lyrebird can store two things outside the app so they survive an uninstall:\n\n" +
@@ -77,21 +77,18 @@ object LyrebirdOnboarding {
                     "They go in Documents/Lyrebird, where you can copy them off the device or " +
                     "restore them after reinstalling.\n\n" +
                     "This is optional. Decline and Lyrebird works normally, but logs and settings " +
-                    "stay inside the app and are lost if it is uninstalled."
-            )
-            .setPositiveButton("Choose folder access") { _, _ ->
+                    "stay inside the app and are lost if it is uninstalled.",
+            ).setPositiveButton("Choose folder access") { _, _ ->
                 runCatching {
                     activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                 }.onFailure { error ->
                     Log.e(TAG, "Cannot open storage settings: ${error.message}", error)
                     Toast.makeText(activity, "Could not open the storage settings screen", Toast.LENGTH_LONG).show()
                 }
-            }
-            .setNegativeButton("Not now") { _, _ ->
+            }.setNegativeButton("Not now") { _, _ ->
                 prefs.edit().putBoolean(PREF_STORAGE_PROMPT_DECLINED, true).apply()
                 Log.i(TAG, "Storage access declined by user")
-            }
-            .setCancelable(true)
+            }.setCancelable(true)
             .show()
     }
 
@@ -132,16 +129,16 @@ object LyrebirdOnboarding {
         backup: LyrebirdSettingsBackup.Backup,
         onRestoreApplied: (() -> Unit)?,
     ) {
-        AlertDialog.Builder(activity)
+        AlertDialog
+            .Builder(activity)
             .setTitle("Restore previous settings?")
             .setMessage(
                 "Settings from a previous Lyrebird install are still on this device" +
                     (if (backup.droneName.isNotBlank()) " for \"${backup.droneName}\"" else "") +
                     ", saved ${backup.savedAt}.\n\n" +
                     "${backup.entryCount} setting(s) can be restored, including the drone name and " +
-                    "the streaming and detection setup."
-            )
-            .setPositiveButton("Restore") { _, _ ->
+                    "the streaming and detection setup.",
+            ).setPositiveButton("Restore") { _, _ ->
                 // Preference writes are async (apply()) and safe from a background thread; run the
                 // restore there so a large backup cannot block the UI thread.
                 Thread {
@@ -150,16 +147,16 @@ object LyrebirdOnboarding {
                         // The layout reads these prefs when it starts (MAVLink endpoint, streaming,
                         // detection), and the drone name is already refreshed live — no restart is
                         // needed unless a service was already running with the old values.
-                        Toast.makeText(
-                            activity,
-                            "Restored $applied setting(s) — takes effect on the next drone connection",
-                            Toast.LENGTH_LONG,
-                        ).show()
+                        Toast
+                            .makeText(
+                                activity,
+                                "Restored $applied setting(s) — takes effect on the next drone connection",
+                                Toast.LENGTH_LONG,
+                            ).show()
                         onRestoreApplied?.invoke()
                     }
                 }.start()
-            }
-            .setNegativeButton("Start fresh", null)
+            }.setNegativeButton("Start fresh", null)
             .show()
     }
 }

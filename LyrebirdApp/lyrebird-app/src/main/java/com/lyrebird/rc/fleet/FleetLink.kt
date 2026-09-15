@@ -42,9 +42,8 @@ internal class FleetLink(
      */
     private val ownDeviceId: () -> String,
     /** Builds the local device's current beacon, or null while identity is not resolved yet. */
-    private val beaconProvider: () -> FleetBeacon?
+    private val beaconProvider: () -> FleetBeacon?,
 ) {
-
     companion object {
         private const val TAG = "LyrebirdFleet"
 
@@ -98,16 +97,18 @@ internal class FleetLink(
         isRunning = true
         acquireMulticastLock()
 
-        receiveThread = thread(name = "Fleet-rx", start = true) {
-            runCatching { openSocketAndReceive() }.onFailure { error ->
-                if (isRunning) Log.w(TAG, "Fleet receive ended: ${error.message}")
+        receiveThread =
+            thread(name = "Fleet-rx", start = true) {
+                runCatching { openSocketAndReceive() }.onFailure { error ->
+                    if (isRunning) Log.w(TAG, "Fleet receive ended: ${error.message}")
+                }
             }
-        }
-        sendThread = thread(name = "Fleet-tx", start = true) {
-            runCatching { beaconLoop() }.onFailure { error ->
-                if (isRunning) Log.w(TAG, "Fleet beacon loop ended: ${error.message}")
+        sendThread =
+            thread(name = "Fleet-tx", start = true) {
+                runCatching { beaconLoop() }.onFailure { error ->
+                    if (isRunning) Log.w(TAG, "Fleet beacon loop ended: ${error.message}")
+                }
             }
-        }
         Log.i(TAG, "Fleet mesh up on $MULTICAST_GROUP:$MULTICAST_PORT")
     }
 
@@ -144,9 +145,11 @@ internal class FleetLink(
             val bytes = payload.toString().toByteArray(Charsets.UTF_8)
             bound.send(
                 DatagramPacket(
-                    bytes, bytes.size,
-                    InetAddress.getByName(MULTICAST_GROUP), MULTICAST_PORT
-                )
+                    bytes,
+                    bytes.size,
+                    InetAddress.getByName(MULTICAST_GROUP),
+                    MULTICAST_PORT,
+                ),
             )
             Log.i(TAG, "Offered a settings profile to the fleet (${bytes.size} bytes)")
             true
@@ -157,13 +160,14 @@ internal class FleetLink(
     }
 
     private fun openSocketAndReceive() {
-        val bound = MulticastSocket(MULTICAST_PORT).apply {
-            reuseAddress = true
-            timeToLive = MULTICAST_TTL
-            // Without this the stack can join on a cellular or virtual interface and never see
-            // the access point the fleet is actually on.
-            preferredInterface()?.let { runCatching { networkInterface = it } }
-        }
+        val bound =
+            MulticastSocket(MULTICAST_PORT).apply {
+                reuseAddress = true
+                timeToLive = MULTICAST_TTL
+                // Without this the stack can join on a cellular or virtual interface and never see
+                // the access point the fleet is actually on.
+                preferredInterface()?.let { runCatching { networkInterface = it } }
+            }
         socket = bound
         val group = InetAddress.getByName(MULTICAST_GROUP)
         bound.joinGroup(group)
@@ -171,14 +175,22 @@ internal class FleetLink(
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
         while (isRunning && !bound.isClosed) {
             val packet = DatagramPacket(buffer, buffer.size)
-            val received = runCatching { bound.receive(packet); true }.getOrElse { false }
+            val received =
+                runCatching {
+                    bound.receive(packet)
+                    true
+                }.getOrElse { false }
             if (!received) break
             if (packet.length <= 0) continue
             handleDatagram(buffer, packet.length, packet.address?.hostAddress.orEmpty())
         }
     }
 
-    private fun handleDatagram(buffer: ByteArray, length: Int, sourceAddress: String) {
+    private fun handleDatagram(
+        buffer: ByteArray,
+        length: Int,
+        sourceAddress: String,
+    ) {
         when (FleetBeacon.messageType(buffer, length)) {
             FleetBeacon.TYPE_BEACON -> {
                 val beacon = FleetBeacon.parse(buffer, length) ?: return
@@ -206,18 +218,21 @@ internal class FleetLink(
     }
 
     private fun sendBeacon(bound: MulticastSocket) {
-        val beacon = beaconProvider()?.copy(
-            appUptimeMs = SystemClock.elapsedRealtime() - startedAtMs,
-            sequence = ++sequence
-        ) ?: return
+        val beacon =
+            beaconProvider()?.copy(
+                appUptimeMs = SystemClock.elapsedRealtime() - startedAtMs,
+                sequence = ++sequence,
+            ) ?: return
         lastSentBeacon = beacon
         runCatching {
             val bytes = beacon.toBytes()
             bound.send(
                 DatagramPacket(
-                    bytes, bytes.size,
-                    InetAddress.getByName(MULTICAST_GROUP), MULTICAST_PORT
-                )
+                    bytes,
+                    bytes.size,
+                    InetAddress.getByName(MULTICAST_GROUP),
+                    MULTICAST_PORT,
+                ),
             )
         }.onFailure { error ->
             if (error is IOException) Log.d(TAG, "Beacon send failed: ${error.message}")
@@ -225,13 +240,15 @@ internal class FleetLink(
     }
 
     /** The interface carrying the device's Wi-Fi address, which is the one the fleet is on. */
-    private fun preferredInterface(): NetworkInterface? = runCatching {
-        val deviceIp = NetworkUtils.getDeviceIpAddress() ?: return null
-        Collections.list(NetworkInterface.getNetworkInterfaces()).firstOrNull { candidate ->
-            candidate.isUp && !candidate.isLoopback &&
-                Collections.list(candidate.inetAddresses).any { it.hostAddress == deviceIp }
-        }
-    }.getOrNull()
+    private fun preferredInterface(): NetworkInterface? =
+        runCatching {
+            val deviceIp = NetworkUtils.getDeviceIpAddress() ?: return null
+            Collections.list(NetworkInterface.getNetworkInterfaces()).firstOrNull { candidate ->
+                candidate.isUp &&
+                    !candidate.isLoopback &&
+                    Collections.list(candidate.inetAddresses).any { it.hostAddress == deviceIp }
+            }
+        }.getOrNull()
 
     /**
      * Android drops inbound multicast before it reaches the socket unless something holds a
@@ -241,10 +258,11 @@ internal class FleetLink(
     private fun acquireMulticastLock() {
         runCatching {
             val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            multicastLock = wifi?.createMulticastLock("lyrebird-fleet")?.apply {
-                setReferenceCounted(false)
-                acquire()
-            }
+            multicastLock =
+                wifi?.createMulticastLock("lyrebird-fleet")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
         }.onFailure { error ->
             Log.w(TAG, "Could not acquire multicast lock: ${error.message}")
         }

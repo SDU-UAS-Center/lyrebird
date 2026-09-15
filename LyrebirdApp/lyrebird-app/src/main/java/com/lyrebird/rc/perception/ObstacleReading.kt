@@ -34,9 +34,8 @@ internal data class ObstacleReading(
     /** Range below the aircraft in metres, or NaN when unknown. */
     val downwardM: Double,
     /** When this sweep was produced, on the device's monotonic clock. */
-    val timestampMs: Long
+    val timestampMs: Long,
 ) {
-
     val hasHorizontalData: Boolean get() = horizontalM.any { it.isFinite() }
 
     /**
@@ -45,7 +44,10 @@ internal data class ObstacleReading(
      * Returns NaN when every sector in the arc is unknown, which a caller must treat as "no
      * information" and never as "clear".
      */
-    fun minimumInArc(bearingDeg: Double, halfAngleDeg: Double): Double {
+    fun minimumInArc(
+        bearingDeg: Double,
+        halfAngleDeg: Double,
+    ): Double {
         if (horizontalM.isEmpty() || angleIntervalDeg <= 0.0) return Double.NaN
         var closest = Double.NaN
         horizontalM.forEachIndexed { index, rangeM ->
@@ -58,8 +60,7 @@ internal data class ObstacleReading(
     }
 
     /** The closest range anywhere in the horizontal ring, or NaN when nothing is known. */
-    fun minimumHorizontal(): Double =
-        horizontalM.filter { it.isFinite() }.minOrNull() ?: Double.NaN
+    fun minimumHorizontal(): Double = horizontalM.filter { it.isFinite() }.minOrNull() ?: Double.NaN
 
     /**
      * The bearing from the nose of the closest known range inside [halfAngleDeg] either side of
@@ -69,7 +70,10 @@ internal data class ObstacleReading(
      * where along the arc it was measured, so a locked-out bearing can be derived from the same
      * sweep the brake came from rather than from the coarse arc centre.
      */
-    fun closestKnownBearingInArc(bearingDeg: Double, halfAngleDeg: Double): Double {
+    fun closestKnownBearingInArc(
+        bearingDeg: Double,
+        halfAngleDeg: Double,
+    ): Double {
         if (horizontalM.isEmpty() || angleIntervalDeg <= 0.0) return Double.NaN
         var closest = Double.NaN
         var closestBearing = Double.NaN
@@ -86,7 +90,6 @@ internal data class ObstacleReading(
     }
 
     companion object {
-
         /** Below this a reading is a sensor dropout rather than a measurement. */
         private const val MIN_VALID_M = 0.05
 
@@ -98,22 +101,24 @@ internal data class ObstacleReading(
             angleIntervalDeg: Double,
             upwardMm: Int,
             downwardMm: Int,
-            timestampMs: Long
-        ): ObstacleReading = ObstacleReading(
-            horizontalM = horizontalMm.map { toMetres(it) },
-            // The SDK occasionally reports no interval; deriving it from the list length is the
-            // same arithmetic the interval describes, and a ring always covers a full turn.
-            angleIntervalDeg = if (angleIntervalDeg > 0.0) {
-                angleIntervalDeg
-            } else if (horizontalMm.isNotEmpty()) {
-                FULL_TURN_DEG / horizontalMm.size
-            } else {
-                0.0
-            },
-            upwardM = toMetres(upwardMm),
-            downwardM = toMetres(downwardMm),
-            timestampMs = timestampMs
-        )
+            timestampMs: Long,
+        ): ObstacleReading =
+            ObstacleReading(
+                horizontalM = horizontalMm.map { toMetres(it) },
+                // The SDK occasionally reports no interval; deriving it from the list length is the
+                // same arithmetic the interval describes, and a ring always covers a full turn.
+                angleIntervalDeg =
+                    if (angleIntervalDeg > 0.0) {
+                        angleIntervalDeg
+                    } else if (horizontalMm.isNotEmpty()) {
+                        FULL_TURN_DEG / horizontalMm.size
+                    } else {
+                        0.0
+                    },
+                upwardM = toMetres(upwardMm),
+                downwardM = toMetres(downwardMm),
+                timestampMs = timestampMs,
+            )
 
         private fun toMetres(millimetres: Int): Double {
             val metres = millimetres / MILLIMETRES_PER_METRE
@@ -126,7 +131,10 @@ internal data class ObstacleReading(
 }
 
 /** Smallest angle between two bearings, 0..180. */
-internal fun angularSeparationDeg(first: Double, second: Double): Double {
+internal fun angularSeparationDeg(
+    first: Double,
+    second: Double,
+): Double {
     val delta = abs(normalizeDeg(first) - normalizeDeg(second))
     return if (delta > 180.0) 360.0 - delta else delta
 }
@@ -150,7 +158,7 @@ internal fun normalizeDeg(value: Double): Double {
 internal fun travelBearingFromNoseDeg(
     velocityNorthMps: Double,
     velocityEastMps: Double,
-    headingDeg: Double
+    headingDeg: Double,
 ): Double? {
     val groundSpeed = hypot(velocityNorthMps, velocityEastMps)
     if (groundSpeed < MIN_GROUND_SPEED_MPS) return null
@@ -159,7 +167,11 @@ internal fun travelBearingFromNoseDeg(
 }
 
 /** The sector index a bearing falls in, for logging a brake against something an operator can picture. */
-internal fun sectorIndexFor(bearingDeg: Double, angleIntervalDeg: Double, sectorCount: Int): Int {
+internal fun sectorIndexFor(
+    bearingDeg: Double,
+    angleIntervalDeg: Double,
+    sectorCount: Int,
+): Int {
     if (angleIntervalDeg <= 0.0 || sectorCount <= 0) return 0
     return ((normalizeDeg(bearingDeg) / angleIntervalDeg).roundToInt()) % sectorCount
 }

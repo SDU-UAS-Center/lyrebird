@@ -39,7 +39,6 @@ import java.util.Locale
  * Already-copied files are skipped by filename, so the sync is always safe to repeat.
  */
 object LyrebirdFlightLogger {
-
     private const val TAG = "LyrebirdFlightLogger"
 
     @Volatile
@@ -47,7 +46,9 @@ object LyrebirdFlightLogger {
         private set
 
     @Volatile private var writer: PrintWriter? = null
+
     @Volatile private var logFile: File? = null
+
     @Volatile private var sessionActive = false
 
     /** Epoch seconds at which the current (or last) session started, 0 when unknown. */
@@ -95,9 +96,9 @@ object LyrebirdFlightLogger {
                 return
             }
             val timeStr = SimpleDateFormat("HH-mm-ss", Locale.US).format(Date())
-            val file = File(dir, "${timeStr}_${droneName}.jsonl")
+            val file = File(dir, "${timeStr}_$droneName.jsonl")
             logFile = file
-            writer = PrintWriter(FileWriter(file, /* append = */ false))
+            writer = PrintWriter(FileWriter(file, false))
             sessionActive = true
             sessionStartEpochSec = System.currentTimeMillis() / 1000
             commitLog("SESSION_START", mapOf("drone" to droneName, "logDir" to dir.absolutePath))
@@ -141,7 +142,10 @@ object LyrebirdFlightLogger {
      * Log an HTTP command.
      * [endpoint] is the URI (e.g. "/send/goto"), [params] is the POST body.
      */
-    fun logCommand(endpoint: String, params: String = "") {
+    fun logCommand(
+        endpoint: String,
+        params: String = "",
+    ) {
         val fields = mutableMapOf<String, Any>("cmd" to endpoint)
         if (params.isNotBlank()) fields["params"] = params.take(300) // cap length
         commitLog("COMMAND", fields)
@@ -165,7 +169,7 @@ object LyrebirdFlightLogger {
         params: List<Float>,
         result: Int,
         signed: Boolean,
-        senderSystem: Int
+        senderSystem: Int,
     ) {
         commitLog(
             "COMMAND",
@@ -175,17 +179,18 @@ object LyrebirdFlightLogger {
                 "params" to params.joinToString(",") { formatParam(it) },
                 "result" to result,
                 "signed" to signed,
-                "from" to senderSystem
-            )
+                "from" to senderSystem,
+            ),
         )
     }
 
     /** NaN and the negative sentinels have to survive into the log as themselves, not as 0. */
-    private fun formatParam(value: Float): String = when {
-        value.isNaN() -> "NaN"
-        value.isInfinite() -> if (value > 0) "Inf" else "-Inf"
-        else -> value.toString()
-    }
+    private fun formatParam(value: Float): String =
+        when {
+            value.isNaN() -> "NaN"
+            value.isInfinite() -> if (value > 0) "Inf" else "-Inf"
+            else -> value.toString()
+        }
 
     /** Log a drone status / mode change (e.g. "NAVIGATING", "RETURNING_HOME"). */
     fun logStatus(status: String) {
@@ -202,13 +207,14 @@ object LyrebirdFlightLogger {
      *
      * Returns the number of files newly copied.
      */
-    fun syncDjiFlightLogs(djiLogPath: String): Int {
-        return DjiFlightLogSync.sync(djiLogPath, FlightLogStorage.resolveDjiSyncDir())
-    }
+    fun syncDjiFlightLogs(djiLogPath: String): Int = DjiFlightLogSync.sync(djiLogPath, FlightLogStorage.resolveDjiSyncDir())
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun commitLog(type: String, fields: Map<String, Any> = emptyMap()) {
+    private fun commitLog(
+        type: String,
+        fields: Map<String, Any> = emptyMap(),
+    ) {
         if (!sessionActive) return
         runCatching {
             val obj = JSONObject()
@@ -243,7 +249,10 @@ private object DjiFlightLogSync {
     private const val TAG = "LyrebirdFlightLogger"
     private val djiFlightRecordExtensions = setOf("txt", "csv", "clog")
 
-    fun sync(djiLogPath: String, destDir: File?): Int {
+    fun sync(
+        djiLogPath: String,
+        destDir: File?,
+    ): Int {
         val sourceDir = djiLogPath.takeIf { it.isNotBlank() }?.let(::File)
         return when {
             sourceDir == null -> logSkipped("empty source path")
@@ -253,9 +262,13 @@ private object DjiFlightLogSync {
         }
     }
 
-    private fun copyDjiFlightLogs(sourceDir: File, destDir: File): Int {
-        return runCatching {
-            sourceDir.walk()
+    private fun copyDjiFlightLogs(
+        sourceDir: File,
+        destDir: File,
+    ): Int =
+        runCatching {
+            sourceDir
+                .walk()
                 .filter { it.isDjiFlightRecord() }
                 .count { source -> copyDjiFlightLogIfNew(source, File(destDir, source.name)) }
         }.onSuccess { copied ->
@@ -263,9 +276,11 @@ private object DjiFlightLogSync {
         }.onFailure { failure ->
             Log.e(TAG, "syncDjiFlightLogs error: ${failure.message}")
         }.getOrDefault(0)
-    }
 
-    private fun copyDjiFlightLogIfNew(source: File, dest: File): Boolean {
+    private fun copyDjiFlightLogIfNew(
+        source: File,
+        dest: File,
+    ): Boolean {
         if (dest.exists()) return false
         return runCatching {
             source.copyTo(dest)
@@ -276,9 +291,7 @@ private object DjiFlightLogSync {
         }.getOrDefault(false)
     }
 
-    private fun File.isDjiFlightRecord(): Boolean {
-        return isFile && extension.lowercase() in djiFlightRecordExtensions
-    }
+    private fun File.isDjiFlightRecord(): Boolean = isFile && extension.lowercase() in djiFlightRecordExtensions
 
     private fun logSkipped(reason: String): Int {
         Log.w(TAG, "syncDjiFlightLogs: $reason")
@@ -296,10 +309,9 @@ internal object FlightLogStorage {
     private const val TAG = "LyrebirdFlightLogger"
     private const val DJI_SYNC_SUB_PATH = "Lyrebird/DJI_FlightRecords"
 
-    fun resolveDjiSyncDir(): File? {
-        return resolveDurableDir(DJI_SYNC_SUB_PATH, "resolveDjiSyncDir")
+    fun resolveDjiSyncDir(): File? =
+        resolveDurableDir(DJI_SYNC_SUB_PATH, "resolveDjiSyncDir")
             ?: resolveAppExternalDir("DJI_FlightRecords", "resolveDjiSyncDir")
-    }
 
     /**
      * Durable location for recoverable configuration, beside the flight logs and outside the app
@@ -315,15 +327,22 @@ internal object FlightLogStorage {
             ?: resolveAppExternalDir("FlightLogs/$dateStr", "resolveLogDir")
     }
 
-    private fun resolveDurableDir(subPath: String, label: String): File? {
+    private fun resolveDurableDir(
+        subPath: String,
+        label: String,
+    ): File? {
         if (!hasFullStorageAccess()) return null
         return removableStorageDir(subPath, label) ?: documentsDir(subPath, label)
     }
 
-    private fun removableStorageDir(subPath: String, label: String): File? {
+    private fun removableStorageDir(
+        subPath: String,
+        label: String,
+    ): File? {
         val context = ContextUtil.getContext()
         return runCatching {
-            context.getExternalFilesDirs(null)
+            context
+                .getExternalFilesDirs(null)
                 .drop(1)
                 .mapNotNull { appPrivateOnCard -> appPrivateOnCard?.cardRoot() }
                 .firstNotNullOfOrNull { root -> ensureDirectory(File(root, subPath)) }
@@ -334,14 +353,20 @@ internal object FlightLogStorage {
         }.getOrNull()
     }
 
-    private fun documentsDir(subPath: String, label: String): File? {
+    private fun documentsDir(
+        subPath: String,
+        label: String,
+    ): File? {
         val documentsRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val dir = ensureDirectory(File(documentsRoot, subPath))
         dir?.let { Log.i(TAG, "$label: using Documents: ${it.absolutePath}") }
         return dir
     }
 
-    private fun resolveAppExternalDir(subPath: String, label: String): File? {
+    private fun resolveAppExternalDir(
+        subPath: String,
+        label: String,
+    ): File? {
         Log.w(TAG, "$label: falling back to app-external files dir")
         val context = ContextUtil.getContext()
         return runCatching {
@@ -353,9 +378,7 @@ internal object FlightLogStorage {
         }.getOrNull()
     }
 
-    private fun hasFullStorageAccess(): Boolean {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
-    }
+    private fun hasFullStorageAccess(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
 
     private fun File.cardRoot(): File {
         var root = this
@@ -363,7 +386,5 @@ internal object FlightLogStorage {
         return root
     }
 
-    private fun ensureDirectory(dir: File): File? {
-        return dir.takeIf { it.mkdirs() || it.isDirectory }
-    }
+    private fun ensureDirectory(dir: File): File? = dir.takeIf { it.mkdirs() || it.isDirectory }
 }

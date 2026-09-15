@@ -16,9 +16,11 @@ import kotlin.math.sin
  * accumulates, so a wrap at north either counts a lap or loses one.
  */
 internal object OrbitControl {
-
     /** A commanded velocity as a speed and the compass direction it points. */
-    data class Velocity(val speedMps: Double, val directionDeg: Double)
+    data class Velocity(
+        val speedMps: Double,
+        val directionDeg: Double,
+    )
 
     /**
      * The velocity to fly this tick.
@@ -27,7 +29,7 @@ internal object OrbitControl {
      * radius. The correction is proportional and capped, so joining an orbit from outside it is a
      * curve rather than a dash at the centre.
      *
-     * @param northM,[eastM] the aircraft's offset from the centre, in metres.
+     * @param northM, [eastM] the aircraft's offset from the centre, in metres.
      * @param radiusM the requested radius, always positive here; direction is [clockwise].
      * @param tangentialMps how fast to travel around. Positive.
      */
@@ -38,7 +40,7 @@ internal object OrbitControl {
         tangentialMps: Double,
         clockwise: Boolean,
         radialGain: Double,
-        maxRadialMps: Double
+        maxRadialMps: Double,
     ): Velocity {
         val currentRadius = hypot(northM, eastM)
         // Standing exactly on the centre leaves the outward direction undefined, so any direction
@@ -54,13 +56,15 @@ internal object OrbitControl {
         val tangentDeg = if (clockwise) outwardDeg + 90.0 else outwardDeg - 90.0
 
         // Compose the two in the north/east plane and read the result back as speed and bearing.
-        val north = radialMps * cos(Math.toRadians(outwardDeg)) +
-            tangentialMps * cos(Math.toRadians(tangentDeg))
-        val east = radialMps * sin(Math.toRadians(outwardDeg)) +
-            tangentialMps * sin(Math.toRadians(tangentDeg))
+        val north =
+            radialMps * cos(Math.toRadians(outwardDeg)) +
+                tangentialMps * cos(Math.toRadians(tangentDeg))
+        val east =
+            radialMps * sin(Math.toRadians(outwardDeg)) +
+                tangentialMps * sin(Math.toRadians(tangentDeg))
         return Velocity(
             speedMps = hypot(north, east),
-            directionDeg = normalizeCompass(Math.toDegrees(atan2(east, north)))
+            directionDeg = normalizeCompass(Math.toDegrees(atan2(east, north))),
         )
     }
 
@@ -73,7 +77,10 @@ internal object OrbitControl {
      * The step is wrapped so crossing north counts as a small move rather than as 359 degrees
      * backwards, which is the arithmetic that turns "orbit twice" into "stop immediately".
      */
-    fun angleStepDeg(previousDeg: Double, currentDeg: Double): Double {
+    fun angleStepDeg(
+        previousDeg: Double,
+        currentDeg: Double,
+    ): Double {
         var step = currentDeg - previousDeg
         if (step > 180.0) step -= 360.0
         if (step < -180.0) step += 360.0
@@ -81,13 +88,21 @@ internal object OrbitControl {
     }
 
     /** The bearing from the centre out to the aircraft, 0..360. */
-    fun bearingFromCentreDeg(northM: Double, eastM: Double): Double =
-        if (hypot(northM, eastM) < 1e-6) 0.0
-        else normalizeCompass(Math.toDegrees(atan2(eastM, northM)))
+    fun bearingFromCentreDeg(
+        northM: Double,
+        eastM: Double,
+    ): Double =
+        if (hypot(northM, eastM) < 1e-6) {
+            0.0
+        } else {
+            normalizeCompass(Math.toDegrees(atan2(eastM, northM)))
+        }
 
     /** Has the aircraft travelled the arc it was asked for? A request of zero means "forever". */
-    fun isComplete(travelledDeg: Double, requestedDeg: Double): Boolean =
-        requestedDeg > 0.0 && abs(travelledDeg) >= requestedDeg
+    fun isComplete(
+        travelledDeg: Double,
+        requestedDeg: Double,
+    ): Boolean = requestedDeg > 0.0 && abs(travelledDeg) >= requestedDeg
 
     private fun normalizeCompass(deg: Double): Double = (deg + 360.0) % 360.0
 }

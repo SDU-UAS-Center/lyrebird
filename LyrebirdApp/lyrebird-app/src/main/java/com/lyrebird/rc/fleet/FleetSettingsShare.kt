@@ -12,7 +12,7 @@ import org.json.JSONObject
 internal data class FleetSettingsOffer(
     val fromDeviceId: String,
     val fromDroneName: String,
-    val values: Map<String, Any>
+    val values: Map<String, Any>,
 ) {
     val size: Int get() = values.size
 }
@@ -43,7 +43,6 @@ internal data class FleetSettingsOffer(
  * profile that arrived unauthenticated over multicast has strictly less provenance than that one.
  */
 internal object FleetSettingsShare {
-
     const val TYPE_SETTINGS_OFFER = "settings"
 
     private const val KEY_MAGIC = "lb"
@@ -60,20 +59,21 @@ internal object FleetSettingsShare {
      * the policy about what may travel between aircraft belongs with the mesh rather than with the
      * screen that happens to own the constants.
      */
-    val SHAREABLE_KEYS: Set<String> = setOf(
-        "mediamtx_server",
-        "webrtc_fps",
-        "webrtc_resolution",
-        "streaming_mode",
-        "detections_enabled",
-        "detection_source",
-        "edge_detection_enabled",
-        "edge_confidence_threshold",
-        "edge_model_uri",
-        "edge_model_name",
-        "edge_labels_uri",
-        "edge_labels_name"
-    )
+    val SHAREABLE_KEYS: Set<String> =
+        setOf(
+            "mediamtx_server",
+            "webrtc_fps",
+            "webrtc_resolution",
+            "streaming_mode",
+            "detections_enabled",
+            "detection_source",
+            "edge_detection_enabled",
+            "edge_confidence_threshold",
+            "edge_model_uri",
+            "edge_model_name",
+            "edge_labels_uri",
+            "edge_labels_name",
+        )
 
     /**
      * Build the datagram this device would offer.
@@ -85,7 +85,7 @@ internal object FleetSettingsShare {
     fun buildOffer(
         prefs: SharedPreferences,
         fromDeviceId: String,
-        fromDroneName: String
+        fromDroneName: String,
     ): JSONObject {
         val values = JSONObject()
         SHAREABLE_KEYS.forEach { key ->
@@ -113,34 +113,37 @@ internal object FleetSettingsShare {
      * enforced on receipt as well as on send: a device must not be able to write arbitrary
      * preferences into a peer by hand-crafting a datagram.
      */
-    fun parseOffer(json: String): FleetSettingsOffer? = runCatching {
-        val obj = JSONObject(json)
-        if (obj.optString(KEY_MAGIC) != FleetBeacon.MAGIC) return null
-        if (obj.optInt(KEY_VERSION) != FleetBeacon.PROTOCOL_VERSION) return null
-        if (obj.optString(KEY_TYPE) != TYPE_SETTINGS_OFFER) return null
-        val fromDeviceId = obj.optString(KEY_FROM_ID).trim()
-        if (fromDeviceId.isEmpty()) return null
-        val rawValues = obj.optJSONObject(KEY_VALUES) ?: return null
+    fun parseOffer(json: String): FleetSettingsOffer? =
+        runCatching {
+            val obj = JSONObject(json)
+            if (obj.optString(KEY_MAGIC) != FleetBeacon.MAGIC) return null
+            if (obj.optInt(KEY_VERSION) != FleetBeacon.PROTOCOL_VERSION) return null
+            if (obj.optString(KEY_TYPE) != TYPE_SETTINGS_OFFER) return null
+            val fromDeviceId = obj.optString(KEY_FROM_ID).trim()
+            if (fromDeviceId.isEmpty()) return null
+            val rawValues = obj.optJSONObject(KEY_VALUES) ?: return null
 
-        val values = mutableMapOf<String, Any>()
-        rawValues.keys().forEach { key ->
-            if (key !in SHAREABLE_KEYS) return@forEach
-            when (val value = rawValues.get(key)) {
-                is Boolean, is String, is Int, is Long -> values[key] = value
-                is Number -> values[key] = value.toFloat()
-                else -> Unit
+            val values = mutableMapOf<String, Any>()
+            rawValues.keys().forEach { key ->
+                if (key !in SHAREABLE_KEYS) return@forEach
+                when (val value = rawValues.get(key)) {
+                    is Boolean, is String, is Int, is Long -> values[key] = value
+                    is Number -> values[key] = value.toFloat()
+                    else -> Unit
+                }
             }
-        }
-        if (values.isEmpty()) return null
-        FleetSettingsOffer(
-            fromDeviceId = fromDeviceId,
-            fromDroneName = obj.optString(KEY_FROM_NAME).trim(),
-            values = values
-        )
-    }.getOrNull()
+            if (values.isEmpty()) return null
+            FleetSettingsOffer(
+                fromDeviceId = fromDeviceId,
+                fromDroneName = obj.optString(KEY_FROM_NAME).trim(),
+                values = values,
+            )
+        }.getOrNull()
 
-    fun parseOffer(data: ByteArray, length: Int): FleetSettingsOffer? =
-        parseOffer(String(data, 0, length, Charsets.UTF_8))
+    fun parseOffer(
+        data: ByteArray,
+        length: Int,
+    ): FleetSettingsOffer? = parseOffer(String(data, 0, length, Charsets.UTF_8))
 
     /**
      * The JSON a received offer is filed as.
@@ -149,7 +152,10 @@ internal object FleetSettingsShare {
      * a `values` object — so a profile that arrived over the mesh is the same kind of artefact as
      * one this device saved itself, and whatever loads the one can load the other.
      */
-    fun profileJson(offer: FleetSettingsOffer, savedAt: String): JSONObject {
+    fun profileJson(
+        offer: FleetSettingsOffer,
+        savedAt: String,
+    ): JSONObject {
         val values = JSONObject()
         // Filtered again on the way to disk. The parse already dropped anything outside the
         // allowlist, so neither step is load-bearing alone, which is the point.
@@ -178,7 +184,9 @@ internal object FleetSettingsShare {
      * dots collapses to one so no `..` survives to be interpreted as a parent directory.
      */
     private fun sanitize(value: String): String =
-        value.trim().lowercase()
+        value
+            .trim()
+            .lowercase()
             .replace(UNSAFE_FILENAME_CHARS, "_")
             .replace(DOT_RUN, ".")
             .trim('.')

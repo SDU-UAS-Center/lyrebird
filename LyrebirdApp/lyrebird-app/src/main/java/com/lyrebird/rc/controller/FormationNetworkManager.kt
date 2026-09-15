@@ -20,7 +20,6 @@ import java.net.URI
  * Decouples networking logic entirely from FormationController.
  */
 object FormationNetworkManager {
-
     private const val TAG = "FormationNetwork"
     private const val WEBSOCKET_PORT = 8765
 
@@ -63,11 +62,17 @@ object FormationNetworkManager {
         }
     }
 
-    fun broadcastCommand(type: String, data: Map<String, Any>) {
+    fun broadcastCommand(
+        type: String,
+        data: Map<String, Any>,
+    ) {
         webSocketServer?.broadcast(createCommandJson(type, data))
     }
 
-    fun sendToLeader(type: String, data: Map<String, Any>) {
+    fun sendToLeader(
+        type: String,
+        data: Map<String, Any>,
+    ) {
         webSocketClient?.send(createCommandJson(type, data))
     }
 
@@ -80,11 +85,12 @@ object FormationNetworkManager {
         webSocketClient = null
     }
 
-    fun getConnectionsCount(): Int {
-        return webSocketServer?.connections?.size ?: 0
-    }
+    fun getConnectionsCount(): Int = webSocketServer?.connections?.size ?: 0
 
-    private fun createCommandJson(type: String, data: Map<String, Any>): String {
+    private fun createCommandJson(
+        type: String,
+        data: Map<String, Any>,
+    ): String {
         val json = JSONObject()
         json.put("type", type)
         json.put("data", JSONObject(data))
@@ -92,22 +98,20 @@ object FormationNetworkManager {
         return json.toString()
     }
 
-    fun configToMap(config: FormationConfig): Map<String, Any> {
-        return mapOf(
+    fun configToMap(config: FormationConfig): Map<String, Any> =
+        mapOf(
             "distanceBehind" to config.distanceBehind,
             "altitudeOffset" to config.altitudeOffset,
             "maxFormationDistance" to config.maxFormationDistance,
-            "formationType" to config.formationType.name
+            "formationType" to config.formationType.name,
         )
-    }
 
-    fun positionToMap(position: LocationCoordinate3D): Map<String, Double> {
-        return mapOf(
+    fun positionToMap(position: LocationCoordinate3D): Map<String, Double> =
+        mapOf(
             "latitude" to position.latitude,
             "longitude" to position.longitude,
-            "altitude" to position.altitude
+            "altitude" to position.altitude,
         )
-    }
 
     private fun handleIncomingMessage(message: String) {
         runCatching {
@@ -118,31 +122,35 @@ object FormationNetworkManager {
             when (type) {
                 "leader_state" -> {
                     val position = data.getJSONObject("position")
-                    val state = DroneState(
-                        position = LocationCoordinate3D(
-                            position.getDouble("latitude"),
-                            position.getDouble("longitude"),
-                            position.getDouble("altitude")
-                        ),
-                        heading = data.getDouble("heading"),
-                        battery = data.getInt("battery"),
-                        isConnected = true,
-                        timestamp = data.getLong("timestamp")
-                    )
+                    val state =
+                        DroneState(
+                            position =
+                                LocationCoordinate3D(
+                                    position.getDouble("latitude"),
+                                    position.getDouble("longitude"),
+                                    position.getDouble("altitude"),
+                                ),
+                            heading = data.getDouble("heading"),
+                            battery = data.getInt("battery"),
+                            isConnected = true,
+                            timestamp = data.getLong("timestamp"),
+                        )
                     onLeaderStateReceived?.invoke(state)
                 }
                 "follower_state" -> {
                     val position = data.getJSONObject("position")
-                    val state = DroneState(
-                        position = LocationCoordinate3D(
-                            position.getDouble("latitude"),
-                            position.getDouble("longitude"),
-                            position.getDouble("altitude")
-                        ),
-                        heading = data.getDouble("heading"),
-                        battery = data.getInt("battery"),
-                        isConnected = true
-                    )
+                    val state =
+                        DroneState(
+                            position =
+                                LocationCoordinate3D(
+                                    position.getDouble("latitude"),
+                                    position.getDouble("longitude"),
+                                    position.getDouble("altitude"),
+                                ),
+                            heading = data.getDouble("heading"),
+                            battery = data.getInt("battery"),
+                            isConnected = true,
+                        )
                     onFollowerStateReceived?.invoke(state)
                 }
                 "formation_start" -> {
@@ -159,15 +167,25 @@ object FormationNetworkManager {
         }.onFailure { failure -> Log.e(TAG, "Error parsing message: $message", failure) }
     }
 
-    private class FormationWebSocketServer(address: InetSocketAddress) : WebSocketServer(address) {
-        override fun onOpen(conn: WebSocket?, handshake: ClientHandshake?) {
+    private class FormationWebSocketServer(
+        address: InetSocketAddress,
+    ) : WebSocketServer(address) {
+        override fun onOpen(
+            conn: WebSocket?,
+            handshake: ClientHandshake?,
+        ) {
             Log.i(TAG, "Follower connected: ${conn?.remoteSocketAddress}")
             Handler(Looper.getMainLooper()).post {
                 ToastUtils.showToast("Follower connected")
             }
         }
 
-        override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
+        override fun onClose(
+            conn: WebSocket?,
+            code: Int,
+            reason: String?,
+            remote: Boolean,
+        ) {
             Log.i(TAG, "Follower disconnected: $reason")
             Handler(Looper.getMainLooper()).post {
                 ToastUtils.showToast("Follower disconnected")
@@ -175,11 +193,17 @@ object FormationNetworkManager {
             }
         }
 
-        override fun onMessage(conn: WebSocket?, message: String?) {
+        override fun onMessage(
+            conn: WebSocket?,
+            message: String?,
+        ) {
             message?.let { handleIncomingMessage(it) }
         }
 
-        override fun onError(conn: WebSocket?, ex: Exception?) {
+        override fun onError(
+            conn: WebSocket?,
+            ex: Exception?,
+        ) {
             Log.e(TAG, "WebSocket server error", ex)
         }
 
@@ -188,7 +212,9 @@ object FormationNetworkManager {
         }
     }
 
-    private class FormationWebSocketClient(uri: URI) : WebSocketClient(uri) {
+    private class FormationWebSocketClient(
+        uri: URI,
+    ) : WebSocketClient(uri) {
         override fun onOpen(handshake: ServerHandshake?) {
             Log.i(TAG, "Connected to leader")
             Handler(Looper.getMainLooper()).post {
@@ -200,7 +226,11 @@ object FormationNetworkManager {
             message?.let { handleIncomingMessage(it) }
         }
 
-        override fun onClose(code: Int, reason: String?, remote: Boolean) {
+        override fun onClose(
+            code: Int,
+            reason: String?,
+            remote: Boolean,
+        ) {
             Log.i(TAG, "Disconnected from leader: $reason")
             Handler(Looper.getMainLooper()).post {
                 ToastUtils.showToast("Disconnected from leader")

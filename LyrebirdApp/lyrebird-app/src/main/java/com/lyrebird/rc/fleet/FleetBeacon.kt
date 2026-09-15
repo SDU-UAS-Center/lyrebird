@@ -45,45 +45,44 @@ internal data class FleetBeacon(
     val videoServer: String,
     /** Milliseconds since this device's app started, so a restart is visible as a counter reset. */
     val appUptimeMs: Long,
-    val sequence: Long
+    val sequence: Long,
 ) {
-
     fun hasRealPosition(): Boolean = FleetGeo.isRealPosition(latitudeDeg, longitudeDeg)
 
     fun hasRealHome(): Boolean = homeSet && FleetGeo.isRealPosition(homeLatitudeDeg, homeLongitudeDeg)
 
-    fun toJson(): JSONObject = JSONObject().apply {
-        put(KEY_MAGIC, MAGIC)
-        put(KEY_VERSION, PROTOCOL_VERSION)
-        put(KEY_TYPE, TYPE_BEACON)
-        put(KEY_DEVICE_ID, deviceId)
-        put(KEY_NAME, droneName)
-        put(KEY_SYSTEM_ID, systemId)
-        put(KEY_LATITUDE, latitudeDeg)
-        put(KEY_LONGITUDE, longitudeDeg)
-        put(KEY_ALTITUDE_ASL, altitudeAslM)
-        put(KEY_ALTITUDE_AGL, altitudeAglM)
-        put(KEY_VELOCITY_NORTH, velocityNorthMps)
-        put(KEY_VELOCITY_EAST, velocityEastMps)
-        put(KEY_VELOCITY_DOWN, velocityDownMps)
-        put(KEY_HEADING, headingDeg)
-        put(KEY_BATTERY, batteryPercent)
-        put(KEY_SATELLITES, satelliteCount)
-        put(KEY_FLYING, flying)
-        put(KEY_FLIGHT_MODE, flightMode)
-        put(KEY_HOME_LATITUDE, homeLatitudeDeg)
-        put(KEY_HOME_LONGITUDE, homeLongitudeDeg)
-        put(KEY_HOME_SET, homeSet)
-        put(KEY_VIDEO_PATH, videoPath)
-        put(KEY_VIDEO_SERVER, videoServer)
-        put(KEY_UPTIME, appUptimeMs)
-        put(KEY_SEQUENCE, sequence)
-    }
+    fun toJson(): JSONObject =
+        JSONObject().apply {
+            put(KEY_MAGIC, MAGIC)
+            put(KEY_VERSION, PROTOCOL_VERSION)
+            put(KEY_TYPE, TYPE_BEACON)
+            put(KEY_DEVICE_ID, deviceId)
+            put(KEY_NAME, droneName)
+            put(KEY_SYSTEM_ID, systemId)
+            put(KEY_LATITUDE, latitudeDeg)
+            put(KEY_LONGITUDE, longitudeDeg)
+            put(KEY_ALTITUDE_ASL, altitudeAslM)
+            put(KEY_ALTITUDE_AGL, altitudeAglM)
+            put(KEY_VELOCITY_NORTH, velocityNorthMps)
+            put(KEY_VELOCITY_EAST, velocityEastMps)
+            put(KEY_VELOCITY_DOWN, velocityDownMps)
+            put(KEY_HEADING, headingDeg)
+            put(KEY_BATTERY, batteryPercent)
+            put(KEY_SATELLITES, satelliteCount)
+            put(KEY_FLYING, flying)
+            put(KEY_FLIGHT_MODE, flightMode)
+            put(KEY_HOME_LATITUDE, homeLatitudeDeg)
+            put(KEY_HOME_LONGITUDE, homeLongitudeDeg)
+            put(KEY_HOME_SET, homeSet)
+            put(KEY_VIDEO_PATH, videoPath)
+            put(KEY_VIDEO_SERVER, videoServer)
+            put(KEY_UPTIME, appUptimeMs)
+            put(KEY_SEQUENCE, sequence)
+        }
 
     fun toBytes(): ByteArray = toJson().toString().toByteArray(Charsets.UTF_8)
 
     companion object {
-
         /** Rejects anything else that happens to be multicasting on this group and port. */
         const val MAGIC = "lyrebird-fleet"
         const val PROTOCOL_VERSION = 1
@@ -123,46 +122,53 @@ internal data class FleetBeacon(
          * populate a read-only roster entry, and a device id that does not parse simply yields
          * null rather than a half-built peer.
          */
-        fun parse(json: String): FleetBeacon? = runCatching {
-            val obj = JSONObject(json)
-            if (obj.optString(KEY_MAGIC) != MAGIC) return null
-            if (obj.optInt(KEY_VERSION) != PROTOCOL_VERSION) return null
-            if (obj.optString(KEY_TYPE) != TYPE_BEACON) return null
-            val deviceId = obj.optString(KEY_DEVICE_ID).trim()
-            if (deviceId.isEmpty()) return null
-            FleetBeacon(
-                deviceId = deviceId,
-                droneName = obj.optString(KEY_NAME).trim(),
-                systemId = obj.optInt(KEY_SYSTEM_ID, 0),
-                latitudeDeg = obj.optDouble(KEY_LATITUDE, 0.0),
-                longitudeDeg = obj.optDouble(KEY_LONGITUDE, 0.0),
-                altitudeAslM = obj.optDouble(KEY_ALTITUDE_ASL, 0.0),
-                altitudeAglM = obj.optDouble(KEY_ALTITUDE_AGL, 0.0),
-                velocityNorthMps = obj.optDouble(KEY_VELOCITY_NORTH, 0.0),
-                velocityEastMps = obj.optDouble(KEY_VELOCITY_EAST, 0.0),
-                velocityDownMps = obj.optDouble(KEY_VELOCITY_DOWN, 0.0),
-                headingDeg = obj.optDouble(KEY_HEADING, 0.0),
-                batteryPercent = obj.optInt(KEY_BATTERY, -1),
-                satelliteCount = obj.optInt(KEY_SATELLITES, -1),
-                flying = obj.optBoolean(KEY_FLYING, false),
-                flightMode = obj.optString(KEY_FLIGHT_MODE, "UNKNOWN"),
-                homeLatitudeDeg = obj.optDouble(KEY_HOME_LATITUDE, 0.0),
-                homeLongitudeDeg = obj.optDouble(KEY_HOME_LONGITUDE, 0.0),
-                homeSet = obj.optBoolean(KEY_HOME_SET, false),
-                videoPath = obj.optString(KEY_VIDEO_PATH).trim(),
-                videoServer = obj.optString(KEY_VIDEO_SERVER).trim(),
-                appUptimeMs = obj.optLong(KEY_UPTIME, 0L),
-                sequence = obj.optLong(KEY_SEQUENCE, 0L)
-            )
-        }.getOrNull()
+        fun parse(json: String): FleetBeacon? =
+            runCatching {
+                val obj = JSONObject(json)
+                if (obj.optString(KEY_MAGIC) != MAGIC) return null
+                if (obj.optInt(KEY_VERSION) != PROTOCOL_VERSION) return null
+                if (obj.optString(KEY_TYPE) != TYPE_BEACON) return null
+                val deviceId = obj.optString(KEY_DEVICE_ID).trim()
+                if (deviceId.isEmpty()) return null
+                FleetBeacon(
+                    deviceId = deviceId,
+                    droneName = obj.optString(KEY_NAME).trim(),
+                    systemId = obj.optInt(KEY_SYSTEM_ID, 0),
+                    latitudeDeg = obj.optDouble(KEY_LATITUDE, 0.0),
+                    longitudeDeg = obj.optDouble(KEY_LONGITUDE, 0.0),
+                    altitudeAslM = obj.optDouble(KEY_ALTITUDE_ASL, 0.0),
+                    altitudeAglM = obj.optDouble(KEY_ALTITUDE_AGL, 0.0),
+                    velocityNorthMps = obj.optDouble(KEY_VELOCITY_NORTH, 0.0),
+                    velocityEastMps = obj.optDouble(KEY_VELOCITY_EAST, 0.0),
+                    velocityDownMps = obj.optDouble(KEY_VELOCITY_DOWN, 0.0),
+                    headingDeg = obj.optDouble(KEY_HEADING, 0.0),
+                    batteryPercent = obj.optInt(KEY_BATTERY, -1),
+                    satelliteCount = obj.optInt(KEY_SATELLITES, -1),
+                    flying = obj.optBoolean(KEY_FLYING, false),
+                    flightMode = obj.optString(KEY_FLIGHT_MODE, "UNKNOWN"),
+                    homeLatitudeDeg = obj.optDouble(KEY_HOME_LATITUDE, 0.0),
+                    homeLongitudeDeg = obj.optDouble(KEY_HOME_LONGITUDE, 0.0),
+                    homeSet = obj.optBoolean(KEY_HOME_SET, false),
+                    videoPath = obj.optString(KEY_VIDEO_PATH).trim(),
+                    videoServer = obj.optString(KEY_VIDEO_SERVER).trim(),
+                    appUptimeMs = obj.optLong(KEY_UPTIME, 0L),
+                    sequence = obj.optLong(KEY_SEQUENCE, 0L),
+                )
+            }.getOrNull()
 
-        fun parse(data: ByteArray, length: Int): FleetBeacon? =
-            parse(String(data, 0, length, Charsets.UTF_8))
+        fun parse(
+            data: ByteArray,
+            length: Int,
+        ): FleetBeacon? = parse(String(data, 0, length, Charsets.UTF_8))
 
         /** The message type of a datagram on the fleet group, or blank when it is not ours. */
-        fun messageType(data: ByteArray, length: Int): String = runCatching {
-            val obj = JSONObject(String(data, 0, length, Charsets.UTF_8))
-            if (obj.optString(KEY_MAGIC) != MAGIC) "" else obj.optString(KEY_TYPE)
-        }.getOrDefault("")
+        fun messageType(
+            data: ByteArray,
+            length: Int,
+        ): String =
+            runCatching {
+                val obj = JSONObject(String(data, 0, length, Charsets.UTF_8))
+                if (obj.optString(KEY_MAGIC) != MAGIC) "" else obj.optString(KEY_TYPE)
+            }.getOrDefault("")
     }
 }

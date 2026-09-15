@@ -8,10 +8,10 @@ import android.graphics.Path
 import android.util.Log
 import android.util.LruCache
 import dji.v5.ux.map.MapWidget
+import dji.v5.ux.mapkit.core.models.DJIBitmapDescriptorFactory
 import dji.v5.ux.mapkit.core.models.DJILatLng
 import dji.v5.ux.mapkit.core.models.annotations.DJIMarker
 import dji.v5.ux.mapkit.core.models.annotations.DJIMarkerOptions
-import dji.v5.ux.mapkit.core.models.DJIBitmapDescriptorFactory
 
 /**
  * Draws the rest of the fleet on the Flight Deck map.
@@ -25,8 +25,9 @@ import dji.v5.ux.mapkit.core.models.DJIBitmapDescriptorFactory
  * modifying the widget, which keeps the vendored UXSDK unpatched and means a future SDK drop does
  * not take this feature with it.
  */
-internal class FleetMapOverlay(private val mapWidget: MapWidget?) {
-
+internal class FleetMapOverlay(
+    private val mapWidget: MapWidget?,
+) {
     companion object {
         private const val TAG = "LyrebirdFleetMap"
 
@@ -81,14 +82,15 @@ internal class FleetMapOverlay(private val mapWidget: MapWidget?) {
             val existing = markers[beacon.deviceId]
             runCatching {
                 if (existing == null) {
-                    val options = DJIMarkerOptions()
-                        .position(position)
-                        .icon(DJIBitmapDescriptorFactory.fromBitmap(iconFor(peer)))
-                        .anchor(ANCHOR_U, ANCHOR_V)
-                        .rotation(beacon.headingDeg.toFloat())
-                        .zIndex(PEER_MARKER_Z)
-                        .title(titleFor(peer))
-                        .visible(true)
+                    val options =
+                        DJIMarkerOptions()
+                            .position(position)
+                            .icon(DJIBitmapDescriptorFactory.fromBitmap(iconFor(peer)))
+                            .anchor(ANCHOR_U, ANCHOR_V)
+                            .rotation(beacon.headingDeg.toFloat())
+                            .zIndex(PEER_MARKER_Z)
+                            .title(titleFor(peer))
+                            .visible(true)
                     map.addMarker(options)?.let { markers[beacon.deviceId] = it }
                 } else {
                     existing.setPosition(position)
@@ -127,15 +129,17 @@ internal class FleetMapOverlay(private val mapWidget: MapWidget?) {
         return bitmap
     }
 
-    private fun colorFor(peer: FleetPeerView): Int = when (peer.liveness) {
-        PeerLiveness.LOST -> COLOR_LOST
-        PeerLiveness.STALE -> COLOR_STALE
-        PeerLiveness.LIVE -> when (peer.advisoryLevel) {
-            AdvisoryLevel.WARNING -> COLOR_WARNING
-            AdvisoryLevel.CAUTION -> COLOR_CAUTION
-            else -> COLOR_NORMAL
+    private fun colorFor(peer: FleetPeerView): Int =
+        when (peer.liveness) {
+            PeerLiveness.LOST -> COLOR_LOST
+            PeerLiveness.STALE -> COLOR_STALE
+            PeerLiveness.LIVE ->
+                when (peer.advisoryLevel) {
+                    AdvisoryLevel.WARNING -> COLOR_WARNING
+                    AdvisoryLevel.CAUTION -> COLOR_CAUTION
+                    else -> COLOR_NORMAL
+                }
         }
-    }
 
     /**
      * A chevron with the peer's name beneath it.
@@ -144,20 +148,24 @@ internal class FleetMapOverlay(private val mapWidget: MapWidget?) {
      * and the label can carry the name, neither of which a static drawable could do without one
      * asset per aircraft per state.
      */
-    private fun drawMarker(label: String, color: Int): Bitmap {
+    private fun drawMarker(
+        label: String,
+        color: Int,
+    ): Bitmap {
         val bitmap = Bitmap.createBitmap(ICON_WIDTH_PX, ICON_HEIGHT_PX, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val centreX = ICON_WIDTH_PX / 2f
         val noseY = (ICON_HEIGHT_PX - CHEVRON_HEIGHT_PX) / 2f - LABEL_TEXT_PX / 2f
         val tailY = noseY + CHEVRON_HEIGHT_PX
 
-        val chevron = Path().apply {
-            moveTo(centreX, noseY)
-            lineTo(centreX + CHEVRON_HALF_WIDTH_PX, tailY)
-            lineTo(centreX, tailY - CHEVRON_HEIGHT_PX / 4f)
-            lineTo(centreX - CHEVRON_HALF_WIDTH_PX, tailY)
-            close()
-        }
+        val chevron =
+            Path().apply {
+                moveTo(centreX, noseY)
+                lineTo(centreX + CHEVRON_HALF_WIDTH_PX, tailY)
+                lineTo(centreX, tailY - CHEVRON_HEIGHT_PX / 4f)
+                lineTo(centreX - CHEVRON_HALF_WIDTH_PX, tailY)
+                close()
+            }
 
         // Dark outline first, so the shape stays legible over both satellite imagery and a pale
         // street map without needing to know which one the operator picked.
@@ -167,21 +175,22 @@ internal class FleetMapOverlay(private val mapWidget: MapWidget?) {
                 style = Paint.Style.STROKE
                 strokeWidth = OUTLINE_WIDTH_PX
                 this.color = Color.BLACK
-            }
+            },
         )
         canvas.drawPath(
             chevron,
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.FILL
                 this.color = color
-            }
+            },
         )
 
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = LABEL_TEXT_PX
-            textAlign = Paint.Align.CENTER
-            isFakeBoldText = true
-        }
+        val textPaint =
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = LABEL_TEXT_PX
+                textAlign = Paint.Align.CENTER
+                isFakeBoldText = true
+            }
         val baseline = tailY + LABEL_TEXT_PX + LABEL_PADDING_PX
         textPaint.color = Color.BLACK
         textPaint.style = Paint.Style.STROKE

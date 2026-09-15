@@ -5,7 +5,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import dji.sdk.keyvalue.value.common.ComponentIndexType
-import org.webrtc.CapturerObserver
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
@@ -55,7 +54,7 @@ class WhipPublisher(
     // corrected mediamtxServer setting, or a freshly discovered client IP, takes effect on the
     // very next reconnect instead of requiring the whole publisher to be torn down and recreated.
     // Defaults to the fixed whipUrl for callers with no way to re-resolve it.
-    private val whipUrlProvider: () -> String = { whipUrl }
+    private val whipUrlProvider: () -> String = { whipUrl },
 ) {
     companion object {
         private const val TAG = "WhipPublisher"
@@ -64,13 +63,16 @@ class WhipPublisher(
         private const val RECONNECT_MAX_DELAY_MS = 30000L
         private const val FIRST_FRAME_TIMEOUT_MS = 8_000L
         private const val FIRST_FRAME_RECOVERY_TIMEOUT_MS = 4_000L
-        //: How long stop() waits for the publish loop to finish its own teardown before returning.
+
+        // : How long stop() waits for the publish loop to finish its own teardown before returning.
         private const val STOP_AWAIT_GRACE_S = 5L
-        //: How long teardown() waits for DJI's live-view thread to finish an in-flight frame
-        //: before disposing the WebRTC source it delivers into.
+
+        // : How long teardown() waits for DJI's live-view thread to finish an in-flight frame
+        // : before disposing the WebRTC source it delivers into.
         private const val FRAME_DRAIN_TIMEOUT_MS = 200L
-        //: getStats() polling cadence, matching SharedDJIFrameSource's own ~1s metrics window so
-        //: network-side and processing-side diagnostics land on comparable timescales.
+
+        // : getStats() polling cadence, matching SharedDJIFrameSource's own ~1s metrics window so
+        // : network-side and processing-side diagnostics land on comparable timescales.
         private const val STATS_POLL_INTERVAL_MS = 1000L
     }
 
@@ -83,7 +85,7 @@ class WhipPublisher(
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
-    private var whipResourceUrl: String? = null  // Location header for DELETE on teardown
+    private var whipResourceUrl: String? = null // Location header for DELETE on teardown
 
     // Phase 3 of the frame-drop investigation: skips the periodic forced keyframe while nothing
     // but WebRTC/WHEP viewers are attached to this drone's MediaMTX path. Owned per-publish
@@ -94,6 +96,7 @@ class WhipPublisher(
     private val isRunning = AtomicBoolean(false)
     private val isPublishing = AtomicBoolean(false)
     private val isTearingDown = AtomicBoolean(false)
+
     @Volatile private var currentFps: Int = options.fps
 
     // Send-side network diagnostics (Phase 1: WHIP/WHEP frame-drop investigation). Updated on
@@ -109,7 +112,9 @@ class WhipPublisher(
 
     interface WhipListener {
         fun onPublishing()
+
         fun onDisconnected()
+
         fun onError(error: String)
     }
 
@@ -125,7 +130,7 @@ class WhipPublisher(
         // drops from pacer/network-side drops (flight-1 follow-up; outputFps alone over-reports
         // because it counts frames handed to the pipeline, not frames that left the device).
         val framesEncoded: Long? = null,
-        val framesSent: Long? = null
+        val framesSent: Long? = null,
     )
 
     fun start() {
@@ -160,7 +165,10 @@ class WhipPublisher(
     }
 
     /** Change resolution without reconnection. */
-    fun changeResolution(width: Int, height: Int) {
+    fun changeResolution(
+        width: Int,
+        height: Int,
+    ) {
         when (videoCapturer) {
             is DJIV5VideoCapturer -> videoCapturer.changeResolution(width, height)
             is SharedVideoCapturerHandle -> videoCapturer.changeResolution(width, height)
@@ -171,11 +179,12 @@ class WhipPublisher(
         val boundedFps = fps.coerceIn(1, 60)
         currentFps = boundedFps
         when (videoCapturer) {
-            is DJIV5VideoCapturer -> videoCapturer.changeCaptureFormat(
-                options.videoResolutionWidth,
-                options.videoResolutionHeight,
-                boundedFps
-            )
+            is DJIV5VideoCapturer ->
+                videoCapturer.changeCaptureFormat(
+                    options.videoResolutionWidth,
+                    options.videoResolutionHeight,
+                    boundedFps,
+                )
             is SharedVideoCapturerHandle -> videoCapturer.changeFrameRate(boundedFps)
         }
         peerConnection?.senders?.firstOrNull()?.let { configureVideoSenderForStability(it) }
@@ -188,9 +197,10 @@ class WhipPublisher(
         var consecutiveFailures = 0
 
         while (isRunning.get()) {
-            val failure = runCatching {
-                publish()
-            }.exceptionOrNull()
+            val failure =
+                runCatching {
+                    publish()
+                }.exceptionOrNull()
 
             if (failure == null) {
                 consecutiveFailures = 0
@@ -209,8 +219,9 @@ class WhipPublisher(
             mainHandler.post { listener?.onDisconnected() }
 
             if (isRunning.get()) {
-                val delay = (RECONNECT_BASE_DELAY_MS * (1L shl minOf(consecutiveFailures - 1, 4)))
-                    .coerceAtMost(RECONNECT_MAX_DELAY_MS)
+                val delay =
+                    (RECONNECT_BASE_DELAY_MS * (1L shl minOf(consecutiveFailures - 1, 4)))
+                        .coerceAtMost(RECONNECT_MAX_DELAY_MS)
                 Log.i(TAG, "Reconnecting in ${delay}ms...")
                 if (!sleepBeforeReconnect(delay)) {
                     isRunning.set(false)
@@ -233,17 +244,20 @@ class WhipPublisher(
 
         // 1. Create video source & track
         videoSource = factory.createVideoSource(false)
-        surfaceTextureHelper = SurfaceTextureHelper.create(
-            "LyrebirdWhipCapture",
-            WebRTCPeerFactory.getEglBase().eglBaseContext
-        )
-        videoTrack = factory.createVideoTrack(options.videoTrackId, videoSource).apply {
-            setEnabled(true)
-            localPreviewSink?.let { addSink(it) }
-        }
-        val useSurfaceEncoder = appContext
-            .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
-            .getBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, false)
+        surfaceTextureHelper =
+            SurfaceTextureHelper.create(
+                "LyrebirdWhipCapture",
+                WebRTCPeerFactory.getEglBase().eglBaseContext,
+            )
+        videoTrack =
+            factory.createVideoTrack(options.videoTrackId, videoSource).apply {
+                setEnabled(true)
+                localPreviewSink?.let { addSink(it) }
+            }
+        val useSurfaceEncoder =
+            appContext
+                .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
+                .getBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, false)
         // The experimental DJI surface encoder cannot be initialized until the WebRTC peer
         // creates its encoder, so waiting here for the normal NV21 listener would deadlock its
         // startup whenever that listener is quiet. Its own MediaCodec output is the first-frame
@@ -257,7 +271,7 @@ class WhipPublisher(
         videoCapturer.startCapture(
             options.videoResolutionWidth,
             options.videoResolutionHeight,
-            currentFps
+            currentFps,
         )
         firstFrameGate?.awaitFirstFrame(startingFrameCount, FIRST_FRAME_TIMEOUT_MS, FIRST_FRAME_RECOVERY_TIMEOUT_MS)
 
@@ -270,17 +284,18 @@ class WhipPublisher(
         val iceGatherLatch = CountDownLatch(1)
         val connected = AtomicBoolean(false)
 
-        peerConnection = factory.createPeerConnection(
-            rtcConfig,
-            WhipConnectionObserver(
-                iceGatherLatch = iceGatherLatch,
-                connected = connected,
-                onPublishing = {
-                    isPublishing.set(true)
-                    mainHandler.post { listener?.onPublishing() }
-                }
+        peerConnection =
+            factory.createPeerConnection(
+                rtcConfig,
+                WhipConnectionObserver(
+                    iceGatherLatch = iceGatherLatch,
+                    connected = connected,
+                    onPublishing = {
+                        isPublishing.set(true)
+                        mainHandler.post { listener?.onPublishing() }
+                    },
+                ),
             )
-        )
 
         // Add video track (sendonly — mediamtx doesn't send back video)
         peerConnection!!.addTrack(videoTrack, listOf(options.mediaStreamId))
@@ -299,9 +314,10 @@ class WhipPublisher(
         }
 
         // Use the local description which now contains all gathered ICE candidates
-        val offerSdp = checkNotNull(peerConnection!!.localDescription?.description) {
-            "No local description after ICE gathering"
-        }
+        val offerSdp =
+            checkNotNull(peerConnection!!.localDescription?.description) {
+                "No local description after ICE gathering"
+            }
 
         // 5. POST offer to WHIP endpoint
         val answerSdp = postWhipOffer(offerSdp, targetWhipUrl)
@@ -313,7 +329,11 @@ class WhipPublisher(
 
         // 7. Wait until connection drops or we're stopped
         waitForWhipConnectionLoss(
-            isRunning, connected, { peerConnection }, STATS_POLL_INTERVAL_MS, ::pollNetworkStatsIfDue
+            isRunning,
+            connected,
+            { peerConnection },
+            STATS_POLL_INTERVAL_MS,
+            ::pollNetworkStatsIfDue,
         )
     }
 
@@ -350,45 +370,52 @@ class WhipPublisher(
     }
 
     private fun onStatsReport(report: RTCStatsReport) {
-        val outboundVideoRtp = report.statsMap.values.firstOrNull { stats ->
-            stats.type == "outbound-rtp" && stats.members["kind"] == "video"
-        } ?: return
+        val outboundVideoRtp =
+            report.statsMap.values.firstOrNull { stats ->
+                stats.type == "outbound-rtp" && stats.members["kind"] == "video"
+            } ?: return
 
         val members = outboundVideoRtp.members
         val qualityLimitationReason = (members["qualityLimitationReason"] as? String)
         val framesEncoded = (members["framesEncoded"] as? Number)?.toLong()
         val framesSent = (members["framesSent"] as? Number)?.toLong()
-        val framesEncodedNotSent = if (framesEncoded != null && framesSent != null) {
-            (framesEncoded - framesSent).coerceAtLeast(0L)
-        } else {
-            null
-        }
+        val framesEncodedNotSent =
+            if (framesEncoded != null && framesSent != null) {
+                (framesEncoded - framesSent).coerceAtLeast(0L)
+            } else {
+                null
+            }
 
         val bytesSent = (members["bytesSent"] as? Number)?.toLong()
         val timestampUs = outboundVideoRtp.timestampUs
-        val sendBitrateBps = if (bytesSent != null) {
-            sendBitrateBpsFromSample(bytesSent, timestampUs, lastStatsBytesSent, lastStatsTimestampUs).also {
-                lastStatsBytesSent = bytesSent
-                lastStatsTimestampUs = timestampUs
+        val sendBitrateBps =
+            if (bytesSent != null) {
+                sendBitrateBpsFromSample(bytesSent, timestampUs, lastStatsBytesSent, lastStatsTimestampUs).also {
+                    lastStatsBytesSent = bytesSent
+                    lastStatsTimestampUs = timestampUs
+                }
+            } else {
+                null
             }
-        } else {
-            null
-        }
 
-        latestNetworkStats = WhipNetworkStats(
-            qualityLimitationReason = qualityLimitationReason,
-            framesEncodedNotSent = framesEncodedNotSent,
-            sendBitrateBps = sendBitrateBps,
-            framesEncoded = framesEncoded,
-            framesSent = framesSent
-        )
+        latestNetworkStats =
+            WhipNetworkStats(
+                qualityLimitationReason = qualityLimitationReason,
+                framesEncodedNotSent = framesEncodedNotSent,
+                sendBitrateBps = sendBitrateBps,
+                framesEncoded = framesEncoded,
+                framesSent = framesSent,
+            )
     }
 
     /**
      * HTTP POST of SDP offer to the WHIP endpoint.
      * Returns the SDP answer body.
      */
-    private fun postWhipOffer(offerSdp: String, whipUrl: String): String {
+    private fun postWhipOffer(
+        offerSdp: String,
+        whipUrl: String,
+    ): String {
         val url = URL(whipUrl)
         val conn = url.openConnection() as HttpURLConnection
         try {
@@ -465,11 +492,12 @@ class WhipPublisher(
     }
 
     private fun drainInFlightFrames() {
-        val drained = when (videoCapturer) {
-            is SharedVideoCapturerHandle -> videoCapturer.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS)
-            is DJIV5VideoCapturer -> videoCapturer.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS)
-            else -> true
-        }
+        val drained =
+            when (videoCapturer) {
+                is SharedVideoCapturerHandle -> videoCapturer.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS)
+                is DJIV5VideoCapturer -> videoCapturer.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS)
+                else -> true
+            }
         if (!drained) Log.w(TAG, "Timed out draining in-flight video frames before dispose")
     }
 
@@ -489,20 +517,21 @@ class WhipPublisher(
     }
 
     /**
-    * Configure the RTP sender to maintain framerate under load:
+     * Configure the RTP sender to maintain framerate under load:
      * - Set max bitrate and framerate
-    * - Set DegradationPreference to MAINTAIN_FRAMERATE (scale before dropping FPS)
+     * - Set DegradationPreference to MAINTAIN_FRAMERATE (scale before dropping FPS)
      */
     private fun configureVideoSenderForStability(sender: RtpSender) {
         runCatching {
             val params = sender.parameters ?: return
             val encodings = params.encodings ?: emptyList()
             val bitrateCap = options.senderBitrateBps()
-            val senderFps = if (isSurfaceEncoderEnabled()) {
-                DjiSurfaceVideoCapturer.DRIVER_FPS
-            } else {
-                currentFps
-            }
+            val senderFps =
+                if (isSurfaceEncoderEnabled()) {
+                    DjiSurfaceVideoCapturer.DRIVER_FPS
+                } else {
+                    currentFps
+                }
 
             encodings.forEach { encoding ->
                 runCatching { encoding.maxBitrateBps = bitrateCap }
@@ -512,6 +541,7 @@ class WhipPublisher(
             // Force adaptation strategy toward FPS reduction before resolution reduction
             runCatching {
                 val preferenceClass = Class.forName("org.webrtc.RtpParameters\$DegradationPreference")
+
                 @Suppress("UNCHECKED_CAST")
                 val enumClass = preferenceClass as Class<out Enum<*>>
                 val maintainFramerate = java.lang.Enum.valueOf(enumClass, "MAINTAIN_FRAMERATE")
@@ -524,16 +554,17 @@ class WhipPublisher(
             Log.d(
                 TAG,
                 "Sender params tuned: maxBitrate=${bitrateCap}bps, " +
-                    "maxFps=$senderFps, prefer=MAINTAIN_FRAMERATE"
+                    "maxFps=$senderFps, prefer=MAINTAIN_FRAMERATE",
             )
         }.onFailure { e ->
             Log.w(TAG, "Unable to fully apply sender tuning: ${e.message}")
         }
     }
 
-    private fun isSurfaceEncoderEnabled(): Boolean = appContext
-        .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
-        .getBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, false)
+    private fun isSurfaceEncoderEnabled(): Boolean =
+        appContext
+            .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
+            .getBoolean(WebRTCPeerFactory.PREF_USE_DJI_SURFACE_H264_ENCODER, false)
 }
 
 /**
@@ -546,7 +577,7 @@ internal fun sendBitrateBpsFromSample(
     bytesSent: Long,
     timestampUs: Double,
     previousBytesSent: Long,
-    previousTimestampUs: Double
+    previousTimestampUs: Double,
 ): Long? {
     if (previousTimestampUs == 0.0 || timestampUs <= previousTimestampUs) return null
     val elapsedSeconds = (timestampUs - previousTimestampUs) / 1_000_000.0
@@ -554,33 +585,35 @@ internal fun sendBitrateBpsFromSample(
     return (deltaBytes * 8 / elapsedSeconds).toLong()
 }
 
-internal fun absoluteWhipResourceUrl(url: URL, location: String?): String? {
-    return when {
+internal fun absoluteWhipResourceUrl(
+    url: URL,
+    location: String?,
+): String? =
+    when {
         location == null -> null
         location.startsWith("http") -> location
         else -> "${url.protocol}://${url.host}${url.portSegment()}$location"
     }
-}
 
 private fun URL.portSegment(): String = if (port >= 0) ":$port" else ""
 
-private fun whipRtcConfiguration(): PeerConnection.RTCConfiguration {
-    return PeerConnection.RTCConfiguration(
-        listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302")
-                .createIceServer()
-        )
-    ).apply {
-        sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-    }
-}
+private fun whipRtcConfiguration(): PeerConnection.RTCConfiguration =
+    PeerConnection
+        .RTCConfiguration(
+            listOf(
+                PeerConnection.IceServer
+                    .builder("stun:stun.l.google.com:19302")
+                    .createIceServer(),
+            ),
+        ).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+        }
 
-private fun whipOfferConstraints(): MediaConstraints {
-    return MediaConstraints().apply {
+private fun whipOfferConstraints(): MediaConstraints =
+    MediaConstraints().apply {
         mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
         mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
     }
-}
 
 private fun createAndSetLocalOffer(peerConnection: PeerConnection) {
     val offerLatch = CountDownLatch(1)
@@ -588,14 +621,17 @@ private fun createAndSetLocalOffer(peerConnection: PeerConnection) {
 
     peerConnection.createOffer(
         WhipOfferObserver(peerConnection, offerLatch) { sdp -> localSdp = sdp },
-        whipOfferConstraints()
+        whipOfferConstraints(),
     )
 
     offerLatch.await(5, TimeUnit.SECONDS)
     check(localSdp != null) { "Failed to create SDP offer" }
 }
 
-private fun setRemoteWhipAnswer(peerConnection: PeerConnection, answerSdp: String) {
+private fun setRemoteWhipAnswer(
+    peerConnection: PeerConnection,
+    answerSdp: String,
+) {
     val answerLatch = CountDownLatch(1)
     val answer = SessionDescription(SessionDescription.Type.ANSWER, answerSdp)
     peerConnection.setRemoteDescription(WhipRemoteDescriptionObserver(answerLatch), answer)
@@ -607,7 +643,7 @@ private fun waitForWhipConnectionLoss(
     connected: AtomicBoolean,
     peerConnection: () -> PeerConnection?,
     tickIntervalMs: Long,
-    onTick: () -> Unit
+    onTick: () -> Unit,
 ) {
     val loopDelayMs = 500L
     var elapsedSinceTickMs = 0L
@@ -632,7 +668,7 @@ private fun waitForWhipConnectionLoss(
 private class WhipConnectionObserver(
     private val iceGatherLatch: CountDownLatch,
     private val connected: AtomicBoolean,
-    private val onPublishing: () -> Unit
+    private val onPublishing: () -> Unit,
 ) : PeerConnection.Observer {
     override fun onSignalingChange(s: PeerConnection.SignalingState) = Unit
 
@@ -645,7 +681,8 @@ private class WhipConnectionObserver(
             }
             PeerConnection.IceConnectionState.FAILED,
             PeerConnection.IceConnectionState.DISCONNECTED,
-            PeerConnection.IceConnectionState.CLOSED -> {
+            PeerConnection.IceConnectionState.CLOSED,
+            -> {
                 connected.set(false)
             }
             else -> Unit
@@ -661,27 +698,37 @@ private class WhipConnectionObserver(
     }
 
     override fun onIceCandidate(c: IceCandidate) = Unit
+
     override fun onIceCandidatesRemoved(c: Array<out IceCandidate>) = Unit
+
     override fun onAddStream(s: MediaStream) = Unit
+
     override fun onRemoveStream(s: MediaStream) = Unit
+
     override fun onDataChannel(dc: DataChannel) = Unit
+
     override fun onRenegotiationNeeded() = Unit
-    override fun onAddTrack(r: RtpReceiver, ss: Array<out MediaStream>) = Unit
+
+    override fun onAddTrack(
+        r: RtpReceiver,
+        ss: Array<out MediaStream>,
+    ) = Unit
 }
 
 private class WhipOfferObserver(
     private val peerConnection: PeerConnection,
     private val offerLatch: CountDownLatch,
-    private val onLocalSdp: (SessionDescription) -> Unit
+    private val onLocalSdp: (SessionDescription) -> Unit,
 ) : SdpObserver {
     override fun onCreateSuccess(sdp: SessionDescription) {
-        val mungedSdp = SessionDescription(
-            sdp.type,
-            SdpUtils.mungeForH264(sdp.description)
-        )
+        val mungedSdp =
+            SessionDescription(
+                sdp.type,
+                SdpUtils.mungeForH264(sdp.description),
+            )
         peerConnection.setLocalDescription(
             WhipSetLocalDescriptionObserver(offerLatch) { onLocalSdp(mungedSdp) },
-            mungedSdp
+            mungedSdp,
         )
     }
 
@@ -691,12 +738,13 @@ private class WhipOfferObserver(
     }
 
     override fun onSetSuccess() = Unit
+
     override fun onSetFailure(s: String?) = Unit
 }
 
 private class WhipSetLocalDescriptionObserver(
     private val offerLatch: CountDownLatch,
-    private val onSet: () -> Unit
+    private val onSet: () -> Unit,
 ) : SdpObserver {
     override fun onSetSuccess() {
         onSet()
@@ -709,10 +757,13 @@ private class WhipSetLocalDescriptionObserver(
     }
 
     override fun onCreateSuccess(s: SessionDescription?) = Unit
+
     override fun onCreateFailure(s: String?) = Unit
 }
 
-private class WhipRemoteDescriptionObserver(private val answerLatch: CountDownLatch) : SdpObserver {
+private class WhipRemoteDescriptionObserver(
+    private val answerLatch: CountDownLatch,
+) : SdpObserver {
     override fun onSetSuccess() {
         answerLatch.countDown()
     }
@@ -723,40 +774,52 @@ private class WhipRemoteDescriptionObserver(private val answerLatch: CountDownLa
     }
 
     override fun onCreateSuccess(s: SessionDescription?) = Unit
+
     override fun onCreateFailure(s: String?) = Unit
 }
 
-private fun createFirstFrameGate(capturer: VideoCapturer): WhipFirstFrameGate? {
-    return when (capturer) {
-        is SharedVideoCapturerHandle -> WhipFirstFrameGate(
-            waiter = object : WhipFirstFrameWaiter {
-                override fun totalOutputFrames(): Long = capturer.totalOutputFrames()
-                override fun waitForOutputFrameAfter(frameCount: Long, timeoutMs: Long): Boolean {
-                    return capturer.waitForOutputFrameAfter(frameCount, timeoutMs)
-                }
-            },
-            unavailableMessage = "No DJI video frames available for WHIP publishing",
-            recoverBeforeRetry = { capturer.recoverCapture("no frames before WHIP offer") },
-            recoveryLogMessage = "No DJI video frames before WHIP offer; recovering capture"
-        )
+private fun createFirstFrameGate(capturer: VideoCapturer): WhipFirstFrameGate? =
+    when (capturer) {
+        is SharedVideoCapturerHandle ->
+            WhipFirstFrameGate(
+                waiter =
+                    object : WhipFirstFrameWaiter {
+                        override fun totalOutputFrames(): Long = capturer.totalOutputFrames()
+
+                        override fun waitForOutputFrameAfter(
+                            frameCount: Long,
+                            timeoutMs: Long,
+                        ): Boolean = capturer.waitForOutputFrameAfter(frameCount, timeoutMs)
+                    },
+                unavailableMessage = "No DJI video frames available for WHIP publishing",
+                recoverBeforeRetry = { capturer.recoverCapture("no frames before WHIP offer") },
+                recoveryLogMessage = "No DJI video frames before WHIP offer; recovering capture",
+            )
         else -> null
     }
-}
 
 internal interface WhipFirstFrameWaiter {
     fun totalOutputFrames(): Long
-    fun waitForOutputFrameAfter(frameCount: Long, timeoutMs: Long): Boolean
+
+    fun waitForOutputFrameAfter(
+        frameCount: Long,
+        timeoutMs: Long,
+    ): Boolean
 }
 
 internal class WhipFirstFrameGate(
     private val waiter: WhipFirstFrameWaiter,
     private val unavailableMessage: String,
     private val recoverBeforeRetry: (() -> Unit)? = null,
-    private val recoveryLogMessage: String? = null
+    private val recoveryLogMessage: String? = null,
 ) {
     fun totalOutputFrames(): Long = waiter.totalOutputFrames()
 
-    fun awaitFirstFrame(startingFrameCount: Long, firstTimeoutMs: Long, recoveryTimeoutMs: Long) {
+    fun awaitFirstFrame(
+        startingFrameCount: Long,
+        firstTimeoutMs: Long,
+        recoveryTimeoutMs: Long,
+    ) {
         if (waiter.waitForOutputFrameAfter(startingFrameCount, firstTimeoutMs)) return
         recoverBeforeRetry?.let { recover ->
             recoveryLogMessage?.let { Log.w("WhipPublisher", it) }
@@ -768,12 +831,11 @@ internal class WhipFirstFrameGate(
     }
 }
 
-private fun sleepBeforeReconnect(delayMs: Long): Boolean {
-    return try {
+private fun sleepBeforeReconnect(delayMs: Long): Boolean =
+    try {
         Thread.sleep(delayMs)
         true
     } catch (_: InterruptedException) {
         Thread.currentThread().interrupt()
         false
     }
-}

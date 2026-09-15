@@ -41,9 +41,8 @@ internal class FleetDeckController(
     /** This device's stable fleet identity. Cheap: consulted on every inbound datagram. */
     private val deviceIdProvider: () -> String,
     /** The local aircraft's current state, or null while identity is still resolving. */
-    private val beaconProvider: () -> FleetBeacon?
+    private val beaconProvider: () -> FleetBeacon?,
 ) {
-
     companion object {
         private const val TAG = "LyrebirdFleet"
 
@@ -61,12 +60,13 @@ internal class FleetDeckController(
     private var mapExpanded = false
     private var lastSharedAtMs: Long = 0L
 
-    private val refreshRunnable = object : Runnable {
-        override fun run() {
-            refresh()
-            mainHandler.postDelayed(this, REFRESH_INTERVAL_MS)
+    private val refreshRunnable =
+        object : Runnable {
+            override fun run() {
+                refresh()
+                mainHandler.postDelayed(this, REFRESH_INTERVAL_MS)
+            }
         }
-    }
 
     val isEnabled: Boolean
         get() = prefs.getBoolean(PREF_FLEET_ENABLED, true)
@@ -77,11 +77,15 @@ internal class FleetDeckController(
             return
         }
         if (link != null) return
-        val started = FleetLink(
-            activity.applicationContext, roster, deviceIdProvider, beaconProvider
-        ).apply {
-            onSettingsOffered = { offer -> fileOffer(offer) }
-        }
+        val started =
+            FleetLink(
+                activity.applicationContext,
+                roster,
+                deviceIdProvider,
+                beaconProvider,
+            ).apply {
+                onSettingsOffered = { offer -> fileOffer(offer) }
+            }
         started.start()
         link = started
         stripView?.onStripClicked = { showFleetDialog() }
@@ -159,7 +163,8 @@ internal class FleetDeckController(
      */
     fun showFleetDialog() {
         val view = currentView()
-        AlertDialog.Builder(activity)
+        AlertDialog
+            .Builder(activity)
             .setTitle("Fleet (${view.peerCount} peer${if (view.peerCount == 1) "" else "s"})")
             .setMessage(fleetPageText(view))
             .setPositiveButton("Close", null)
@@ -167,28 +172,29 @@ internal class FleetDeckController(
             .show()
     }
 
-    private fun fleetPageText(view: FleetView): String = buildString {
-        if (view.isEmpty) {
-            append("No other Lyrebird aircraft on this network.\n\n")
-            append("Every device beacons on ")
-            append("${FleetLink.MULTICAST_GROUP}:${FleetLink.MULTICAST_PORT}. ")
-            append("A peer missing here is usually on a different access point.")
-        } else {
-            append("AIRCRAFT\n")
-            view.peers.forEach { peer -> append(peerLine(peer)).append('\n') }
+    private fun fleetPageText(view: FleetView): String =
+        buildString {
+            if (view.isEmpty) {
+                append("No other Lyrebird aircraft on this network.\n\n")
+                append("Every device beacons on ")
+                append("${FleetLink.MULTICAST_GROUP}:${FleetLink.MULTICAST_PORT}. ")
+                append("A peer missing here is usually on a different access point.")
+            } else {
+                append("AIRCRAFT\n")
+                view.peers.forEach { peer -> append(peerLine(peer)).append('\n') }
+            }
+            if (view.alerts.isNotEmpty()) {
+                append("\nALERTS\n")
+                view.alerts.forEach { append("• ${it.summary}\n") }
+            }
+            if (view.conflicts.isNotEmpty()) {
+                append("\nCONFLICTS\n")
+                view.conflicts.forEach { append("• ${it.summary}\n") }
+            } else if (!view.isEmpty) {
+                append("\nNo configuration conflicts.")
+            }
+            appendProfileSection()
         }
-        if (view.alerts.isNotEmpty()) {
-            append("\nALERTS\n")
-            view.alerts.forEach { append("• ${it.summary}\n") }
-        }
-        if (view.conflicts.isNotEmpty()) {
-            append("\nCONFLICTS\n")
-            view.conflicts.forEach { append("• ${it.summary}\n") }
-        } else if (!view.isEmpty) {
-            append("\nNo configuration conflicts.")
-        }
-        appendProfileSection()
-    }
 
     /**
      * What the mesh has filed, and what this device has published.
@@ -216,46 +222,48 @@ internal class FleetDeckController(
 
     private fun peerLine(peer: FleetPeerView): String {
         val beacon = peer.peer.beacon
-        val state = when (peer.liveness) {
-            PeerLiveness.LIVE -> if (beacon.flying) "flying" else "on ground"
-            PeerLiveness.STALE -> "stale ${peer.ageMs / MILLIS_PER_SECOND}s"
-            PeerLiveness.LOST -> "lost ${peer.ageMs / MILLIS_PER_SECOND}s"
-        }
-        val range = peer.solution?.let {
-            " · ${FleetGeo.formatDistance(it.slantRangeM)} ${FleetGeo.compassPoint(it.bearingDeg)}" +
-                " · ${FleetGeo.formatRelativeAltitude(it.verticalSeparationM)}"
-        }.orEmpty()
+        val state =
+            when (peer.liveness) {
+                PeerLiveness.LIVE -> if (beacon.flying) "flying" else "on ground"
+                PeerLiveness.STALE -> "stale ${peer.ageMs / MILLIS_PER_SECOND}s"
+                PeerLiveness.LOST -> "lost ${peer.ageMs / MILLIS_PER_SECOND}s"
+            }
+        val range =
+            peer.solution
+                ?.let {
+                    " · ${FleetGeo.formatDistance(it.slantRangeM)} ${FleetGeo.compassPoint(it.bearingDeg)}" +
+                        " · ${FleetGeo.formatRelativeAltitude(it.verticalSeparationM)}"
+                }.orEmpty()
         val battery = if (beacon.batteryPercent >= 0) " · ${beacon.batteryPercent}%" else ""
-        val closing = peer.solution
-            ?.takeIf { it.level.atLeast(AdvisoryLevel.CAUTION) && it.timeToClosestApproachS != null }
-            ?.let { " · closing, CPA ${it.timeToClosestApproachS?.toInt()}s" }
-            .orEmpty()
+        val closing =
+            peer.solution
+                ?.takeIf { it.level.atLeast(AdvisoryLevel.CAUTION) && it.timeToClosestApproachS != null }
+                ?.let { " · closing, CPA ${it.timeToClosestApproachS?.toInt()}s" }
+                .orEmpty()
         return "• ${peer.displayName} (MAV ${beacon.systemId}) · $state$range$battery$closing"
     }
 
     private fun confirmShareProfile() {
         val peers = roster.peerCount()
         val keys = FleetSettingsShare.SHAREABLE_KEYS.size
-        AlertDialog.Builder(activity)
+        AlertDialog
+            .Builder(activity)
             .setTitle("Share profile with $peers aircraft?")
             .setMessage(
                 "Publishes this device's video and detection settings ($keys keys) to every " +
                     "peer, which saves them as a profile file.\n\n" +
                     "Nothing changes on any aircraft. Drone names, MAVLink IDs and all flight " +
-                    "settings are never shared."
-            )
-            .setPositiveButton("Share") { _, _ ->
+                    "settings are never shared.",
+            ).setPositiveButton("Share") { _, _ ->
                 shareProfileWithFleet()
                 // Reopen the page so the result is visible where the operator already is, rather
                 // than as a notification over the video feed.
                 showFleetDialog()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun clockTime(epochMs: Long): String =
-        SimpleDateFormat("HH:mm", Locale.US).format(Date(epochMs))
+    private fun clockTime(epochMs: Long): String = SimpleDateFormat("HH:mm", Locale.US).format(Date(epochMs))
 }
 
 private const val MILLIS_PER_SECOND = 1_000L

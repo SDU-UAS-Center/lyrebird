@@ -12,9 +12,11 @@ import kotlin.math.hypot
  * value that looks reasonable while being wrong by a sign or by the aircraft's heading.
  */
 internal object RoiControl {
-
     /** A gimbal aim expressed in the joint frame — angles relative to the aircraft body. */
-    data class Aim(val pitchDeg: Double, val yawDeg: Double)
+    data class Aim(
+        val pitchDeg: Double,
+        val yawDeg: Double,
+    )
 
     /**
      * The joint angles that point the camera at a fixed position on the ground.
@@ -38,7 +40,7 @@ internal object RoiControl {
         groundDistanceM: Double,
         altitudeAboveRoiM: Double,
         headingDeg: Double,
-        aircraftPitchDeg: Double
+        aircraftPitchDeg: Double,
     ): Aim {
         // Depression below the horizon, from the right triangle the aircraft and the point make.
         // atan2 rather than atan so that standing directly over the point gives -90 rather than a
@@ -47,12 +49,15 @@ internal object RoiControl {
         return Aim(
             // DJI's gimbal pitch is zero at the horizon and negative looking down.
             pitchDeg = -depressionDeg - aircraftPitchDeg,
-            yawDeg = normalizeAngle(bearingToRoiDeg - headingDeg)
+            yawDeg = normalizeAngle(bearingToRoiDeg - headingDeg),
         )
     }
 
     /** Horizontal distance and height difference, in the flat-earth approximation that is right at these ranges. */
-    fun groundDistanceM(northM: Double, eastM: Double): Double = hypot(northM, eastM)
+    fun groundDistanceM(
+        northM: Double,
+        eastM: Double,
+    ): Double = hypot(northM, eastM)
 
     /**
      * The rotation to ask of the gimbal this tick: the error, limited.
@@ -61,9 +66,16 @@ internal object RoiControl {
      * a large step is a slew that whips the picture. Dead-banded because the measured attitude is
      * noisy and a gimbal asked to correct a tenth of a degree ten times a second hunts audibly.
      */
-    fun step(errorDeg: Double, deadbandDeg: Double, maxStepDeg: Double): Double =
-        if (kotlin.math.abs(errorDeg) < deadbandDeg) 0.0
-        else errorDeg.coerceIn(-maxStepDeg, maxStepDeg)
+    fun step(
+        errorDeg: Double,
+        deadbandDeg: Double,
+        maxStepDeg: Double,
+    ): Double =
+        if (kotlin.math.abs(errorDeg) < deadbandDeg) {
+            0.0
+        } else {
+            errorDeg.coerceIn(-maxStepDeg, maxStepDeg)
+        }
 
     /** Wrap to -180..180 so an error never takes the long way round. */
     fun normalizeAngle(angle: Double): Double {

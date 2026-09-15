@@ -22,14 +22,11 @@ import kotlin.math.abs
 internal data class BlockedArc(
     /** Bearing from the nose of the measured obstacle, degrees body frame. */
     val bearingFromNoseDeg: Double,
-
     /** Half-width of the blocked arc, degrees. */
     val halfAngleDeg: Double,
-
     /** Wall-clock ms, from [android.os.SystemClock.elapsedRealtime], when the arc opens. */
-    val expiresAtElapsedMs: Long
+    val expiresAtElapsedMs: Long,
 ) {
-
     /** True when [atElapsedMs] is before the lockout ended; a stale arc blocks nothing. */
     fun isActive(atElapsedMs: Long): Boolean = atElapsedMs < expiresAtElapsedMs
 
@@ -39,12 +36,14 @@ internal data class BlockedArc(
      * [legBearingDeg] is body frame from the nose, the same frame every other bearing here uses —
      * compass bearings must be reduced to body frame by the caller before asking.
      */
-    fun contains(legBearingDeg: Double, atElapsedMs: Long): Boolean =
+    fun contains(
+        legBearingDeg: Double,
+        atElapsedMs: Long,
+    ): Boolean =
         isActive(atElapsedMs) &&
             abs(angularSeparationDeg(legBearingDeg, bearingFromNoseDeg)) <= halfAngleDeg
 
     companion object {
-
         /**
          * How wide the arc is around the measured obstacle bearing.
          *
@@ -75,13 +74,16 @@ internal data class BlockedArc(
          * Null for the vertical reasons (upward/downward): a climb blocked overhead says nothing
          * about any horizontal leg, and there is no yaw-bearing geometry to refuse reliably.
          */
-        fun fromBrake(decision: BrakeDecision, nowElapsedMs: Long): BlockedArc? {
+        fun fromBrake(
+            decision: BrakeDecision,
+            nowElapsedMs: Long,
+        ): BlockedArc? {
             if (!decision.shouldBrake || decision.reason != BrakeReason.HORIZONTAL) return null
             if (!decision.bearingFromNoseDeg.isFinite()) return null
             return BlockedArc(
                 bearingFromNoseDeg = decision.bearingFromNoseDeg,
                 halfAngleDeg = HALF_ANGLE_DEG,
-                expiresAtElapsedMs = nowElapsedMs + LOCKOUT_MS
+                expiresAtElapsedMs = nowElapsedMs + LOCKOUT_MS,
             )
         }
     }

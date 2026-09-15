@@ -5,8 +5,6 @@ import com.dji.wpmzsdk.common.data.Template
 import com.dji.wpmzsdk.manager.WPMZManager
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
-import dji.v5.common.callback.CommonCallbacks
-import dji.v5.common.error.IDJIError
 import dji.sdk.wpmz.value.mission.ActionGimbalRotateParam
 import dji.sdk.wpmz.value.mission.ActionTakePhotoParam
 import dji.sdk.wpmz.value.mission.WaylineActionGroup
@@ -40,6 +38,8 @@ import dji.sdk.wpmz.value.mission.WaylineWaypointTurnMode
 import dji.sdk.wpmz.value.mission.WaylineWaypointYawMode
 import dji.sdk.wpmz.value.mission.WaylineWaypointYawParam
 import dji.sdk.wpmz.value.mission.WaylineWaypointYawPathMode
+import dji.v5.common.callback.CommonCallbacks
+import dji.v5.common.error.IDJIError
 import dji.v5.manager.aircraft.waypoint3.WaylineExecutingInfoListener
 import dji.v5.manager.aircraft.waypoint3.WaypointMissionExecuteStateListener
 import dji.v5.manager.aircraft.waypoint3.WaypointMissionManager
@@ -60,7 +60,6 @@ import java.util.zip.ZipFile
  */
 @Suppress("TooManyFunctions")
 object WaylineMissionHelper {
-
     @Volatile
     var lastMissionNameNoExt: String = ""
         internal set
@@ -109,15 +108,16 @@ object WaylineMissionHelper {
         headingDeg: Double? = null,
         speedMps: Double? = null,
         roiTarget: WaylineLocationCoordinate3D? = null,
-        extraActions: List<WaylineActionInfo> = emptyList()
+        extraActions: List<WaylineActionInfo> = emptyList(),
     ): WaypointInfoModel {
         val waypointInfo = WaypointInfoModel()
         val waypoint = WaylineWaypoint()
 
-        val coordinate2D = WaylineLocationCoordinate2D().apply {
-            latitude = lat
-            longitude = lon
-        }
+        val coordinate2D =
+            WaylineLocationCoordinate2D().apply {
+                latitude = lat
+                longitude = lon
+            }
         waypoint.location = coordinate2D
         waypoint.waypointIndex = index
         waypoint.height = heightMeters
@@ -132,24 +132,28 @@ object WaylineMissionHelper {
         }
         waypoint.useGlobalTurnParam = true
 
-        val yawParam = when {
-            roiTarget != null -> WaylineWaypointYawParam().apply {
-                yawMode = WaylineWaypointYawMode.TOWARD_POI
-                poiLocation = roiTarget
-                yawPathMode = WaylineWaypointYawPathMode.FOLLOW_BAD_ARC
+        val yawParam =
+            when {
+                roiTarget != null ->
+                    WaylineWaypointYawParam().apply {
+                        yawMode = WaylineWaypointYawMode.TOWARD_POI
+                        poiLocation = roiTarget
+                        yawPathMode = WaylineWaypointYawPathMode.FOLLOW_BAD_ARC
+                    }
+                headingDeg != null ->
+                    WaylineWaypointYawParam().apply {
+                        yawMode = WaylineWaypointYawMode.FIXED
+                        enableYawAngle = true
+                        yawAngle = headingDeg
+                        yawPathMode = WaylineWaypointYawPathMode.FOLLOW_BAD_ARC
+                    }
+                else ->
+                    WaylineWaypointYawParam().apply {
+                        yawMode = WaylineWaypointYawMode.FOLLOW_WAYLINE
+                        yawPathMode = WaylineWaypointYawPathMode.FOLLOW_BAD_ARC
+                        poiLocation = WaylineLocationCoordinate3D(lat, lon, heightMeters)
+                    }
             }
-            headingDeg != null -> WaylineWaypointYawParam().apply {
-                yawMode = WaylineWaypointYawMode.FIXED
-                enableYawAngle = true
-                yawAngle = headingDeg
-                yawPathMode = WaylineWaypointYawPathMode.FOLLOW_BAD_ARC
-            }
-            else -> WaylineWaypointYawParam().apply {
-                yawMode = WaylineWaypointYawMode.FOLLOW_WAYLINE
-                yawPathMode = WaylineWaypointYawPathMode.FOLLOW_BAD_ARC
-                poiLocation = WaylineLocationCoordinate3D(lat, lon, heightMeters)
-            }
-        }
         waypoint.yawParam = yawParam
         waypoint.useGlobalYawParam = false
         waypoint.isWaylineWaypointYawParamSet = true
@@ -157,14 +161,15 @@ object WaylineMissionHelper {
         if (roiTarget != null) {
             // Point the gimbal at the same target driving yaw, continuously along the leg,
             // instead of the fixed nadir default below.
-            waypoint.gimbalHeadingParam = WaylineWaypointGimbalHeadingParam().apply {
-                headingMode = WaylineWaypointGimbalHeadingMode.TOWARD_POI
-            }
+            waypoint.gimbalHeadingParam =
+                WaylineWaypointGimbalHeadingParam().apply {
+                    headingMode = WaylineWaypointGimbalHeadingMode.TOWARD_POI
+                }
             waypoint.useGlobalGimbalHeadingParam = false
             waypoint.isWaylineWaypointGimbalHeadingParamSet = true
         } else {
             // Set gimbal pitch angle directly on the waypoint
-            waypoint.gimbalPitchAngle = -90.0  // Gimbal looking straight down during trajectory following
+            waypoint.gimbalPitchAngle = -90.0 // Gimbal looking straight down during trajectory following
 
             // Use global gimbal heading param (set at template level)
             waypoint.useGlobalGimbalHeadingParam = true
@@ -175,7 +180,7 @@ object WaylineMissionHelper {
         // Create gimbal rotate action to set pitch to -90 degrees (looking straight down)
         val gimbalRotateParam = ActionGimbalRotateParam()
         gimbalRotateParam.enablePitch = true
-        gimbalRotateParam.pitch = -90.0  // Look straight down
+        gimbalRotateParam.pitch = -90.0 // Look straight down
         gimbalRotateParam.rotateMode = WaylineGimbalActuatorRotateMode.ABSOLUTE_ANGLE
         gimbalRotateParam.payloadPositionIndex = 0
 
@@ -183,11 +188,12 @@ object WaylineMissionHelper {
         gimbalAction.actionType = WaylineActionType.GIMBAL_ROTATE
         gimbalAction.gimbalRotateParam = gimbalRotateParam
 
-        waypointInfo.actionInfos = when {
-            roiTarget != null -> ArrayList(extraActions)
-            extraActions.any { it.actionType == WaylineActionType.GIMBAL_ROTATE } -> ArrayList(extraActions)
-            else -> ArrayList(listOf(gimbalAction) + extraActions)
-        }
+        waypointInfo.actionInfos =
+            when {
+                roiTarget != null -> ArrayList(extraActions)
+                extraActions.any { it.actionType == WaylineActionType.GIMBAL_ROTATE } -> ArrayList(extraActions)
+                else -> ArrayList(listOf(gimbalAction) + extraActions)
+            }
         return waypointInfo
     }
 
@@ -202,7 +208,7 @@ object WaylineMissionHelper {
     fun createMissionConfig(
         finishAction: WaylineFinishedAction = WaylineFinishedAction.NO_ACTION,
         lostAction: WaylineExitOnRCLostAction = WaylineExitOnRCLostAction.GO_BACK,
-        securityTakeOffHeightM: Double = 20.0
+        securityTakeOffHeightM: Double = 20.0,
     ): WaylineMissionConfig {
         val c = WaylineMissionConfig()
         c.flyToWaylineMode = WaylineFlyToWaylineMode.SAFELY
@@ -217,9 +223,7 @@ object WaylineMissionHelper {
         return c
     }
 
-    private fun createTemplateWaypointInfo(
-        waypointInfoModels: List<WaypointInfoModel>
-    ): WaylineTemplateWaypointInfo {
+    private fun createTemplateWaypointInfo(waypointInfoModels: List<WaypointInfoModel>): WaylineTemplateWaypointInfo {
         val waypoints = waypointInfoModels.map { it.waylineWaypoint }
         val info = WaylineTemplateWaypointInfo()
         info.waypoints = waypoints
@@ -238,52 +242,56 @@ object WaylineMissionHelper {
         info.useStraightLine = true
         info.isTemplateGlobalTurnModeSet = true
 
-        val poi = if (waypoints.isNotEmpty()) {
-            val first = waypoints.first()
-            first.yawParam?.poiLocation
-                ?: WaylineLocationCoordinate3D(first.location.latitude, first.location.longitude, first.height)
-        } else WaylineLocationCoordinate3D(0.0, 0.0, 0.0)
+        val poi =
+            if (waypoints.isNotEmpty()) {
+                val first = waypoints.first()
+                first.yawParam?.poiLocation
+                    ?: WaylineLocationCoordinate3D(first.location.latitude, first.location.longitude, first.height)
+            } else {
+                WaylineLocationCoordinate3D(0.0, 0.0, 0.0)
+            }
 
-        val yawParam = WaylineWaypointYawParam().apply {
-            yawMode = WaylineWaypointYawMode.FOLLOW_WAYLINE
-            poiLocation = poi
-        }
+        val yawParam =
+            WaylineWaypointYawParam().apply {
+                yawMode = WaylineWaypointYawMode.FOLLOW_WAYLINE
+                poiLocation = poi
+            }
         info.globalYawParam = yawParam
         info.isTemplateGlobalYawParamSet = true
-        
+
         // Set global gimbal heading param to look straight down (-90 degrees pitch)
         val globalGimbalParam = WaylineWaypointGimbalHeadingParam()
         globalGimbalParam.headingMode = WaylineWaypointGimbalHeadingMode.find(0)
-        globalGimbalParam.pitchAngle = -90.0  // Look straight down
+        globalGimbalParam.pitchAngle = -90.0 // Look straight down
         info.globalGimbalHeadingParam = globalGimbalParam
         info.isTemplateGlobalGimbalHeadingParamSet = true
-        
-        info.pitchMode = WaylineWaypointPitchMode.USE_POINT_SETTING  // Use point setting to apply gimbal pitch
+
+        info.pitchMode = WaylineWaypointPitchMode.USE_POINT_SETTING // Use point setting to apply gimbal pitch
         return info
     }
 
     // Transform waypoint actions into proper action groups for KMZ
     private fun transformActionsToGroups(waypointInfoModels: List<WaypointInfoModel>): ArrayList<WaylineActionGroup> {
         val actionGroups = ArrayList<WaylineActionGroup>()
-        
+
         for (i in waypointInfoModels.indices) {
             val actionInfos = waypointInfoModels[i].actionInfos
             if (actionInfos.isNotEmpty()) {
                 val actionGroup = WaylineActionGroup()
-                
+
                 // Set trigger to execute when reaching waypoint
                 val trigger = WaylineActionTrigger()
                 trigger.setTriggerType(WaylineActionTriggerType.REACH_POINT)
                 actionGroup.setTrigger(trigger)
-                
+
                 actionGroup.groupId = actionGroups.size
                 actionGroup.startIndex = i
                 actionGroup.endIndex = i
                 actionGroup.setActions(actionInfos)
-                
+
                 // Build action tree structure
                 val nodeLists = ArrayList<WaylineActionNodeList>()
-                
+
                 // Root node
                 val root = WaylineActionNodeList()
                 val treeNodes = ArrayList<WaylineActionTreeNode>()
@@ -293,7 +301,7 @@ object WaylineMissionHelper {
                 treeNodes.add(rootNode)
                 root.setNodes(treeNodes)
                 nodeLists.add(root)
-                
+
                 // Children nodes (one for each action)
                 val children = WaylineActionNodeList()
                 val childrenNodeList = ArrayList<WaylineActionTreeNode>()
@@ -305,12 +313,12 @@ object WaylineMissionHelper {
                 }
                 children.setNodes(childrenNodeList)
                 nodeLists.add(children)
-                
+
                 actionGroup.setNodeLists(nodeLists)
                 actionGroups.add(actionGroup)
             }
         }
-        
+
         return actionGroups
     }
 
@@ -343,43 +351,48 @@ object WaylineMissionHelper {
                 endIndex++
             }
 
-            val photoAction = WaylineActionInfo().apply {
-                actionType = WaylineActionType.TAKE_PHOTO
-                takePhotoParam = ActionTakePhotoParam().apply { payloadPositionIndex = 0 }
-            }
-            val trigger = WaylineActionTrigger().apply {
-                triggerType = WaylineActionTriggerType.MULTIPLE_DISTANCE
-                distanceInterval = interval
-            }
-            val actionGroup = WaylineActionGroup().apply {
-                groupId = -1 // assigned by the caller, once all groups are known
-                startIndex = index
-                endIndex = endIndex
-                setActions(listOf(photoAction))
-                setTrigger(trigger)
-            }
+            val photoAction =
+                WaylineActionInfo().apply {
+                    actionType = WaylineActionType.TAKE_PHOTO
+                    takePhotoParam = ActionTakePhotoParam().apply { payloadPositionIndex = 0 }
+                }
+            val trigger =
+                WaylineActionTrigger().apply {
+                    triggerType = WaylineActionTriggerType.MULTIPLE_DISTANCE
+                    distanceInterval = interval
+                }
+            val actionGroup =
+                WaylineActionGroup().apply {
+                    groupId = -1 // assigned by the caller, once all groups are known
+                    startIndex = index
+                    endIndex = endIndex
+                    setActions(listOf(photoAction))
+                    setTrigger(trigger)
+                }
 
             // Same tree shape the reach-point groups use: a SEQUENCE root over one LEAF.
-            val root = WaylineActionNodeList().apply {
-                setNodes(
-                    arrayListOf(
-                        WaylineActionTreeNode().apply {
-                            nodeType = WaylineActionsRelationType.SEQUENCE
-                            childrenNum = 1
-                        }
+            val root =
+                WaylineActionNodeList().apply {
+                    setNodes(
+                        arrayListOf(
+                            WaylineActionTreeNode().apply {
+                                nodeType = WaylineActionsRelationType.SEQUENCE
+                                childrenNum = 1
+                            },
+                        ),
                     )
-                )
-            }
-            val children = WaylineActionNodeList().apply {
-                setNodes(
-                    arrayListOf(
-                        WaylineActionTreeNode().apply {
-                            nodeType = WaylineActionsRelationType.LEAF
-                            actionIndex = 0
-                        }
+                }
+            val children =
+                WaylineActionNodeList().apply {
+                    setNodes(
+                        arrayListOf(
+                            WaylineActionTreeNode().apply {
+                                nodeType = WaylineActionsRelationType.LEAF
+                                actionIndex = 0
+                            },
+                        ),
                     )
-                )
-            }
+                }
             actionGroup.setNodeLists(arrayListOf(root, children))
             actionGroups.add(actionGroup)
             index = endIndex + 1
@@ -389,17 +402,18 @@ object WaylineMissionHelper {
 
     fun createTemplate(
         waypointInfoModels: List<WaypointInfoModel>,
-        trajectorySpeed: Double = 5.0
+        trajectorySpeed: Double = 5.0,
     ): Template {
         val t = Template()
         t.waypointInfo = createTemplateWaypointInfo(waypointInfoModels)
 
-        val cp = WaylineCoordinateParam().apply {
-            coordinateMode = WaylineCoordinateMode.WGS84
-            positioningType = WaylinePositioningType.GPS
-            isWaylinePositioningTypeSet = true
-            altitudeMode = WaylineAltitudeMode.RELATIVE_TO_START_POINT
-        }
+        val cp =
+            WaylineCoordinateParam().apply {
+                coordinateMode = WaylineCoordinateMode.WGS84
+                positioningType = WaylinePositioningType.GPS
+                isWaylinePositioningTypeSet = true
+                altitudeMode = WaylineAltitudeMode.RELATIVE_TO_START_POINT
+            }
         t.coordinateParam = cp
         t.useGlobalTransitionalSpeed = true
         t.autoFlightSpeed = trajectorySpeed
@@ -416,7 +430,10 @@ object WaylineMissionHelper {
                     val text = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
                     val regex = Regex("<\\s*wpml:waylineId\\s*>\\s*([0-9]+)\\s*<\\s*/\\s*wpml:waylineId\\s*>")
                     regex.findAll(text).forEach { m ->
-                        m.groupValues.getOrNull(1)?.toIntOrNull()?.let { result.add(it) }
+                        m.groupValues
+                            .getOrNull(1)
+                            ?.toIntOrNull()
+                            ?.let { result.add(it) }
                     }
                 }
             }
@@ -433,20 +450,20 @@ object WaylineMissionHelper {
         missionName: String = generateTrajectoryName(),
         trajectorySpeed: Double = 5.0,
         finishAction: WaylineFinishedAction = WaylineFinishedAction.GO_HOME,
-        lostAction: WaylineExitOnRCLostAction = WaylineExitOnRCLostAction.GO_BACK
+        lostAction: WaylineExitOnRCLostAction = WaylineExitOnRCLostAction.GO_BACK,
     ): String {
         WPMZManager.getInstance().init(ContextUtil.getContext())
-        
+
         val waylineMission = createWaylineMission()
         val missionConfig = createMissionConfig(finishAction, lostAction)
         val template = createTemplate(waypointInfoModels, trajectorySpeed)
-        
+
         val kmzOutPath = kmzDir + missionName + ".kmz"
         WPMZManager.getInstance().generateKMZFile(kmzOutPath, waylineMission, missionConfig, template)
-        
+
         lastMissionNameNoExt = missionName
         lastMissionKmzPath = kmzOutPath
-        
+
         return kmzOutPath
     }
 
@@ -457,23 +474,28 @@ object WaylineMissionHelper {
         kmzPath: String,
         onProgress: ((Double) -> Unit)? = null,
         onSuccess: () -> Unit,
-        onFailure: (IDJIError) -> Unit
+        onFailure: (IDJIError) -> Unit,
     ) {
         lastMissionKmzPath = kmzPath
         lastMissionNameNoExt = File(kmzPath).nameWithoutExtension
-        
-        WaypointMissionManager.getInstance().pushKMZFileToAircraft(kmzPath, object :
-            CommonCallbacks.CompletionCallbackWithProgress<Double> {
-            override fun onProgressUpdate(progress: Double) {
-                onProgress?.invoke(progress)
-            }
-            override fun onSuccess() {
-                onSuccess()
-            }
-            override fun onFailure(error: IDJIError) {
-                onFailure(error)
-            }
-        })
+
+        WaypointMissionManager.getInstance().pushKMZFileToAircraft(
+            kmzPath,
+            object :
+                CommonCallbacks.CompletionCallbackWithProgress<Double> {
+                override fun onProgressUpdate(progress: Double) {
+                    onProgress?.invoke(progress)
+                }
+
+                override fun onSuccess() {
+                    onSuccess()
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    onFailure(error)
+                }
+            },
+        )
     }
 
     /**
@@ -483,21 +505,27 @@ object WaylineMissionHelper {
         missionNameNoExt: String = lastMissionNameNoExt,
         kmzPath: String = lastMissionKmzPath,
         onSuccess: () -> Unit,
-        onFailure: (IDJIError) -> Unit
+        onFailure: (IDJIError) -> Unit,
     ) {
         if (missionNameNoExt.isEmpty()) {
-            val noMissionError = object : IDJIError {
-                override fun errorType() = null
-                override fun errorCode() = "NO_MISSION"
-                override fun description() = "No mission loaded"
-                override fun isError(p0: String?) = true
-                override fun innerCode() = "NO_MISSION"
-                override fun hint() = "Load a mission first"
-            }
+            val noMissionError =
+                object : IDJIError {
+                    override fun errorType() = null
+
+                    override fun errorCode() = "NO_MISSION"
+
+                    override fun description() = "No mission loaded"
+
+                    override fun isError(p0: String?) = true
+
+                    override fun innerCode() = "NO_MISSION"
+
+                    override fun hint() = "Load a mission first"
+                }
             onFailure(noMissionError)
             return
         }
-        
+
         val ids = extractWaylineIdsFromKmz(kmzPath).ifEmpty { arrayListOf(0) }
         WaypointMissionManager.getInstance().startMission(
             missionNameNoExt,
@@ -506,10 +534,11 @@ object WaylineMissionHelper {
                 override fun onSuccess() {
                     onSuccess()
                 }
+
                 override fun onFailure(error: IDJIError) {
                     onFailure(error)
                 }
-            }
+            },
         )
     }
 
@@ -518,17 +547,20 @@ object WaylineMissionHelper {
      */
     fun pauseMission(
         onSuccess: () -> Unit,
-        onFailure: (IDJIError) -> Unit
+        onFailure: (IDJIError) -> Unit,
     ) {
-        WaypointMissionManager.getInstance().pauseMission(object :
-            CommonCallbacks.CompletionCallback {
-            override fun onSuccess() {
-                onSuccess()
-            }
-            override fun onFailure(error: IDJIError) {
-                onFailure(error)
-            }
-        })
+        WaypointMissionManager.getInstance().pauseMission(
+            object :
+                CommonCallbacks.CompletionCallback {
+                override fun onSuccess() {
+                    onSuccess()
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    onFailure(error)
+                }
+            },
+        )
     }
 
     /**
@@ -537,21 +569,25 @@ object WaylineMissionHelper {
     fun stopMission(
         missionNameNoExt: String = lastMissionNameNoExt,
         onSuccess: () -> Unit,
-        onFailure: (IDJIError) -> Unit
+        onFailure: (IDJIError) -> Unit,
     ) {
         if (missionNameNoExt.isEmpty()) {
             pauseMission(onSuccess, onFailure)
             return
         }
-        WaypointMissionManager.getInstance().stopMission(missionNameNoExt, object :
-            CommonCallbacks.CompletionCallback {
-            override fun onSuccess() {
-                onSuccess()
-            }
-            override fun onFailure(error: IDJIError) {
-                onFailure(error)
-            }
-        })
+        WaypointMissionManager.getInstance().stopMission(
+            missionNameNoExt,
+            object :
+                CommonCallbacks.CompletionCallback {
+                override fun onSuccess() {
+                    onSuccess()
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    onFailure(error)
+                }
+            },
+        )
     }
 
     /**
@@ -566,11 +602,12 @@ object WaylineMissionHelper {
         userWaypoints: List<Triple<Double, Double, Double>>,
         trajectorySpeed: Double,
         onProgress: (Int) -> Unit = {},
-        onFinished: (Boolean) -> Unit = {}
+        onFinished: (Boolean) -> Unit = {},
     ) {
-        val wpModels = userWaypoints.mapIndexed { idx, t ->
-            createWaypointFromLatLon(t.first, t.second, t.third, idx)
-        }
+        val wpModels =
+            userWaypoints.mapIndexed { idx, t ->
+                createWaypointFromLatLon(t.first, t.second, t.third, idx)
+            }
         navigateWaylineMissionNative(wpModels, createMissionConfig(), trajectorySpeed, onProgress, onFinished)
     }
 
@@ -587,7 +624,7 @@ object WaylineMissionHelper {
         missionConfig: WaylineMissionConfig,
         autoFlightSpeed: Double,
         onProgress: (Int) -> Unit = {},
-        onFinished: (Boolean) -> Unit = {}
+        onFinished: (Boolean) -> Unit = {},
     ) {
         if (waypointInfoModels.size < 2) {
             ToastUtils.showToast("Need at least 2 waypoints")
@@ -600,8 +637,9 @@ object WaylineMissionHelper {
                 lastMissionNameNoExt,
                 object : CommonCallbacks.CompletionCallback {
                     override fun onSuccess() { /* no-op */ }
+
                     override fun onFailure(error: IDJIError) { /* ignore */ }
-                }
+                },
             )
         }
 
@@ -617,33 +655,39 @@ object WaylineMissionHelper {
         lastMissionNameNoExt = missionName
         lastMissionKmzPath = kmzOutPath
 
-        WaypointMissionManager.getInstance().pushKMZFileToAircraft(kmzOutPath, object :
-            CommonCallbacks.CompletionCallbackWithProgress<Double> {
-            override fun onProgressUpdate(progress: Double) {
-                Log.d("WaylineMissionHelper", "Push KMZ progress: $progress")
-            }
-            override fun onSuccess() {
-                val ids = extractWaylineIdsFromKmz(kmzOutPath).ifEmpty { arrayListOf(0) }
-                WaypointMissionManager.getInstance().startMission(
-                    lastMissionNameNoExt,
-                    ids,
-                    object : CommonCallbacks.CompletionCallback {
-                        override fun onSuccess() {
-                            ToastUtils.showToast("Mission started: $lastMissionNameNoExt")
-                            watchNativeMissionExecution(onProgress, onFinished)
-                        }
-                        override fun onFailure(error: IDJIError) {
-                            ToastUtils.showToast("Start mission failed: ${error.description()}")
-                            onFinished(false)
-                        }
-                    }
-                )
-            }
-            override fun onFailure(error: IDJIError) {
-                ToastUtils.showToast("Push KMZ failed: ${error.description()}")
-                onFinished(false)
-            }
-        })
+        WaypointMissionManager.getInstance().pushKMZFileToAircraft(
+            kmzOutPath,
+            object :
+                CommonCallbacks.CompletionCallbackWithProgress<Double> {
+                override fun onProgressUpdate(progress: Double) {
+                    Log.d("WaylineMissionHelper", "Push KMZ progress: $progress")
+                }
+
+                override fun onSuccess() {
+                    val ids = extractWaylineIdsFromKmz(kmzOutPath).ifEmpty { arrayListOf(0) }
+                    WaypointMissionManager.getInstance().startMission(
+                        lastMissionNameNoExt,
+                        ids,
+                        object : CommonCallbacks.CompletionCallback {
+                            override fun onSuccess() {
+                                ToastUtils.showToast("Mission started: $lastMissionNameNoExt")
+                                watchNativeMissionExecution(onProgress, onFinished)
+                            }
+
+                            override fun onFailure(error: IDJIError) {
+                                ToastUtils.showToast("Start mission failed: ${error.description()}")
+                                onFinished(false)
+                            }
+                        },
+                    )
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    ToastUtils.showToast("Push KMZ failed: ${error.description()}")
+                    onFinished(false)
+                }
+            },
+        )
     }
 
     /**
@@ -653,35 +697,47 @@ object WaylineMissionHelper {
      * most recently started native mission — the same assumption [navigateTrajectoryNative]
      * already makes by stopping any prior one before pushing a new KMZ.
      */
-    private fun watchNativeMissionExecution(onProgress: (Int) -> Unit, onFinished: (Boolean) -> Unit) {
+    private fun watchNativeMissionExecution(
+        onProgress: (Int) -> Unit,
+        onFinished: (Boolean) -> Unit,
+    ) {
         lateinit var stateListener: WaypointMissionExecuteStateListener
         val infoListener = WaylineExecutingInfoListener { info -> onProgress(info.currentWaypointIndex) }
-        stateListener = WaypointMissionExecuteStateListener { state ->
-            when (state) {
-                WaypointMissionExecuteState.FINISHED -> {
-                    WaypointMissionManager.getInstance().removeWaypointMissionExecuteStateListener(stateListener)
-                    WaypointMissionManager.getInstance().removeWaylineExecutingInfoListener(infoListener)
-                    onFinished(true)
+        stateListener =
+            WaypointMissionExecuteStateListener { state ->
+                when (state) {
+                    WaypointMissionExecuteState.FINISHED -> {
+                        WaypointMissionManager.getInstance().removeWaypointMissionExecuteStateListener(stateListener)
+                        WaypointMissionManager.getInstance().removeWaylineExecutingInfoListener(infoListener)
+                        onFinished(true)
+                    }
+                    WaypointMissionExecuteState.INTERRUPTED, WaypointMissionExecuteState.DISCONNECTED,
+                    WaypointMissionExecuteState.NOT_SUPPORTED,
+                    -> {
+                        WaypointMissionManager.getInstance().removeWaypointMissionExecuteStateListener(stateListener)
+                        WaypointMissionManager.getInstance().removeWaylineExecutingInfoListener(infoListener)
+                        onFinished(false)
+                    }
+                    else -> { /* UPLOADING/PREPARING/ENTER_WAYLINE/EXECUTING/etc — still in flight */ }
                 }
-                WaypointMissionExecuteState.INTERRUPTED, WaypointMissionExecuteState.DISCONNECTED,
-                WaypointMissionExecuteState.NOT_SUPPORTED -> {
-                    WaypointMissionManager.getInstance().removeWaypointMissionExecuteStateListener(stateListener)
-                    WaypointMissionManager.getInstance().removeWaylineExecutingInfoListener(infoListener)
-                    onFinished(false)
-                }
-                else -> { /* UPLOADING/PREPARING/ENTER_WAYLINE/EXECUTING/etc — still in flight */ }
             }
-        }
         WaypointMissionManager.getInstance().addWaypointMissionExecuteStateListener(stateListener)
         WaypointMissionManager.getInstance().addWaylineExecutingInfoListener(infoListener)
     }
 
     fun endMission() {
         if (lastMissionNameNoExt.isEmpty()) {
-            WaypointMissionManager.getInstance().pauseMission(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { ToastUtils.showToast("Mission paused") }
-                override fun onFailure(error: IDJIError) { ToastUtils.showToast("No mission to stop") }
-            })
+            WaypointMissionManager.getInstance().pauseMission(
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        ToastUtils.showToast("Mission paused")
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        ToastUtils.showToast("No mission to stop")
+                    }
+                },
+            )
             return
         }
         WaypointMissionManager.getInstance().stopMission(
@@ -690,10 +746,11 @@ object WaylineMissionHelper {
                 override fun onSuccess() {
                     ToastUtils.showToast("Mission stopped: $lastMissionNameNoExt")
                 }
+
                 override fun onFailure(error: IDJIError) {
                     ToastUtils.showToast("Stop mission failed: ${error.description()}")
                 }
-            }
+            },
         )
     }
 }

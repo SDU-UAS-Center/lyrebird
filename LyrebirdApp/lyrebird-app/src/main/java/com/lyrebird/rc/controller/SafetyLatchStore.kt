@@ -29,7 +29,10 @@ internal class SafetyLatchStore(
         }
     }
 
-    override fun write(aircraftSerial: String, authority: ControlAuthority.Authority) {
+    override fun write(
+        aircraftSerial: String,
+        authority: ControlAuthority.Authority,
+    ) {
         preferences.edit().putString(keyFor(aircraftSerial), authority.name).commit()
     }
 

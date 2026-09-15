@@ -61,27 +61,31 @@ internal class DjiSurfaceH264Encoder(
     private val width: Int,
     private val height: Int,
     private val bitrateBps: Int,
-    private val fps: Int
+    private val fps: Int,
 ) : VideoEncoder {
-
     private companion object {
         const val TAG = "DjiSurfaceH264Encoder"
         const val MIME_TYPE = "video/avc"
+
         // 1s instead of 2s: recovers faster from loss/motion-induced quality dips, and shortens
         // RTSP/WHEP join time without meaningfully increasing bitrate on mostly-static footage.
         const val I_FRAME_INTERVAL_S = 1
         const val DRAIN_TIMEOUT_US = 10_000L
         const val DIAGNOSTIC_LOG_INTERVAL = 100L
+
         // Roomier queue so source bursts (high close-range DJI bitrate, sudden motion) do not
         // immediately overflow. Combined with drop-oldest semantics below this is what stops
         // the multi-second collapse loops seen on flights 2-3.
         const val PENDING_OUTPUT_CAPACITY = 8
+
         // Consecutive overflows before a sync frame is requested -- see deliverEncodedFrame.
         const val OVERFLOW_SYNC_STREAK = 10
+
         // Give up waiting for a keyframe after this many consecutive dependent-frame drops
         // (roughly 3s at 30fps): flight 4 showed waitingForKeyFrame stuck for minutes despite a
         // 1s I-interval, silently dropping ~17fps the whole time.
         const val KEYFRAME_WAIT_MAX_DROPS = 90
+
         // VBR quality target (0-100): high for crisp fast motion, bounded by the sender cap.
         const val VBR_QUALITY = 90
     }
@@ -98,6 +102,7 @@ internal class DjiSurfaceH264Encoder(
     private var deliverTask: ScheduledFuture<*>? = null
     private val isRunning = AtomicBoolean(false)
     private val encodeCalls = AtomicLong(0)
+
     // Encode-thread only (single writer); window for the periodic encode() call-rate log.
     private var rateWindowCalls = 0
     private var rateWindowStartNs = System.nanoTime()
@@ -108,8 +113,11 @@ internal class DjiSurfaceH264Encoder(
     private val callbackFrames = AtomicLong(0)
     private val droppedFrames = AtomicLong(0)
     private val pendingOutputs = ArrayBlockingQueue<PendingEncodedFrame>(PENDING_OUTPUT_CAPACITY)
+
     @Volatile private var waitingForKeyFrame = false
+
     @Volatile private var codecConfig: ByteBuffer? = null
+
     // Drain-thread only (single writer), so a plain field is safe.
     private var overflowStreak = 0
     private var keyframeWaitDrops = 0
@@ -118,44 +126,48 @@ internal class DjiSurfaceH264Encoder(
         val buffer: ByteBuffer,
         val size: Int,
         val isKeyFrame: Boolean,
-        val presentationTimeUs: Long
+        val presentationTimeUs: Long,
     )
 
-    override fun initEncode(settings: VideoEncoder.Settings?, callback: VideoEncoder.Callback?): VideoCodecStatus {
+    override fun initEncode(
+        settings: VideoEncoder.Settings?,
+        callback: VideoEncoder.Callback?,
+    ): VideoCodecStatus {
         this.callback = callback
         return runCatching {
-            val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
-                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL_S)
-                // VBR instead of the default CBR: motion gets more bits instead of blurring at a
-                // flat ceiling, and static scenes get fewer. Flight 1 showed CBR starving motion
-                // (blurry while moving, sharp when static) and, with frame-drops allowed, silently
-                // dropping frames under pressure -- the likely source of the phone-vs-relay fps gap.
-                setInteger(
-                    MediaFormat.KEY_BITRATE_MODE,
-                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
-                )
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    // VBR quality target: without it VBR defaults to a mediocre quality trade;
-                    // a high value gives fast motion the bits it needs to stay crisp.
-                    setInteger(MediaFormat.KEY_QUALITY, VBR_QUALITY)
+            val format =
+                MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                    setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
+                    setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL_S)
+                    // VBR instead of the default CBR: motion gets more bits instead of blurring at a
+                    // flat ceiling, and static scenes get fewer. Flight 1 showed CBR starving motion
+                    // (blurry while moving, sharp when static) and, with frame-drops allowed, silently
+                    // dropping frames under pressure -- the likely source of the phone-vs-relay fps gap.
+                    setInteger(
+                        MediaFormat.KEY_BITRATE_MODE,
+                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        // VBR quality target: without it VBR defaults to a mediocre quality trade;
+                        // a high value gives fast motion the bits it needs to stay crisp.
+                        setInteger(MediaFormat.KEY_QUALITY, VBR_QUALITY)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        setInteger(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps)
+                    }
+                    // No B-frames: they add latency and motion smear; DJI's own stream is P-only.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                    }
+                    // Explicitly disallow the encoder dropping frames: with VBR there is no reason to
+                    // trade temporal fidelity for a fixed bitrate. (KEY_ALLOW_FRAME_DROP defaults to 0
+                    // and was previously set to 1 -- flight data showed exactly that drop signature.)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        setInteger(MediaFormat.KEY_ALLOW_FRAME_DROP, 0)
+                    }
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    setInteger(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps)
-                }
-                // No B-frames: they add latency and motion smear; DJI's own stream is P-only.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-                }
-                // Explicitly disallow the encoder dropping frames: with VBR there is no reason to
-                // trade temporal fidelity for a fixed bitrate. (KEY_ALLOW_FRAME_DROP defaults to 0
-                // and was previously set to 1 -- flight data showed exactly that drop signature.)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    setInteger(MediaFormat.KEY_ALLOW_FRAME_DROP, 0)
-                }
-            }
             val mediaCodec = MediaCodec.createEncoderByType(MIME_TYPE)
             mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val surface = mediaCodec.createInputSurface()
@@ -164,7 +176,11 @@ internal class DjiSurfaceH264Encoder(
             // The zero-copy handoff: DJI's decoder writes camera frames directly onto the
             // encoder's own input surface. Unverified against real hardware -- see class doc.
             cameraStreamManager.putCameraStreamSurface(
-                cameraIndex, surface, width, height, ICameraStreamManager.ScaleType.CENTER_INSIDE
+                cameraIndex,
+                surface,
+                width,
+                height,
+                ICameraStreamManager.ScaleType.CENTER_INSIDE,
             )
             Log.i(TAG, "Camera surface registered on $cameraIndex")
 
@@ -172,7 +188,7 @@ internal class DjiSurfaceH264Encoder(
             inputSurface = surface
             startDrainThread(mediaCodec)
             startDeliverThread()
-            Log.i(TAG, "Started: ${width}x${height}@${fps}fps ${bitrateBps}bps VBR on $cameraIndex")
+            Log.i(TAG, "Started: ${width}x$height@${fps}fps ${bitrateBps}bps VBR on $cameraIndex")
             VideoCodecStatus.OK
         }.getOrElse { error ->
             Log.e(TAG, "initEncode failed: ${error.message}", error)
@@ -182,10 +198,11 @@ internal class DjiSurfaceH264Encoder(
 
     private fun startDrainThread(mediaCodec: MediaCodec) {
         isRunning.set(true)
-        drainThread = Thread({ drainLoop(mediaCodec) }, "DjiSurfaceH264Drain").apply {
-            isDaemon = true
-            start()
-        }
+        drainThread =
+            Thread({ drainLoop(mediaCodec) }, "DjiSurfaceH264Drain").apply {
+                isDaemon = true
+                start()
+            }
     }
 
     /**
@@ -195,34 +212,40 @@ internal class DjiSurfaceH264Encoder(
      * queue drained regardless of engine cadence (libwebrtc supports asynchronous encoders).
      */
     private fun startDeliverThread() {
-        val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
-            Thread(runnable, "DjiSurfaceH264Deliver").apply { isDaemon = true }
-        }
+        val executor =
+            Executors.newSingleThreadScheduledExecutor { runnable ->
+                Thread(runnable, "DjiSurfaceH264Deliver").apply { isDaemon = true }
+            }
         deliverExecutor = executor
-        deliverTask = executor.scheduleAtFixedRate(
-            ::deliverNextFrame, 0L, 1_000_000L / fps, TimeUnit.MICROSECONDS
-        )
+        deliverTask =
+            executor.scheduleAtFixedRate(
+                ::deliverNextFrame,
+                0L,
+                1_000_000L / fps,
+                TimeUnit.MICROSECONDS,
+            )
     }
 
     private fun deliverNextFrame() {
         if (!isRunning.get()) return
         val cb = callback ?: return
         val pending = pendingOutputs.poll() ?: return
-        val encodedImage = EncodedImage.builder()
-            .setBuffer(pending.buffer) { }
-            .setEncodedWidth(width)
-            .setEncodedHeight(height)
-            .setCaptureTimeNs(pending.presentationTimeUs * 1000)
-            .setFrameType(
-                if (pending.isKeyFrame) {
-                    EncodedImage.FrameType.VideoFrameKey
-                } else {
-                    EncodedImage.FrameType.VideoFrameDelta
-                }
-            )
-            .setRotation(0)
-            .setQp(null)
-            .createEncodedImage()
+        val encodedImage =
+            EncodedImage
+                .builder()
+                .setBuffer(pending.buffer) { }
+                .setEncodedWidth(width)
+                .setEncodedHeight(height)
+                .setCaptureTimeNs(pending.presentationTimeUs * 1000)
+                .setFrameType(
+                    if (pending.isKeyFrame) {
+                        EncodedImage.FrameType.VideoFrameKey
+                    } else {
+                        EncodedImage.FrameType.VideoFrameDelta
+                    },
+                ).setRotation(0)
+                .setQp(null)
+                .createEncodedImage()
         cb.onEncodedFrame(encodedImage, VideoEncoder.CodecSpecificInfo())
         encodedImage.release()
         val callbackCount = callbackFrames.incrementAndGet()
@@ -230,7 +253,7 @@ internal class DjiSurfaceH264Encoder(
             Log.i(
                 TAG,
                 "Delivered encoded output: callback=$callbackCount size=${pending.size} " +
-                    "keyframe=${pending.isKeyFrame} codecPtsUs=${pending.presentationTimeUs}"
+                    "keyframe=${pending.isKeyFrame} codecPtsUs=${pending.presentationTimeUs}",
             )
         }
     }
@@ -249,15 +272,17 @@ internal class DjiSurfaceH264Encoder(
     private fun drainLoop(mediaCodec: MediaCodec) {
         val bufferInfo = MediaCodec.BufferInfo()
         while (isRunning.get()) {
-            val outputIndex = runCatching { mediaCodec.dequeueOutputBuffer(bufferInfo, DRAIN_TIMEOUT_US) }
-                .getOrNull() ?: break
+            val outputIndex =
+                runCatching { mediaCodec.dequeueOutputBuffer(bufferInfo, DRAIN_TIMEOUT_US) }
+                    .getOrNull() ?: break
             when (outputIndex) {
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     Log.i(TAG, "Output format changed: ${mediaCodec.outputFormat}")
                     continue
                 }
                 MediaCodec.INFO_TRY_AGAIN_LATER,
-                MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> continue
+                MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED,
+                -> continue
             }
             if (outputIndex < 0) continue
 
@@ -270,16 +295,20 @@ internal class DjiSurfaceH264Encoder(
         }
     }
 
-    private fun deliverEncodedFrame(outputBuffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo) {
+    private fun deliverEncodedFrame(
+        outputBuffer: ByteBuffer,
+        bufferInfo: MediaCodec.BufferInfo,
+    ) {
         if (bufferInfo.size <= 0) return
         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
             val count = codecConfigBuffers.incrementAndGet()
             outputBuffer.position(bufferInfo.offset)
             outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-            codecConfig = ByteBuffer.allocateDirect(bufferInfo.size).apply {
-                put(outputBuffer)
-                rewind()
-            }
+            codecConfig =
+                ByteBuffer.allocateDirect(bufferInfo.size).apply {
+                    put(outputBuffer)
+                    rewind()
+                }
             Log.i(TAG, "Codec config buffer received: size=${bufferInfo.size} count=$count")
             return
         }
@@ -304,13 +333,14 @@ internal class DjiSurfaceH264Encoder(
         val outputSize = bufferInfo.size + if (isKeyFrame) config?.capacity() ?: 0 else 0
         outputBuffer.position(bufferInfo.offset)
         outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-        val copy = ByteBuffer.allocateDirect(outputSize).apply {
-            if (isKeyFrame && config != null) {
-                put(config.duplicate().apply { rewind() })
+        val copy =
+            ByteBuffer.allocateDirect(outputSize).apply {
+                if (isKeyFrame && config != null) {
+                    put(config.duplicate().apply { rewind() })
+                }
+                put(outputBuffer)
+                rewind()
             }
-            put(outputBuffer)
-            rewind()
-        }
         val frameCount = encodedFrames.incrementAndGet()
         encodedBytes.addAndGet(outputSize.toLong())
         val pending = PendingEncodedFrame(copy, outputSize, isKeyFrame, bufferInfo.presentationTimeUs)
@@ -327,7 +357,7 @@ internal class DjiSurfaceH264Encoder(
                 overflowStreak = 0
                 Log.w(
                     TAG,
-                    "Queue overflow; evicted backlog for keyframe: dropped=${droppedFrames.get()}"
+                    "Queue overflow; evicted backlog for keyframe: dropped=${droppedFrames.get()}",
                 )
             } else {
                 // Drop the OLDEST frame instead of clearing the queue: a source burst must not
@@ -354,7 +384,7 @@ internal class DjiSurfaceH264Encoder(
         Log.d(
             TAG,
             "Queued encoded output: frame=$frameCount size=$outputSize keyframe=$isKeyFrame " +
-                "configPrepended=${isKeyFrame && config != null}"
+                "configPrepended=${isKeyFrame && config != null}",
         )
     }
 
@@ -375,7 +405,10 @@ internal class DjiSurfaceH264Encoder(
      * is delivered asynchronously by the delivery thread (see [startDeliverThread]), so the
      * engine's encode() cadence no longer limits throughput.
      */
-    override fun encode(frame: VideoFrame?, info: VideoEncoder.EncodeInfo?): VideoCodecStatus {
+    override fun encode(
+        frame: VideoFrame?,
+        info: VideoEncoder.EncodeInfo?,
+    ): VideoCodecStatus {
         val callCount = encodeCalls.incrementAndGet()
         if (callCount == 1L) {
             Log.i(TAG, "First WebRTC encode call received; encoded output is delivered asynchronously")
@@ -412,13 +445,16 @@ internal class DjiSurfaceH264Encoder(
             TAG,
             "Released: encodeCalls=${encodeCalls.get()} outputBuffers=${outputBuffers.get()} " +
                 "codecConfig=${codecConfigBuffers.get()} encodedFrames=${encodedFrames.get()} " +
-            "encodedBytes=${encodedBytes.get()} callbackFrames=${callbackFrames.get()} " +
-                "droppedFrames=${droppedFrames.get()}"
+                "encodedBytes=${encodedBytes.get()} callbackFrames=${callbackFrames.get()} " +
+                "droppedFrames=${droppedFrames.get()}",
         )
         return VideoCodecStatus.OK
     }
 
-    override fun setRateAllocation(allocation: VideoEncoder.BitrateAllocation?, framerate: Int): VideoCodecStatus {
+    override fun setRateAllocation(
+        allocation: VideoEncoder.BitrateAllocation?,
+        framerate: Int,
+    ): VideoCodecStatus {
         val bitrate = allocation?.sum ?: return VideoCodecStatus.OK
         return applyBitrate(bitrate)
     }
@@ -428,10 +464,11 @@ internal class DjiSurfaceH264Encoder(
         return applyBitrate(bitrate)
     }
 
-    private fun applyBitrate(bitrateBps: Int): VideoCodecStatus = runCatching {
-        codec?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrateBps) })
-        VideoCodecStatus.OK
-    }.getOrElse { VideoCodecStatus.ERROR }
+    private fun applyBitrate(bitrateBps: Int): VideoCodecStatus =
+        runCatching {
+            codec?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrateBps) })
+            VideoCodecStatus.OK
+        }.getOrElse { VideoCodecStatus.ERROR }
 
     override fun getScalingSettings(): VideoEncoder.ScalingSettings = VideoEncoder.ScalingSettings.OFF
 
@@ -457,24 +494,24 @@ internal class DjiSurfaceH264EncoderFactory(
     private val width: Int,
     private val height: Int,
     private val bitrateBps: Int,
-    private val fps: Int
+    private val fps: Int,
 ) : VideoEncoderFactory {
-    override fun createEncoder(info: VideoCodecInfo?): VideoEncoder =
-        DjiSurfaceH264Encoder(cameraIndex, width, height, bitrateBps, fps)
+    override fun createEncoder(info: VideoCodecInfo?): VideoEncoder = DjiSurfaceH264Encoder(cameraIndex, width, height, bitrateBps, fps)
 
     override fun getSupportedCodecs(): Array<VideoCodecInfo> =
         arrayOf(
             VideoCodecInfo("H264", h264Params("640c1f")),
-            VideoCodecInfo("H264", h264Params("42e01f"))
+            VideoCodecInfo("H264", h264Params("42e01f")),
         )
 
     override fun getImplementations(): Array<VideoCodecInfo> = supportedCodecs
 
-    private fun h264Params(profileLevelId: String): Map<String, String> = mapOf(
-        "level-asymmetry-allowed" to "1",
-        "packetization-mode" to "1",
-        "profile-level-id" to profileLevelId
-    )
+    private fun h264Params(profileLevelId: String): Map<String, String> =
+        mapOf(
+            "level-asymmetry-allowed" to "1",
+            "packetization-mode" to "1",
+            "profile-level-id" to profileLevelId,
+        )
 
     override fun getEncoderSelector(): VideoEncoderFactory.VideoEncoderSelector? = null
 }

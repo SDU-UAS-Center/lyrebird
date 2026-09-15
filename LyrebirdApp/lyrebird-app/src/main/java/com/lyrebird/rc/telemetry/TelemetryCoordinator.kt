@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package com.lyrebird.rc.telemetry
 
 /**
@@ -15,9 +17,13 @@ class TelemetryCoordinator {
 
     // Position & Attitude
     @Volatile var speed: VelocityNedMps? = null
+
     @Volatile var heading: Double = 0.0
+
     @Volatile var attitude: AttitudeDeg? = null
+
     @Volatile var location: GeoPosition? = null
+
     @Volatile var altitudeASL: Double = 0.0
 
     /**
@@ -29,43 +35,61 @@ class TelemetryCoordinator {
      * would be a compatibility break to fix an ambiguity that has not bitten.
      */
     @Volatile var altitudeAGL: Double = 0.0
+
     @Volatile var gimbalAttitude: AttitudeDeg? = null
+
     @Volatile var gimbalJointAttitude: AttitudeDeg? = null
 
     // Battery & Satellites
     @Volatile var batteryLevel: Int = -1
+
     @Volatile var satelliteCount: Int = -1
 
     // Flight & Mission
     @Volatile var homeLocation: GeoPoint? = null
+
     @Volatile var distanceToHome: Double = 0.0
+
     @Volatile var waypointReached: Boolean = false
+
     @Volatile var intermediaryWaypointReached: Boolean = false
+
     @Volatile var yawReached: Boolean = false
+
     @Volatile var altitudeReached: Boolean = false
+
     @Volatile var isRecording: Boolean = false
+
     @Volatile var homeSet: Boolean = false
+
     @Volatile var flightMode: String = "UNKNOWN"
+
     @Volatile var isManualOverrideActive: Boolean = false
 
     // Command sequence ids: which command the matching *Reached flag refers to. The ground
     // station compares these against the seq returned when it issued the command, so a stale
     // latch from a previous command is not mistaken for the current one.
     @Volatile var waypointSeq: Long = 0
+
     @Volatile var yawSeq: Long = 0
+
     @Volatile var altitudeSeq: Long = 0
 
     // Take-off readiness, derived aircraft-side from the DJI system-status banner.
     @Volatile var readyToTakeoff: Boolean = false
+
     @Volatile var takeoffBlockReason: String = "UNKNOWN"
 
     // Last laser-rangefinder target fix, or null when the LRF has not locked a target.
     @Volatile var lrfTarget: GeoPoint3D? = null
-    
+
     // Camera Zoom
     @Volatile var zoomFl: Int = -1
+
     @Volatile var hybridFl: Int = -1
+
     @Volatile var opticalFl: Int = -1
+
     @Volatile var zoomRatio: Double = 1.0
 
     /**
@@ -76,51 +100,80 @@ class TelemetryCoordinator {
      * to authenticate sends the configured user/password to the media server itself.
      */
     @Volatile var streamRequiresAuth: Boolean = false
-    
+
     // Battery assessment info
     @Volatile var remainingFlightTime: Int = 0
+
     @Volatile var timeNeededToGoHome: Int = 0
+
     @Volatile var timeNeededToLand: Int = 0
+
     @Volatile var totalTime: Int = 0
+
     @Volatile var maxRadiusCanFlyAndGoHome: Int = 0
+
     @Volatile var remainingCharge: Int = 0
+
     @Volatile var batteryNeededToLand: Int = 0
+
     @Volatile var batteryNeededToGoHome: Int = 0
+
     @Volatile var seriousLowBatteryThreshold: Int = 0
+
     @Volatile var lowBatteryThreshold: Int = 0
-    
+
     // Phone location & status
     @Volatile var phoneLatitude: Double = 0.0
+
     @Volatile var phoneLongitude: Double = 0.0
+
     @Volatile var phoneHeading: Double = 0.0
+
     @Volatile var phonePressure: Float = 0.0f
+
     @Volatile var phoneBattery: Int = -1
+
     @Volatile var wifiRssi: Int = -100
-    
+
     // WebRTC Metrics
     @Volatile var webRtcMetricsJson: String = "{}"
-    
+
     // Detections status
     @Volatile var isDetectionsEnabled: Boolean = false
+
     @Volatile var isAutoSensingActive: Boolean = false
+
     @Volatile var edgeDetectionActive: Boolean = false
+
     @Volatile var detectionSource: String = "none"
+
     @Volatile var selectedDetectionSource: String = "none"
+
     @Volatile var detectionMenuLabel: String = "None"
+
     @Volatile var edgeModelName: String? = null
+
     @Volatile var edgeLabelsName: String? = null
+
     @Volatile var edgeConfidenceThreshold: Float? = null
+
     @Volatile var detectedTargetsJson: String = "[]"
+
     @Volatile var detectedTargetsSize: Int = 0
 
     // Streaming Config
     @Volatile var streamingMode: String = "webrtc"
+
     @Volatile var rtspPort: Int = 8554
+
     @Volatile var rtspUser: String = ""
+
     @Volatile var rtmpUrl: String = ""
+
     @Volatile var consumptionPath: String = ""
 
     @Volatile private var cachedTelemetryJson: String = "{}"
+
     @Volatile private var cachedGapTelemetryJson: String = "{}"
 
     fun getTelemetryJson(): String = cachedTelemetryJson
@@ -133,20 +186,19 @@ class TelemetryCoordinator {
         cachedGapTelemetryJson = buildGapTelemetryJson()
     }
 
-    private fun escapeJson(value: String): String {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"")
-    }
+    private fun escapeJson(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     fun detectionTelemetryJson(): String {
         val thresholdJson = edgeConfidenceThreshold?.toString() ?: "null"
         val modelJson = edgeModelName?.let { "\"${escapeJson(it)}\"" } ?: "null"
         val labelsJson = edgeLabelsName?.let { "\"${escapeJson(it)}\"" } ?: "null"
-        val active = when (detectionSource) {
-            "none" -> false
-            "dji_onboard" -> isAutoSensingActive
-            "yolo_on_phone" -> edgeDetectionActive
-            else -> false
-        }
+        val active =
+            when (detectionSource) {
+                "none" -> false
+                "dji_onboard" -> isAutoSensingActive
+                "yolo_on_phone" -> edgeDetectionActive
+                else -> false
+            }
         return """{"source":"$detectionSource","selectedSource":"$selectedDetectionSource","label":"$detectionMenuLabel","enabled":$isDetectionsEnabled,"active":$active,"count":$detectedTargetsSize,"model":$modelJson,"labels":$labelsJson,"confidenceThreshold":$thresholdJson,"targets":$detectedTargetsJson}"""
     }
 
@@ -155,7 +207,9 @@ class TelemetryCoordinator {
         // telemetry port, so it describes the configuration without disclosing the credential.
         // The bridge that pulls the RTSP stream holds the password on its own side (see the
         // video_test webapp), exactly as any other media client would.
-        return """{"mode":"$streamingMode","rtspPort":$rtspPort,"rtspUser":"${escapeJson(rtspUser)}","requiresAuth":$streamRequiresAuth,"rtmpUrl":"${escapeJson(rtmpUrl)}","consumptionPath":"${escapeJson(consumptionPath)}"}"""
+        return """{"mode":"$streamingMode","rtspPort":$rtspPort,"rtspUser":"${escapeJson(
+            rtspUser,
+        )}","requiresAuth":$streamRequiresAuth,"rtmpUrl":"${escapeJson(rtmpUrl)}","consumptionPath":"${escapeJson(consumptionPath)}"}"""
     }
 
     fun buildTelemetryJson(): String {

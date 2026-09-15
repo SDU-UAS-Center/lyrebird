@@ -13,54 +13,47 @@ data class FrameMetadata(
     val frameNumber: Long,
     val timestampNs: Long,
     val captureTimeMs: Long,
-
     // Drone identification
     val droneName: String,
-
     // Frame properties
     val frameWidth: Int,
     val frameHeight: Int,
-
     // Aircraft position
     val latitude: Double,
     val longitude: Double,
-    val altitudeASL: Double,      // Above sea level (GPS altitude)
-    val altitudeAGL: Double,      // Above ground level (relative to takeoff)
-    
+    val altitudeASL: Double, // Above sea level (GPS altitude)
+    val altitudeAGL: Double, // Above ground level (relative to takeoff)
     // Aircraft attitude (degrees)
     val aircraftPitch: Double,
     val aircraftRoll: Double,
-    val aircraftYaw: Double,      // Heading / compass direction
-
+    val aircraftYaw: Double, // Heading / compass direction
     // Gimbal attitude (degrees)
     val gimbalPitch: Double,
     val gimbalRoll: Double,
     val gimbalYaw: Double,
-
     // Velocity (m/s)
-    val velocityX: Double,        // North
-    val velocityY: Double,        // East
-    val velocityZ: Double,        // Down (positive = descending)
-
+    val velocityX: Double, // North
+    val velocityY: Double, // East
+    val velocityZ: Double, // Down (positive = descending)
     // Additional info
     val satelliteCount: Int,
     val batteryPercent: Int,
     val isFlying: Boolean,
-    val flightMode: String,          // DJI flight mode string (e.g. "GPS", "ATTI", "SPORT", "TRIPOD")
-    val readyToTakeoff: Boolean = false,          // Derived: aircraft ready to take off / arm
-    val takeoffBlockReason: String = "UNKNOWN",   // FCMotorStartFailureError name, "NONE", or "UNKNOWN"
-    val isManualOverrideActive: Boolean = false,  // True when pilot has taken manual RC control
-    val detectedTargets: List<DetectedTarget> = emptyList(),  // AI-detected targets from selected detector
+    val flightMode: String, // DJI flight mode string (e.g. "GPS", "ATTI", "SPORT", "TRIPOD")
+    val readyToTakeoff: Boolean = false, // Derived: aircraft ready to take off / arm
+    val takeoffBlockReason: String = "UNKNOWN", // FCMotorStartFailureError name, "NONE", or "UNKNOWN"
+    val isManualOverrideActive: Boolean = false, // True when pilot has taken manual RC control
+    val detectedTargets: List<DetectedTarget> = emptyList(), // AI-detected targets from selected detector
     val detectionSource: String = "none",
     val detectionActive: Boolean = false,
     val detectionModel: String? = null,
-    val detectionConfidenceThreshold: Float? = null
+    val detectionConfidenceThreshold: Float? = null,
 ) {
     /**
      * Convert to JSON for transmission via WebRTC data channel
      */
-    fun toJson(): JSONObject {
-        return JSONObject().apply {
+    fun toJson(): JSONObject =
+        JSONObject().apply {
             // Frame info
             put("frameNumber", frameNumber)
             put("timestampNs", timestampNs)
@@ -99,16 +92,18 @@ data class FrameMetadata(
             put("takeoffBlockReason", takeoffBlockReason)
             put("isManualOverrideActive", isManualOverrideActive)
             put("detectedTargets", JSONArray(detectedTargets.map { it.toJson() }))
-            put("detections", JSONObject().apply {
-                put("source", detectionSource)
-                put("active", detectionActive)
-                put("count", detectedTargets.size)
-                put("model", detectionModel)
-                put("confidenceThreshold", detectionConfidenceThreshold)
-                put("targets", JSONArray(detectedTargets.map { it.toJson() }))
-            })
+            put(
+                "detections",
+                JSONObject().apply {
+                    put("source", detectionSource)
+                    put("active", detectionActive)
+                    put("count", detectedTargets.size)
+                    put("model", detectionModel)
+                    put("confidenceThreshold", detectionConfidenceThreshold)
+                    put("targets", JSONArray(detectedTargets.map { it.toJson() }))
+                },
+            )
         }
-    }
 
     /**
      * Convert to compact JSON string for transmission
@@ -152,27 +147,27 @@ data class FrameMetadata(
                 detectionSource = parseDetectionSource(obj),
                 detectionActive = obj.detections()?.optBoolean("active") ?: false,
                 detectionModel = obj.detections()?.optString("model")?.takeIf { it.isNotBlank() },
-                detectionConfidenceThreshold = parseDetectionConfidenceThreshold(obj)
+                detectionConfidenceThreshold = parseDetectionConfidenceThreshold(obj),
             )
         }
 
         private fun parseDetectedTargets(obj: JSONObject): List<DetectedTarget> {
-            val targets = obj.optJSONArray("detectedTargets")
-                ?: obj.detections()?.optJSONArray("targets")
-                ?: JSONArray()
+            val targets =
+                obj.optJSONArray("detectedTargets")
+                    ?: obj.detections()?.optJSONArray("targets")
+                    ?: JSONArray()
             return DetectedTarget.fromJsonArray(targets)
         }
 
-        private fun parseDetectionSource(obj: JSONObject): String {
-            return obj.detections()?.optString("source") ?: obj.optString("detectionSource", "none")
-        }
+        private fun parseDetectionSource(obj: JSONObject): String =
+            obj.detections()?.optString("source") ?: obj.optString("detectionSource", "none")
 
-        private fun parseDetectionConfidenceThreshold(obj: JSONObject): Float? {
-            return obj.detections()
+        private fun parseDetectionConfidenceThreshold(obj: JSONObject): Float? =
+            obj
+                .detections()
                 ?.optDouble("confidenceThreshold")
                 ?.takeIf { it.isFinite() }
                 ?.toFloat()
-        }
 
         private fun JSONObject.detections(): JSONObject? = optJSONObject("detections")
     }

@@ -36,9 +36,8 @@ class PeriodicKeyframeEncoderFactory(
      * without recreating the encoder. Defaults to always-on, i.e. today's unconditional behavior,
      * so any other caller of this class is unaffected.
      */
-    private val shouldForce: () -> Boolean = { true }
+    private val shouldForce: () -> Boolean = { true },
 ) : VideoEncoderFactory {
-
     override fun createEncoder(info: VideoCodecInfo?): VideoEncoder? {
         val encoder = delegate.createEncoder(info) ?: return null
         if (keyframeIntervalMs <= 0) return encoder
@@ -50,8 +49,7 @@ class PeriodicKeyframeEncoderFactory(
 
     override fun getImplementations(): Array<VideoCodecInfo> = delegate.implementations
 
-    override fun getEncoderSelector(): VideoEncoderFactory.VideoEncoderSelector? =
-        delegate.encoderSelector
+    override fun getEncoderSelector(): VideoEncoderFactory.VideoEncoderSelector? = delegate.encoderSelector
 
     companion object {
         private const val TAG = "PeriodicKeyframe"
@@ -84,12 +82,14 @@ class PeriodicKeyframeEncoderFactory(
 private class PeriodicKeyframeEncoder(
     private val delegate: VideoEncoder,
     private val keyframeIntervalMs: Long,
-    private val shouldForce: () -> Boolean = { true }
+    private val shouldForce: () -> Boolean = { true },
 ) : VideoEncoder {
-
     private var lastKeyframeAtNanos = 0L
 
-    override fun encode(frame: VideoFrame?, info: VideoEncoder.EncodeInfo?): VideoCodecStatus {
+    override fun encode(
+        frame: VideoFrame?,
+        info: VideoEncoder.EncodeInfo?,
+    ): VideoCodecStatus {
         val forced = maybeForceKeyframe(info)
         return delegate.encode(frame, forced)
     }
@@ -122,7 +122,7 @@ private class PeriodicKeyframeEncoder(
 
     override fun initEncode(
         settings: VideoEncoder.Settings?,
-        callback: VideoEncoder.Callback?
+        callback: VideoEncoder.Callback?,
     ): VideoCodecStatus {
         // Reset so the first frame after (re)configuration is a keyframe.
         lastKeyframeAtNanos = 0L
@@ -133,16 +133,14 @@ private class PeriodicKeyframeEncoder(
 
     override fun setRateAllocation(
         allocation: VideoEncoder.BitrateAllocation?,
-        framerate: Int
+        framerate: Int,
     ): VideoCodecStatus = delegate.setRateAllocation(allocation, framerate)
 
-    override fun setRates(parameters: VideoEncoder.RateControlParameters?): VideoCodecStatus =
-        delegate.setRates(parameters)
+    override fun setRates(parameters: VideoEncoder.RateControlParameters?): VideoCodecStatus = delegate.setRates(parameters)
 
     override fun getScalingSettings(): VideoEncoder.ScalingSettings = delegate.scalingSettings
 
-    override fun getResolutionBitrateLimits(): Array<VideoEncoder.ResolutionBitrateLimits> =
-        delegate.resolutionBitrateLimits
+    override fun getResolutionBitrateLimits(): Array<VideoEncoder.ResolutionBitrateLimits> = delegate.resolutionBitrateLimits
 
     override fun getImplementationName(): String = delegate.implementationName
 

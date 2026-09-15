@@ -39,7 +39,7 @@ object WebRTCPeerFactory {
     fun getFactory(
         context: Context,
         cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
-        options: WebRTCMediaOptions = WebRTCMediaOptions()
+        options: WebRTCMediaOptions = WebRTCMediaOptions(),
     ): PeerConnectionFactory {
         synchronized(factoryLock) {
             if (factory == null) {
@@ -62,21 +62,25 @@ object WebRTCPeerFactory {
     private fun initializeFactory(
         context: Context,
         cameraIndex: ComponentIndexType,
-        options: WebRTCMediaOptions
+        options: WebRTCMediaOptions,
     ) {
-        val initOptions = PeerConnectionFactory.InitializationOptions.builder(context)
-            .setEnableInternalTracer(true)
-            .setFieldTrials("WebRTC-H264HighProfile/Enabled/")
-            .createInitializationOptions()
+        val initOptions =
+            PeerConnectionFactory.InitializationOptions
+                .builder(context)
+                .setEnableInternalTracer(true)
+                .setFieldTrials("WebRTC-H264HighProfile/Enabled/")
+                .createInitializationOptions()
         PeerConnectionFactory.initialize(initOptions)
 
         val rootEglBase = getEglBase()
 
-        factory = PeerConnectionFactory.builder()
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(rootEglBase.eglBaseContext))
-            .setVideoEncoderFactory(createVideoEncoderFactory(context, rootEglBase, cameraIndex, options))
-            .setOptions(PeerConnectionFactory.Options())
-            .createPeerConnectionFactory()
+        factory =
+            PeerConnectionFactory
+                .builder()
+                .setVideoDecoderFactory(DefaultVideoDecoderFactory(rootEglBase.eglBaseContext))
+                .setVideoEncoderFactory(createVideoEncoderFactory(context, rootEglBase, cameraIndex, options))
+                .setOptions(PeerConnectionFactory.Options())
+                .createPeerConnectionFactory()
 
         Log.d(TAG, "PeerConnectionFactory initialized")
     }
@@ -85,21 +89,22 @@ object WebRTCPeerFactory {
         context: Context,
         rootEglBase: EglBase,
         cameraIndex: ComponentIndexType,
-        options: WebRTCMediaOptions
+        options: WebRTCMediaOptions,
     ): VideoEncoderFactory {
-        val useSurfaceEncoder = context
-            .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
-            .getBoolean(PREF_USE_DJI_SURFACE_H264_ENCODER, false)
+        val useSurfaceEncoder =
+            context
+                .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
+                .getBoolean(PREF_USE_DJI_SURFACE_H264_ENCODER, false)
         if (useSurfaceEncoder) {
             val width = if (options.usesSourceResolution) 1920 else options.videoResolutionWidth
             val height = if (options.usesSourceResolution) 1080 else options.videoResolutionHeight
-            Log.w(TAG, "Using experimental DJI surface H264 encoder: ${width}x${height}@${options.fps}")
+            Log.w(TAG, "Using experimental DJI surface H264 encoder: ${width}x$height@${options.fps}")
             return DjiSurfaceH264EncoderFactory(
                 cameraIndex = cameraIndex,
                 width = width,
                 height = height,
                 bitrateBps = options.senderBitrateBps(),
-                fps = options.fps
+                fps = options.fps,
             )
         }
 
@@ -109,7 +114,7 @@ object WebRTCPeerFactory {
         return PeriodicKeyframeEncoderFactory(
             DefaultVideoEncoderFactory(rootEglBase.eglBaseContext, false, true),
             keyframeIntervalMs = resolveKeyframeIntervalMs(context),
-            shouldForce = { activeConsumerWatcher?.shouldForceKeyframe ?: true }
+            shouldForce = { activeConsumerWatcher?.shouldForceKeyframe ?: true },
         )
     }
 

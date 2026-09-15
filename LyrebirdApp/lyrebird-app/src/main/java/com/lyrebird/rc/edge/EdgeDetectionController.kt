@@ -13,16 +13,15 @@ data class EdgeDetectionConfig(
     val modelUri: Uri?,
     val labels: List<String>,
     val sourceLabel: String,
-    val confidenceThreshold: Float = 0.25f
+    val confidenceThreshold: Float = 0.25f,
 )
 
 class EdgeDetectionController(
     context: Context,
     private val config: EdgeDetectionConfig,
     private val onTargets: (List<DetectedTarget>) -> Unit,
-    private val onMetrics: (EdgeDetectionMetrics) -> Unit = {}
+    private val onMetrics: (EdgeDetectionMetrics) -> Unit = {},
 ) : SharedDJIFrameSource.EdgeDetectionFrameListener {
-
     companion object {
         private const val TAG = "EdgeDetectionController"
         private const val TARGET_FPS = 5
@@ -32,9 +31,13 @@ class EdgeDetectionController(
     private val appContext = context.applicationContext
     private val executor = Executors.newSingleThreadExecutor()
     private val busy = AtomicBoolean(false)
+
     @Volatile private var detector: YoloTfliteDetector? = null
+
     @Volatile private var running = false
+
     @Volatile private var lastInferenceNs = 0L
+
     @Volatile private var status = "loading"
     private var receivedInWindow = 0L
     private var inferredInWindow = 0L
@@ -52,7 +55,7 @@ class EdgeDetectionController(
         val averageInferenceMs: Double = 0.0,
         val targetCount: Int = 0,
         val confidenceThreshold: Float = 0.25f,
-        val lastError: String? = null
+        val lastError: String? = null,
     ) {
         fun compactLabel(): String {
             val errorLabel = lastError?.takeIf { it.isNotBlank() }?.let { " err" } ?: ""
@@ -82,12 +85,13 @@ class EdgeDetectionController(
         emitImmediateMetrics(targetCount = 0)
         executor.execute {
             runCatching {
-                detector = YoloTfliteDetector.fromUri(
-                    context = appContext,
-                    modelUri = selectedModelUri,
-                    labels = config.labels,
-                    confidenceThreshold = config.confidenceThreshold
-                )
+                detector =
+                    YoloTfliteDetector.fromUri(
+                        context = appContext,
+                        modelUri = selectedModelUri,
+                        labels = config.labels,
+                        confidenceThreshold = config.confidenceThreshold,
+                    )
                 status = "ready"
                 emitImmediateMetrics(targetCount = 0)
                 Log.i(TAG, "Edge detector loaded: $selectedModelUri")
@@ -150,7 +154,11 @@ class EdgeDetectionController(
         return false
     }
 
-    private fun runNv21Inference(frameCopy: ByteArray, width: Int, height: Int) {
+    private fun runNv21Inference(
+        frameCopy: ByteArray,
+        width: Int,
+        height: Int,
+    ) {
         val inferenceStartNs = System.nanoTime()
         var targetCount = 0
         try {
@@ -172,7 +180,11 @@ class EdgeDetectionController(
         }
     }
 
-    fun onYuv420Image(image: Image, timestampNs: Long, onComplete: () -> Unit = {}) {
+    fun onYuv420Image(
+        image: Image,
+        timestampNs: Long,
+        onComplete: () -> Unit = {},
+    ) {
         if (!startInferenceWindow(timestampNs)) {
             image.close()
             onComplete()
@@ -204,7 +216,10 @@ class EdgeDetectionController(
         }
     }
 
-    private fun maybeEmitWindowMetrics(nowNs: Long, targetCount: Int) {
+    private fun maybeEmitWindowMetrics(
+        nowNs: Long,
+        targetCount: Int,
+    ) {
         val elapsedNs = nowNs - lastMetricsAtNs
         if (elapsedNs < 1_000_000_000L) return
         val elapsedSeconds = elapsedNs / 1_000_000_000.0
@@ -220,7 +235,7 @@ class EdgeDetectionController(
                 averageInferenceMs = averageInferenceMs,
                 targetCount = targetCount,
                 confidenceThreshold = config.confidenceThreshold,
-            )
+            ),
         )
         receivedInWindow = 0L
         inferredInWindow = 0L
@@ -229,15 +244,18 @@ class EdgeDetectionController(
         lastMetricsAtNs = nowNs
     }
 
-    private fun emitImmediateMetrics(targetCount: Int, lastError: String? = null) {
+    private fun emitImmediateMetrics(
+        targetCount: Int,
+        lastError: String? = null,
+    ) {
         onMetrics(
             EdgeDetectionMetrics(
                 status = status,
                 source = config.sourceLabel,
                 targetCount = targetCount,
                 confidenceThreshold = config.confidenceThreshold,
-                lastError = lastError
-            )
+                lastError = lastError,
+            ),
         )
     }
 }

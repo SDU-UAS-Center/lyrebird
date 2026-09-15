@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicLong
 @Suppress("TooManyFunctions")
 class SharedDJIFrameSource(
     private val preferredCameraIndex: ComponentIndexType,
-    private val droneName: String
+    private val droneName: String,
 ) {
     companion object {
         private const val TAG = "SharedDJIFrameSource"
@@ -33,21 +33,23 @@ class SharedDJIFrameSource(
         // Order in which we fall back when the preferred camera index is not
         // exposed by the connected aircraft (e.g. M350 may not publish
         // LEFT_OR_MAIN; Mini 4 Pro typically does).
-        private val CAMERA_PREFERENCE = listOf(
-            ComponentIndexType.LEFT_OR_MAIN,
-            ComponentIndexType.FPV,
-            ComponentIndexType.RIGHT,
-            ComponentIndexType.UP
-        )
+        private val CAMERA_PREFERENCE =
+            listOf(
+                ComponentIndexType.LEFT_OR_MAIN,
+                ComponentIndexType.FPV,
+                ComponentIndexType.RIGHT,
+                ComponentIndexType.UP,
+            )
 
         // Payload/accessory ports (PORT_1..PORT_8) are never video cameras — they carry
         // non-imaging payloads such as a hook on a multi-port aircraft (e.g. M400). The SDK
         // still lists them in the available-camera set, so we exclude them from auto-selection;
         // otherwise the last-resort fallback could bind the video stream to a payload port and
         // the bridge shows no camera. Drop one here if it ever genuinely carries a camera.
-        private val NON_CAMERA_INDICES = setOf(
-            ComponentIndexType.PORT_4
-        )
+        private val NON_CAMERA_INDICES =
+            setOf(
+                ComponentIndexType.PORT_4,
+            )
     }
 
     /** Currently used camera index. Resolved dynamically from the available
@@ -71,21 +73,28 @@ class SharedDJIFrameSource(
         val length: Int,
         val width: Int,
         val height: Int,
-        val timestampNs: Long
+        val timestampNs: Long,
     )
 
     @Volatile var targetWidth: Int = DJIV5VideoCapturer.FULL_HD_WIDTH
+
     @Volatile var targetHeight: Int = DJIV5VideoCapturer.FULL_HD_HEIGHT
+
     @Volatile private var scaleToTarget: Boolean = true
+
     @Volatile private var targetFps: Int = 30
+
     @Volatile private var frameIntervalNs: Long = 1_000_000_000L / 30L
+
     @Volatile var metricsListener: ((WebRTCStreamMetrics) -> Unit)? = null
+
     @Volatile private var edgeDetectionFrameListener: EdgeDetectionFrameListener? = null
     private val lastSentTimestampNs = AtomicLong(0L)
     private val frameCounter = AtomicLong(0)
     private val incomingFrameCounter = AtomicLong(0)
-    //: Frames currently being handled on DJI's live-view thread; teardown waits on this before
-    //: disposing anything the observers feed into (see awaitInFlightFramesIdle).
+
+    // : Frames currently being handled on DJI's live-view thread; teardown waits on this before
+    // : disposing anything the observers feed into (see awaitInFlightFramesIdle).
     private val inFlightFrames = AtomicInteger(0)
     private val frameIdleLock = Object()
     private val droppedFrameCounter = AtomicLong(0)
@@ -101,21 +110,23 @@ class SharedDJIFrameSource(
     private var lastOutputWidth = 0
     private var lastOutputHeight = 0
     private var lastMetricsTimestampNs = System.nanoTime()
+
     @Volatile private var lastError: String? = null
 
     private val cameraStreamManager: ICameraStreamManager by lazy {
         MediaDataCenter.getInstance().cameraStreamManager
     }
 
-    private val availableCameraListener = object : ICameraStreamManager.AvailableCameraUpdatedListener {
-        override fun onAvailableCameraUpdated(availableCameraList: MutableList<ComponentIndexType>) {
-            onAvailableCamerasChanged(availableCameraList)
-        }
+    private val availableCameraListener =
+        object : ICameraStreamManager.AvailableCameraUpdatedListener {
+            override fun onAvailableCameraUpdated(availableCameraList: MutableList<ComponentIndexType>) {
+                onAvailableCamerasChanged(availableCameraList)
+            }
 
-        override fun onCameraStreamEnableUpdate(cameraStreamEnableMap: MutableMap<ComponentIndexType, Boolean>) {
-            // Not used; frame availability is detected by the frame callback itself.
+            override fun onCameraStreamEnableUpdate(cameraStreamEnableMap: MutableMap<ComponentIndexType, Boolean>) {
+                // Not used; frame availability is detected by the frame callback itself.
+            }
         }
-    }
 
     init {
         // Begin observing available cameras as early as possible so we can
@@ -128,6 +139,10 @@ class SharedDJIFrameSource(
         }
     }
 
+    // Only the M400 exposes payload ports (a hook etc.) that pollute the camera list; other
+    // aircraft are left untouched. Read live so it tracks the currently connected drone.
+    private fun isMatrice400(): Boolean = ProductKey.KeyProductType.create().get(ProductType.UNKNOWN) == ProductType.DJI_MATRICE_400
+
     /**
      * Pick the best camera to stream from given the list reported by the SDK.
      * Preference order:
@@ -135,11 +150,6 @@ class SharedDJIFrameSource(
      *  2. Any entry from CAMERA_PREFERENCE that is present, in order.
      *  3. The first entry in the list as a last resort.
      */
-    // Only the M400 exposes payload ports (a hook etc.) that pollute the camera list; other
-    // aircraft are left untouched. Read live so it tracks the currently connected drone.
-    private fun isMatrice400(): Boolean =
-        ProductKey.KeyProductType.create().get(ProductType.UNKNOWN) == ProductType.DJI_MATRICE_400
-
     private fun pickCameraIndex(available: List<ComponentIndexType>): ComponentIndexType? {
         // On the M400, drop payload/accessory ports (e.g. a hook on PORT_4) so they can never be
         // selected. Other aircraft keep the full list unchanged.
@@ -151,10 +161,11 @@ class SharedDJIFrameSource(
 
     @Synchronized
     private fun onAvailableCamerasChanged(available: List<ComponentIndexType>) {
-        val resolved = pickCameraIndex(available) ?: run {
-            Log.w(TAG, "Available camera list is empty — keeping current index $activeCameraIndex")
-            return
-        }
+        val resolved =
+            pickCameraIndex(available) ?: run {
+                Log.w(TAG, "Available camera list is empty — keeping current index $activeCameraIndex")
+                return
+            }
         if (resolved == activeCameraIndex) {
             Log.d(TAG, "Available cameras updated ($available); active index unchanged: $activeCameraIndex")
             return
@@ -164,7 +175,7 @@ class SharedDJIFrameSource(
         Log.i(
             TAG,
             "Active camera index changed: $previous -> $resolved " +
-                "(available: $available, preferred: $preferredCameraIndex)"
+                "(available: $available, preferred: $preferredCameraIndex)",
         )
 
         // If we're already streaming, re-attach the frame listener to the new index.
@@ -174,7 +185,7 @@ class SharedDJIFrameSource(
                 cameraStreamManager.addFrameListener(
                     activeCameraIndex,
                     ICameraStreamManager.FrameFormat.NV21,
-                    frameListener
+                    frameListener,
                 )
                 Log.i(TAG, "Re-attached frame listener on $activeCameraIndex")
             }.onFailure { error ->
@@ -185,40 +196,44 @@ class SharedDJIFrameSource(
 
     private val frameProcessor = FrameProcessor()
 
-    private val frameListener = object : ICameraStreamManager.CameraFrameListener {
-        override fun onFrame(
-            frameData: ByteArray,
-            offset: Int,
-            length: Int,
-            width: Int,
-            height: Int,
-            format: ICameraStreamManager.FrameFormat
-        ) {
-            // Count the callback before anything else. Teardown removes its observer and then
-            // waits for this counter to drain, so a frame already dispatched on DJI's live-view
-            // thread can never outlive the WebRTC VideoSource it delivers into -- disposing that
-            // first aborts inside the native lib (pthread_mutex_lock on a destroyed mutex).
-            inFlightFrames.incrementAndGet()
-            try {
-                if (isCapturing.get()) {
-                    val frame = Nv21Frame(frameData, offset, length, width, height, System.nanoTime())
-                    edgeDetectionFrameListener?.onNv21Frame(frame)
+    private val frameListener =
+        object : ICameraStreamManager.CameraFrameListener {
+            override fun onFrame(
+                frameData: ByteArray,
+                offset: Int,
+                length: Int,
+                width: Int,
+                height: Int,
+                format: ICameraStreamManager.FrameFormat,
+            ) {
+                // Count the callback before anything else. Teardown removes its observer and then
+                // waits for this counter to drain, so a frame already dispatched on DJI's live-view
+                // thread can never outlive the WebRTC VideoSource it delivers into -- disposing that
+                // first aborts inside the native lib (pthread_mutex_lock on a destroyed mutex).
+                inFlightFrames.incrementAndGet()
+                try {
+                    if (isCapturing.get()) {
+                        val frame = Nv21Frame(frameData, offset, length, width, height, System.nanoTime())
+                        edgeDetectionFrameListener?.onNv21Frame(frame)
 
-                    val recipients = DjiFrameRecipients.capture(observers, metadataListeners)
-                    if (recipients.hasObservers) {
-                        frameProcessor.process(frame, recipients)
+                        val recipients = DjiFrameRecipients.capture(observers, metadataListeners)
+                        if (recipients.hasObservers) {
+                            frameProcessor.process(frame, recipients)
+                        }
                     }
-                }
-            } finally {
-                if (inFlightFrames.decrementAndGet() == 0) {
-                    synchronized(frameIdleLock) { frameIdleLock.notifyAll() }
+                } finally {
+                    if (inFlightFrames.decrementAndGet() == 0) {
+                        synchronized(frameIdleLock) { frameIdleLock.notifyAll() }
+                    }
                 }
             }
         }
-    }
 
     private inner class FrameProcessor {
-        fun process(frame: Nv21Frame, recipients: DjiFrameRecipients) {
+        fun process(
+            frame: Nv21Frame,
+            recipients: DjiFrameRecipients,
+        ) {
             runCatching {
                 incomingFrameCounter.incrementAndGet()
                 inputFramesInWindow.incrementAndGet()
@@ -235,7 +250,10 @@ class SharedDJIFrameSource(
             }
         }
 
-        private fun deliverFrame(frame: Nv21Frame, recipients: DjiFrameRecipients) {
+        private fun deliverFrame(
+            frame: Nv21Frame,
+            recipients: DjiFrameRecipients,
+        ) {
             updateSourceSize(frame.width, frame.height)
             val frameNumber = recordAcceptedFrame(frame.timestampNs)
             val (outputWidth, outputHeight) = chooseOutputSize(frame.width, frame.height)
@@ -259,14 +277,17 @@ class SharedDJIFrameSource(
             maybeEmitMetrics(timestampNs)
         }
 
-        private fun updateSourceSize(width: Int, height: Int) {
+        private fun updateSourceSize(
+            width: Int,
+            height: Int,
+        ) {
             if (width != lastSourceWidth || height != lastSourceHeight) {
                 lastSourceWidth = width
                 lastSourceHeight = height
                 Log.d(
                     TAG,
-                    "Source: ${width}x${height}, Target: " +
-                        "${targetWidth}x${targetHeight}, Scale: $scaleToTarget"
+                    "Source: ${width}x$height, Target: " +
+                        "${targetWidth}x$targetHeight, Scale: $scaleToTarget",
                 )
             }
         }
@@ -286,16 +307,17 @@ class SharedDJIFrameSource(
             timestampNs: Long,
             outputWidth: Int,
             outputHeight: Int,
-            recipients: DjiFrameRecipients
+            recipients: DjiFrameRecipients,
         ) {
             if (!recipients.hasMetadataListeners) return
-            val metadata = TelemetryProvider.captureMetadata(
-                frameNumber = frameNumber,
-                timestampNs = timestampNs,
-                frameWidth = outputWidth,
-                frameHeight = outputHeight,
-                droneName = droneName
-            )
+            val metadata =
+                TelemetryProvider.captureMetadata(
+                    frameNumber = frameNumber,
+                    timestampNs = timestampNs,
+                    frameWidth = outputWidth,
+                    frameHeight = outputHeight,
+                    droneName = droneName,
+                )
             recipients.singleMetadataListener?.onFrameMetadata(metadata)
                 ?: recipients.metadataListeners.forEach { it.onFrameMetadata(metadata) }
         }
@@ -304,17 +326,18 @@ class SharedDJIFrameSource(
             frame: Nv21Frame,
             outputWidth: Int,
             outputHeight: Int,
-            recipients: DjiFrameRecipients
+            recipients: DjiFrameRecipients,
         ) {
             val buffer = NV21Buffer(frame.data, frame.width, frame.height, null)
             val needsScale = scaleToTarget && (frame.width != outputWidth || frame.height != outputHeight)
-            val outputBuffer = if (needsScale) {
-                val scaled = buffer.cropAndScale(0, 0, frame.width, frame.height, outputWidth, outputHeight)
-                buffer.release()
-                scaled
-            } else {
-                buffer
-            }
+            val outputBuffer =
+                if (needsScale) {
+                    val scaled = buffer.cropAndScale(0, 0, frame.width, frame.height, outputWidth, outputHeight)
+                    buffer.release()
+                    scaled
+                } else {
+                    buffer
+                }
 
             val videoFrame = VideoFrame(outputBuffer, 0, frame.timestampNs)
             try {
@@ -347,12 +370,15 @@ class SharedDJIFrameSource(
             cameraStreamManager.addFrameListener(
                 activeCameraIndex,
                 ICameraStreamManager.FrameFormat.NV21,
-                frameListener
+                frameListener,
             )
         }
     }
 
-    private fun chooseOutputSize(sourceWidth: Int, sourceHeight: Int): Pair<Int, Int> {
+    private fun chooseOutputSize(
+        sourceWidth: Int,
+        sourceHeight: Int,
+    ): Pair<Int, Int> {
         if (!scaleToTarget) return sourceWidth to sourceHeight
         val boundedWidth = targetWidth.coerceAtMost(sourceWidth).coerceAtLeast(2)
         val boundedHeight = targetHeight.coerceAtMost(sourceHeight).coerceAtLeast(2)
@@ -365,7 +391,10 @@ class SharedDJIFrameSource(
 
     fun observerCount(): Int = observers.size
 
-    fun waitForOutputFrameAfter(frameCount: Long, timeoutMs: Long): Boolean {
+    fun waitForOutputFrameAfter(
+        frameCount: Long,
+        timeoutMs: Long,
+    ): Boolean {
         val deadlineMs = System.currentTimeMillis() + timeoutMs
         synchronized(frameWaitLock) {
             while (frameCounter.get() <= frameCount) {
@@ -431,19 +460,25 @@ class SharedDJIFrameSource(
                 activeCamera = activeCameraIndex.name,
                 status = if (isCapturing.get()) "running" else "idle",
                 recoveryCount = recoveryCounter.get().toInt(),
-                lastError = lastError
-            )
+                lastError = lastError,
+            ),
         )
     }
 
     // ---- Client management ----
 
-    fun registerObserver(clientId: String, observer: CapturerObserver) {
+    fun registerObserver(
+        clientId: String,
+        observer: CapturerObserver,
+    ) {
         observers[clientId] = observer
         Log.d(TAG, "Observer registered: $clientId (total: ${observers.size})")
     }
 
-    fun setMetadataListener(clientId: String, listener: DJIV5VideoCapturer.FrameMetadataListener?) {
+    fun setMetadataListener(
+        clientId: String,
+        listener: DJIV5VideoCapturer.FrameMetadataListener?,
+    ) {
         if (listener != null) {
             metadataListeners[clientId] = listener
         } else {
@@ -455,7 +490,12 @@ class SharedDJIFrameSource(
      * Start capturing if not already started. If already capturing, the
      * new client immediately begins receiving frames.
      */
-    fun startClient(clientId: String, width: Int, height: Int, fps: Int) {
+    fun startClient(
+        clientId: String,
+        width: Int,
+        height: Int,
+        fps: Int,
+    ) {
         // Use the first client's requested settings
         if (isCapturing.compareAndSet(false, true)) {
             applyResolutionRequest(width, height)
@@ -464,15 +504,15 @@ class SharedDJIFrameSource(
             lastSentTimestampNs.set(0L)
             Log.d(
                 TAG,
-                "Starting shared capture: ${targetWidth}x${targetHeight}@$targetFps fps " +
-                    "on camera $activeCameraIndex (preferred: $preferredCameraIndex)"
+                "Starting shared capture: ${targetWidth}x$targetHeight@$targetFps fps " +
+                    "on camera $activeCameraIndex (preferred: $preferredCameraIndex)",
             )
             runCatching { cameraStreamManager.enableStream(activeCameraIndex, true) }
                 .onFailure { Log.w(TAG, "Could not enable stream on $activeCameraIndex: ${it.message}") }
             cameraStreamManager.addFrameListener(
                 activeCameraIndex,
                 ICameraStreamManager.FrameFormat.NV21,
-                frameListener
+                frameListener,
             )
         }
         observers[clientId]?.onCapturerStarted(true)
@@ -489,7 +529,10 @@ class SharedDJIFrameSource(
         }
     }
 
-    fun changeResolution(width: Int, height: Int) {
+    fun changeResolution(
+        width: Int,
+        height: Int,
+    ) {
         val previousWidth = targetWidth
         val previousHeight = targetHeight
         val previousScale = scaleToTarget
@@ -497,12 +540,15 @@ class SharedDJIFrameSource(
         Log.d(
             TAG,
             "Changing target resolution: " +
-                "${previousWidth}x${previousHeight} (scale=$previousScale) -> " +
-                "${targetWidth}x${targetHeight} (scale=$scaleToTarget)"
+                "${previousWidth}x$previousHeight (scale=$previousScale) -> " +
+                "${targetWidth}x$targetHeight (scale=$scaleToTarget)",
         )
     }
 
-    private fun applyResolutionRequest(width: Int, height: Int) {
+    private fun applyResolutionRequest(
+        width: Int,
+        height: Int,
+    ) {
         if (width <= 0 || height <= 0) {
             targetWidth = 0
             targetHeight = 0
@@ -544,7 +590,7 @@ class SharedDJIFrameSource(
         cameraStreamManager.addFrameListener(
             activeCameraIndex,
             ICameraStreamManager.FrameFormat.NV21,
-            frameListener
+            frameListener,
         )
         Log.w(TAG, "Reset DJI frame listener on $activeCameraIndex: $reason")
     }
@@ -569,7 +615,7 @@ private data class DjiFrameRecipients(
     val singleObserver: CapturerObserver?,
     val observers: List<CapturerObserver>,
     val singleMetadataListener: DJIV5VideoCapturer.FrameMetadataListener?,
-    val metadataListeners: List<DJIV5VideoCapturer.FrameMetadataListener>
+    val metadataListeners: List<DJIV5VideoCapturer.FrameMetadataListener>,
 ) {
     val hasObservers: Boolean = singleObserver != null || observers.isNotEmpty()
     val hasMetadataListeners: Boolean = singleMetadataListener != null || metadataListeners.isNotEmpty()
@@ -586,21 +632,20 @@ private data class DjiFrameRecipients(
     companion object {
         fun capture(
             observers: ConcurrentHashMap<String, CapturerObserver>,
-            metadataListeners: ConcurrentHashMap<String, DJIV5VideoCapturer.FrameMetadataListener>
+            metadataListeners: ConcurrentHashMap<String, DJIV5VideoCapturer.FrameMetadataListener>,
         ): DjiFrameRecipients {
             val singleObserver = observers.singleValueOrNull()
             val observerSnapshot = if (singleObserver == null) observers.values.toList() else emptyList()
             val singleMetadataListener = metadataListeners.singleValueOrNull()
-            val metadataSnapshot = if (singleMetadataListener == null) {
-                metadataListeners.values.toList()
-            } else {
-                emptyList()
-            }
+            val metadataSnapshot =
+                if (singleMetadataListener == null) {
+                    metadataListeners.values.toList()
+                } else {
+                    emptyList()
+                }
             return DjiFrameRecipients(singleObserver, observerSnapshot, singleMetadataListener, metadataSnapshot)
         }
 
-        private fun <T> ConcurrentHashMap<String, T>.singleValueOrNull(): T? {
-            return if (size == 1) values.firstOrNull() else null
-        }
+        private fun <T> ConcurrentHashMap<String, T>.singleValueOrNull(): T? = if (size == 1) values.firstOrNull() else null
     }
 }

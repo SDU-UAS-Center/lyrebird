@@ -43,28 +43,29 @@ def detektTaskClass = buildscript.classLoader.loadClass('io.gitlab.arturbosch.de
 def lyrebirdSourceIncludes = [
         'com/lyrebird/rc/controller/**/*.kt',
         'com/lyrebird/rc/edge/**/*.kt',
+    'com/lyrebird/rc/fleet/**/*.kt',
         'com/lyrebird/rc/formation/**/*.kt',
         'com/lyrebird/rc/logger/**/*.kt',
+    'com/lyrebird/rc/mavlink/**/*.kt',
+    'com/lyrebird/rc/perception/**/*.kt',
         'com/lyrebird/rc/server/**/*.kt',
+    'com/lyrebird/rc/settings/**/*.kt',
+    'com/lyrebird/rc/telemetry/**/*.kt',
         'com/lyrebird/rc/webrtc/**/*.kt',
         'com/lyrebird/rc/DroneControlProfiles.kt',
         'com/lyrebird/rc/TestToolsVM.kt',
         'com/lyrebird/rc/FlightDeckActivity.kt',
+        'com/lyrebird/rc/StreamingMode.kt',
 ]
 
-// The list above is source-root-relative, which is what Detekt matches against. Spotless resolves
-// targets relative to the module directory instead, so reusing it as a Spotless target matched no
-// file at all and the check passed having inspected nothing — verified by appending a deliberate
-// violation to a listed file and still getting BUILD SUCCESSFUL. The prefix below is what makes
-// the target resolve, derived from the same list so the two cannot drift apart again.
-def lyrebirdSpotlessIncludes = lyrebirdSourceIncludes.collect { "src/main/java/$it" }
+def lyrebirdSpotlessSources = fileTree(dir: sampleJavaSource, includes: lyrebirdSourceIncludes)
 
 project(':app') {
     apply plugin: 'com.diffplug.spotless'
 
     spotless {
         kotlin {
-            target lyrebirdSpotlessIncludes
+            target lyrebirdSpotlessSources
             ktlint('1.5.0')
         }
     }

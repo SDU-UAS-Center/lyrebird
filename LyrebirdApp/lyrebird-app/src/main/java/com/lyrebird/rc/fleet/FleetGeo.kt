@@ -18,7 +18,6 @@ import kotlin.math.hypot
  * velocity as north, east and down, so callers negate the down component on the way in.
  */
 internal object FleetGeo {
-
     /** IUGG mean Earth radius. */
     const val EARTH_RADIUS_M = 6_371_008.8
 
@@ -33,7 +32,10 @@ internal object FleetGeo {
      * and produce a collision warning between two drones sitting on the ground, so null island is
      * rejected here as it is elsewhere in the app.
      */
-    fun isRealPosition(latitudeDeg: Double, longitudeDeg: Double): Boolean =
+    fun isRealPosition(
+        latitudeDeg: Double,
+        longitudeDeg: Double,
+    ): Boolean =
         latitudeDeg.isFinite() && longitudeDeg.isFinite() &&
             (latitudeDeg != 0.0 || longitudeDeg != 0.0) &&
             latitudeDeg in -90.0..90.0 && longitudeDeg in -180.0..180.0
@@ -43,11 +45,12 @@ internal object FleetGeo {
         originLatitudeDeg: Double,
         originLongitudeDeg: Double,
         targetLatitudeDeg: Double,
-        targetLongitudeDeg: Double
+        targetLongitudeDeg: Double,
     ): Pair<Double, Double> {
         val originLatRad = Math.toRadians(originLatitudeDeg)
-        val east = Math.toRadians(normalizeLongitudeDelta(targetLongitudeDeg - originLongitudeDeg)) *
-            EARTH_RADIUS_M * cos(originLatRad)
+        val east =
+            Math.toRadians(normalizeLongitudeDelta(targetLongitudeDeg - originLongitudeDeg)) *
+                EARTH_RADIUS_M * cos(originLatRad)
         val north = Math.toRadians(targetLatitudeDeg - originLatitudeDeg) * EARTH_RADIUS_M
         return east to north
     }
@@ -57,11 +60,15 @@ internal object FleetGeo {
         originLatitudeDeg: Double,
         originLongitudeDeg: Double,
         targetLatitudeDeg: Double,
-        targetLongitudeDeg: Double
+        targetLongitudeDeg: Double,
     ): Double {
-        val (east, north) = eastNorthOffsetM(
-            originLatitudeDeg, originLongitudeDeg, targetLatitudeDeg, targetLongitudeDeg
-        )
+        val (east, north) =
+            eastNorthOffsetM(
+                originLatitudeDeg,
+                originLongitudeDeg,
+                targetLatitudeDeg,
+                targetLongitudeDeg,
+            )
         return hypot(east, north)
     }
 
@@ -70,11 +77,15 @@ internal object FleetGeo {
         originLatitudeDeg: Double,
         originLongitudeDeg: Double,
         targetLatitudeDeg: Double,
-        targetLongitudeDeg: Double
+        targetLongitudeDeg: Double,
     ): Double {
-        val (east, north) = eastNorthOffsetM(
-            originLatitudeDeg, originLongitudeDeg, targetLatitudeDeg, targetLongitudeDeg
-        )
+        val (east, north) =
+            eastNorthOffsetM(
+                originLatitudeDeg,
+                originLongitudeDeg,
+                targetLatitudeDeg,
+                targetLongitudeDeg,
+            )
         if (east == 0.0 && north == 0.0) return 0.0
         return normalizeBearingDeg(Math.toDegrees(atan2(east, north)))
     }
@@ -98,15 +109,17 @@ internal object FleetGeo {
         relativeUpM: Double,
         relativeEastMps: Double,
         relativeNorthMps: Double,
-        relativeUpMps: Double
+        relativeUpMps: Double,
     ): Double? {
-        val speedSquared = relativeEastMps * relativeEastMps +
-            relativeNorthMps * relativeNorthMps +
-            relativeUpMps * relativeUpMps
+        val speedSquared =
+            relativeEastMps * relativeEastMps +
+                relativeNorthMps * relativeNorthMps +
+                relativeUpMps * relativeUpMps
         if (speedSquared < MIN_RELATIVE_SPEED_MPS * MIN_RELATIVE_SPEED_MPS) return null
-        val dot = relativeEastM * relativeEastMps +
-            relativeNorthM * relativeNorthMps +
-            relativeUpM * relativeUpMps
+        val dot =
+            relativeEastM * relativeEastMps +
+                relativeNorthM * relativeNorthMps +
+                relativeUpM * relativeUpMps
         val timeS = -dot / speedSquared
         return if (timeS > 0.0) timeS else null
     }
@@ -118,34 +131,38 @@ internal object FleetGeo {
         relativeUpM: Double,
         relativeEastMps: Double,
         relativeNorthMps: Double,
-        relativeUpMps: Double
+        relativeUpMps: Double,
     ): Double {
-        val range = kotlin.math.sqrt(
-            relativeEastM * relativeEastM +
-                relativeNorthM * relativeNorthM +
-                relativeUpM * relativeUpM
-        )
+        val range =
+            kotlin.math.sqrt(
+                relativeEastM * relativeEastM +
+                    relativeNorthM * relativeNorthM +
+                    relativeUpM * relativeUpM,
+            )
         if (range <= 0.0) return 0.0
-        val dot = relativeEastM * relativeEastMps +
-            relativeNorthM * relativeNorthMps +
-            relativeUpM * relativeUpMps
+        val dot =
+            relativeEastM * relativeEastMps +
+                relativeNorthM * relativeNorthMps +
+                relativeUpM * relativeUpMps
         return -dot / range
     }
 
     /** Longitude differences wrap at the antimeridian; without this a pair astride it reads as half a world apart. */
-    private fun normalizeLongitudeDelta(deltaDeg: Double): Double = when {
-        deltaDeg > 180.0 -> deltaDeg - 360.0
-        deltaDeg < -180.0 -> deltaDeg + 360.0
-        else -> deltaDeg
-    }
+    private fun normalizeLongitudeDelta(deltaDeg: Double): Double =
+        when {
+            deltaDeg > 180.0 -> deltaDeg - 360.0
+            deltaDeg < -180.0 -> deltaDeg + 360.0
+            else -> deltaDeg
+        }
 
     /** Compact metre/kilometre rendering for the one-line peer rows on the Flight Deck. */
-    fun formatDistance(metres: Double): String = when {
-        !metres.isFinite() -> "--"
-        metres < 1_000.0 -> "${metres.toInt()}m"
-        metres < 10_000.0 -> String.format("%.1fkm", metres / 1_000.0)
-        else -> "${(metres / 1_000.0).toInt()}km"
-    }
+    fun formatDistance(metres: Double): String =
+        when {
+            !metres.isFinite() -> "--"
+            metres < 1_000.0 -> "${metres.toInt()}m"
+            metres < 10_000.0 -> String.format("%.1fkm", metres / 1_000.0)
+            else -> "${(metres / 1_000.0).toInt()}km"
+        }
 
     /** Signed relative altitude, always carrying its sign so "level" is unambiguous. */
     fun formatRelativeAltitude(metres: Double): String {
@@ -165,5 +182,8 @@ internal object FleetGeo {
         return points[index]
     }
 
-    fun absDifference(first: Double, second: Double): Double = abs(first - second)
+    fun absDifference(
+        first: Double,
+        second: Double,
+    ): Double = abs(first - second)
 }

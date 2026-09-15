@@ -20,7 +20,6 @@ import java.util.Locale
  * flight log it belongs to.
  */
 object FlightVideoManifest {
-
     private const val TAG = "FlightVideoManifest"
 
     /** Clock skew and recording-start margin around the session window, in seconds. */
@@ -32,7 +31,7 @@ object FlightVideoManifest {
     data class VideoEntry(
         val fileName: String,
         val sizeBytes: Long,
-        val subFiles: List<String>
+        val subFiles: List<String>,
     )
 
     /**
@@ -43,7 +42,7 @@ object FlightVideoManifest {
         logFile: File?,
         droneName: String,
         vehicleSerial: String,
-        windowSec: Pair<Long, Long>?
+        windowSec: Pair<Long, Long>?,
     ) {
         if (logFile == null || windowSec == null) return
         Thread {
@@ -66,7 +65,7 @@ object FlightVideoManifest {
     internal fun matchFlightVideos(
         entries: List<VideoEntry>,
         windowSec: Pair<Long, Long>,
-        marginSec: Long
+        marginSec: Long,
     ): List<VideoEntry> {
         val lo = windowSec.first - marginSec
         val hi = windowSec.second + marginSec
@@ -89,9 +88,9 @@ object FlightVideoManifest {
         droneName: String,
         vehicleSerial: String,
         windowSec: Pair<Long, Long>,
-        videos: List<VideoEntry>
+        videos: List<VideoEntry>,
     ): JSONObject {
-        val prefix = sanitize("${droneName}_${vehicleSerial}")
+        val prefix = sanitize("${droneName}_$vehicleSerial")
         val array = JSONArray()
         videos.forEach { entry ->
             array.put(
@@ -100,7 +99,7 @@ object FlightVideoManifest {
                     .put("recordStartEpochSec", parseDjiVideoTimestamp(entry.fileName) ?: -1L)
                     .put("sizeBytes", entry.sizeBytes)
                     .put("subFiles", JSONArray(entry.subFiles))
-                    .put("proposedName", "${prefix}_${entry.fileName}")
+                    .put("proposedName", "${prefix}_${entry.fileName}"),
             )
         }
         return JSONObject()
@@ -112,32 +111,40 @@ object FlightVideoManifest {
             .put("videos", array)
     }
 
-    internal fun sanitize(value: String): String =
-        value.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_').ifBlank { "unknown" }
+    internal fun sanitize(value: String): String = value.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_').ifBlank { "unknown" }
 
     // -- SDK pull and log append (integration side) ------------------------------
 
     private fun pullSdCardVideos(): List<VideoEntry> {
-        val list = MediaDataCenter.getInstance().mediaManager.mediaFileListData?.data ?: return emptyList()
+        val list =
+            MediaDataCenter
+                .getInstance()
+                .mediaManager.mediaFileListData
+                ?.data ?: return emptyList()
         return list.mapNotNull { file ->
             file.fileName?.takeIf { it.isNotBlank() }?.let { name ->
                 VideoEntry(
                     fileName = name,
                     sizeBytes = file.fileSize,
-                    subFiles = file.subMediaFile.orEmpty().mapNotNull { it.fileName }
+                    subFiles = file.subMediaFile.orEmpty().mapNotNull { it.fileName },
                 )
             }
         }
     }
 
-    private fun appendLogLine(logFile: File, videos: List<VideoEntry>, manifestName: String) {
+    private fun appendLogLine(
+        logFile: File,
+        videos: List<VideoEntry>,
+        manifestName: String,
+    ) {
         runCatching {
             val names = JSONArray(videos.map { it.fileName })
-            val line = JSONObject()
-                .put("t", System.currentTimeMillis() / 1000)
-                .put("type", "VIDEOS")
-                .put("manifest", manifestName)
-                .put("files", names)
+            val line =
+                JSONObject()
+                    .put("t", System.currentTimeMillis() / 1000)
+                    .put("type", "VIDEOS")
+                    .put("manifest", manifestName)
+                    .put("files", names)
             logFile.appendText(line.toString() + "\n")
         }.onFailure { error ->
             Log.w(TAG, "Could not append VIDEOS line to flight log: ${error.message}")

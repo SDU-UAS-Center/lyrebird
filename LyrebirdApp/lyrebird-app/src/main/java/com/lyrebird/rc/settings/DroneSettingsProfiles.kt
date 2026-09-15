@@ -20,7 +20,6 @@ import java.util.concurrent.Executors
  * aircraft.
  */
 object DroneSettingsProfiles {
-
     private const val TAG = "DroneSettingsProfiles"
     private const val FILE_PREFIX = "drone-"
     private const val FILE_SUFFIX = ".json"
@@ -29,12 +28,12 @@ object DroneSettingsProfiles {
     const val PREF_CURRENT_SERIAL = "lb_current_aircraft_serial"
 
     /** Serialized worker so profile writes never interleave. */
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "drone-settings-profiles").apply { isDaemon = true }
-    }
+    private val executor =
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "drone-settings-profiles").apply { isDaemon = true }
+        }
 
-    fun isUsableSerial(serial: String): Boolean =
-        serial.isNotBlank() && serial.trim() != "UNKNOWN"
+    fun isUsableSerial(serial: String): Boolean = serial.isNotBlank() && serial.trim() != "UNKNOWN"
 
     fun profileFile(serial: String): File? =
         FlightLogStorage.resolveConfigDir()?.let { dir ->
@@ -53,7 +52,7 @@ object DroneSettingsProfiles {
         perDroneKeys: Set<String>,
         newSerial: String,
         mainHandler: Handler,
-        onProfileApplied: (Boolean) -> Unit
+        onProfileApplied: (Boolean) -> Unit,
     ) {
         val serial = newSerial.trim()
         if (!isUsableSerial(serial)) {
@@ -63,11 +62,12 @@ object DroneSettingsProfiles {
         val oldSerial = prefs.getString(PREF_CURRENT_SERIAL, "")?.trim().orEmpty()
         // Snapshot synchronously on the caller thread: the preferences still describe the
         // outgoing aircraft, and a background snapshot could capture the incoming one instead.
-        val oldValues: JSONObject? = if (oldSerial != serial && isUsableSerial(oldSerial)) {
-            snapshotSettings(prefs, perDroneKeys)
-        } else {
-            null
-        }
+        val oldValues: JSONObject? =
+            if (oldSerial != serial && isUsableSerial(oldSerial)) {
+                snapshotSettings(prefs, perDroneKeys)
+            } else {
+                null
+            }
 
         prefs.edit().putString(PREF_CURRENT_SERIAL, serial).apply()
         Log.i(TAG, "Aircraft changed: '$oldSerial' -> '$serial'")
@@ -90,7 +90,10 @@ object DroneSettingsProfiles {
      * Persist the current per-drone settings under the currently connected aircraft. Called at
      * teardown so settings changed mid-flight survive even when no serial switch happened.
      */
-    fun saveCurrentProfile(prefs: SharedPreferences, perDroneKeys: Set<String>) {
+    fun saveCurrentProfile(
+        prefs: SharedPreferences,
+        perDroneKeys: Set<String>,
+    ) {
         val serial = prefs.getString(PREF_CURRENT_SERIAL, "")?.trim().orEmpty()
         if (!isUsableSerial(serial)) return
         val values = snapshotSettings(prefs, perDroneKeys)
@@ -100,7 +103,10 @@ object DroneSettingsProfiles {
     // -- Helpers kept internal so the round-trip is unit-tested -----------------
 
     /** The per-drone preference values, with types preserved for the restore. */
-    internal fun snapshotSettings(prefs: SharedPreferences, keys: Set<String>): JSONObject {
+    internal fun snapshotSettings(
+        prefs: SharedPreferences,
+        keys: Set<String>,
+    ): JSONObject {
         val values = JSONObject()
         prefs.all.forEach { (key, value) ->
             if (key in keys && value !is Set<*>) values.put(key, value)
@@ -109,7 +115,10 @@ object DroneSettingsProfiles {
     }
 
     /** Write [values] over the preferences, leaving every other preference untouched. */
-    internal fun applySettings(prefs: SharedPreferences, values: JSONObject) {
+    internal fun applySettings(
+        prefs: SharedPreferences,
+        values: JSONObject,
+    ) {
         val editor = prefs.edit()
         values.keys().forEach { key ->
             when (val value = values.opt(key)) {
@@ -124,7 +133,10 @@ object DroneSettingsProfiles {
         editor.apply()
     }
 
-    internal fun encodeProfile(serial: String, values: JSONObject): JSONObject =
+    internal fun encodeProfile(
+        serial: String,
+        values: JSONObject,
+    ): JSONObject =
         JSONObject()
             .put("serial", serial)
             .put("savedAt", System.currentTimeMillis() / 1000)
@@ -137,7 +149,10 @@ object DroneSettingsProfiles {
 
     // -- Storage ---------------------------------------------------------------
 
-    private fun writeProfile(serial: String, values: JSONObject) {
+    private fun writeProfile(
+        serial: String,
+        values: JSONObject,
+    ) {
         val target = profileFile(serial) ?: return
         runCatching {
             target.writeText(encodeProfile(serial, values).toString(2))
@@ -160,6 +175,5 @@ object DroneSettingsProfiles {
         }.getOrNull()
     }
 
-    private fun sanitize(serial: String): String =
-        serial.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+    private fun sanitize(serial: String): String = serial.replace(Regex("[^a-zA-Z0-9_-]"), "_")
 }

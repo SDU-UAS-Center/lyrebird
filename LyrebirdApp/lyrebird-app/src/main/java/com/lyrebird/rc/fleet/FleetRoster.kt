@@ -16,7 +16,7 @@ internal enum class PeerLiveness {
     STALE,
 
     /** Gone. Position, if shown at all, is where it was last seen. */
-    LOST
+    LOST,
 }
 
 /** A peer as the roster remembers it, with the bookkeeping liveness needs. */
@@ -34,7 +34,7 @@ internal data class FleetPeer(
      */
     val lastFlyingMs: Long?,
     /** True when the peer's uptime counter went backwards, meaning its app restarted. */
-    val restartedSinceFirstSeen: Boolean
+    val restartedSinceFirstSeen: Boolean,
 )
 
 internal enum class FleetAlertKind {
@@ -42,14 +42,14 @@ internal enum class FleetAlertKind {
     PEER_SILENT_WHILE_FLYING,
 
     /** A peer's app restarted mid-session: its uptime counter went backwards. */
-    PEER_APP_RESTARTED
+    PEER_APP_RESTARTED,
 }
 
 internal data class FleetAlert(
     val kind: FleetAlertKind,
     val severity: ConflictSeverity,
     val summary: String,
-    val peerName: String
+    val peerName: String,
 )
 
 /** One peer, resolved against the local aircraft, ready to render. */
@@ -58,7 +58,7 @@ internal data class FleetPeerView(
     val liveness: PeerLiveness,
     val ageMs: Long,
     /** Null when either aircraft lacks a usable GPS fix. */
-    val solution: TrafficSolution?
+    val solution: TrafficSolution?,
 ) {
     val displayName: String get() = peer.beacon.displayName()
     val advisoryLevel: AdvisoryLevel get() = solution?.level ?: AdvisoryLevel.NONE
@@ -68,7 +68,7 @@ internal data class FleetPeerView(
 internal data class FleetView(
     val peers: List<FleetPeerView>,
     val conflicts: List<FleetConflict>,
-    val alerts: List<FleetAlert>
+    val alerts: List<FleetAlert>,
 ) {
     val peerCount: Int get() = peers.size
     val liveCount: Int get() = peers.count { it.liveness == PeerLiveness.LIVE }
@@ -104,8 +104,9 @@ internal data class FleetView(
  *
  * Thread-safe: beacons arrive on the mesh receive thread while the UI thread reads snapshots.
  */
-internal class FleetRoster(private val ownDeviceId: () -> String) {
-
+internal class FleetRoster(
+    private val ownDeviceId: () -> String,
+) {
     companion object {
         /** Beacon period is 500 ms, so this is five missed beacons. */
         const val LIVE_TIMEOUT_MS = 2_500L
@@ -133,19 +134,25 @@ internal class FleetRoster(private val ownDeviceId: () -> String) {
      * appears to come from depends on which interface the stack picked.
      */
     @Synchronized
-    fun onBeacon(beacon: FleetBeacon, sourceAddress: String, nowMs: Long): Boolean {
+    fun onBeacon(
+        beacon: FleetBeacon,
+        sourceAddress: String,
+        nowMs: Long,
+    ): Boolean {
         if (beacon.deviceId == ownDeviceId()) return false
         val existing = peers[beacon.deviceId]
-        val restarted = existing != null &&
-            (beacon.appUptimeMs < existing.beacon.appUptimeMs || beacon.sequence < existing.beacon.sequence)
-        peers[beacon.deviceId] = FleetPeer(
-            beacon = beacon,
-            sourceAddress = sourceAddress,
-            firstSeenMs = existing?.firstSeenMs ?: nowMs,
-            lastSeenMs = nowMs,
-            lastFlyingMs = if (beacon.flying) nowMs else existing?.lastFlyingMs,
-            restartedSinceFirstSeen = restarted || (existing?.restartedSinceFirstSeen ?: false)
-        )
+        val restarted =
+            existing != null &&
+                (beacon.appUptimeMs < existing.beacon.appUptimeMs || beacon.sequence < existing.beacon.sequence)
+        peers[beacon.deviceId] =
+            FleetPeer(
+                beacon = beacon,
+                sourceAddress = sourceAddress,
+                firstSeenMs = existing?.firstSeenMs ?: nowMs,
+                lastSeenMs = nowMs,
+                lastFlyingMs = if (beacon.flying) nowMs else existing?.lastFlyingMs,
+                restartedSinceFirstSeen = restarted || (existing?.restartedSinceFirstSeen ?: false),
+            )
         return true
     }
 
@@ -172,35 +179,43 @@ internal class FleetRoster(private val ownDeviceId: () -> String) {
      * first is the one at the top of a strip that may only have room for three.
      */
     @Synchronized
-    fun view(own: FleetBeacon, nowMs: Long): FleetView {
+    fun view(
+        own: FleetBeacon,
+        nowMs: Long,
+    ): FleetView {
         forgetStalePeers(nowMs)
         if (peers.isEmpty()) return FleetView.EMPTY
 
-        val views = peers.values.map { peer ->
-            val ageMs = nowMs - peer.lastSeenMs
-            val liveness = livenessOf(ageMs)
-            FleetPeerView(
-                peer = peer,
-                liveness = liveness,
-                ageMs = ageMs,
-                // A peer that has gone quiet has no current track, so projecting one would be a
-                // fabrication. Its row keeps a range from the last fix, but no advisory.
-                solution = if (liveness == PeerLiveness.LOST) null else solveAgainst(own, peer)
-            )
-        }.sortedWith(
-            compareByDescending<FleetPeerView> { it.advisoryLevel.ordinal }
-                .thenBy { it.solution?.slantRangeM ?: Double.MAX_VALUE }
-                .thenBy { it.displayName }
-        )
+        val views =
+            peers.values
+                .map { peer ->
+                    val ageMs = nowMs - peer.lastSeenMs
+                    val liveness = livenessOf(ageMs)
+                    FleetPeerView(
+                        peer = peer,
+                        liveness = liveness,
+                        ageMs = ageMs,
+                        // A peer that has gone quiet has no current track, so projecting one would be a
+                        // fabrication. Its row keeps a range from the last fix, but no advisory.
+                        solution = if (liveness == PeerLiveness.LOST) null else solveAgainst(own, peer),
+                    )
+                }.sortedWith(
+                    compareByDescending<FleetPeerView> { it.advisoryLevel.ordinal }
+                        .thenBy { it.solution?.slantRangeM ?: Double.MAX_VALUE }
+                        .thenBy { it.displayName },
+                )
 
         return FleetView(
             peers = views,
             conflicts = FleetConflicts.detect(own, views.map { it.peer.beacon }),
-            alerts = alertsFor(views, nowMs)
+            alerts = alertsFor(views, nowMs),
         )
     }
 
-    private fun solveAgainst(own: FleetBeacon, peer: FleetPeer): TrafficSolution? =
+    private fun solveAgainst(
+        own: FleetBeacon,
+        peer: FleetPeer,
+    ): TrafficSolution? =
         TrafficAdvisory.solve(
             ownLatitudeDeg = own.latitudeDeg,
             ownLongitudeDeg = own.longitudeDeg,
@@ -209,14 +224,15 @@ internal class FleetRoster(private val ownDeviceId: () -> String) {
             ownVelocityEastMps = own.velocityEastMps,
             ownVelocityDownMps = own.velocityDownMps,
             ownFlying = own.flying,
-            peer = peer.beacon
+            peer = peer.beacon,
         )
 
-    private fun livenessOf(ageMs: Long): PeerLiveness = when {
-        ageMs <= LIVE_TIMEOUT_MS -> PeerLiveness.LIVE
-        ageMs <= STALE_TIMEOUT_MS -> PeerLiveness.STALE
-        else -> PeerLiveness.LOST
-    }
+    private fun livenessOf(ageMs: Long): PeerLiveness =
+        when {
+            ageMs <= LIVE_TIMEOUT_MS -> PeerLiveness.LIVE
+            ageMs <= STALE_TIMEOUT_MS -> PeerLiveness.STALE
+            else -> PeerLiveness.LOST
+        }
 
     /**
      * Liveness alerts.
@@ -226,30 +242,36 @@ internal class FleetRoster(private val ownDeviceId: () -> String) {
      * aircraft flying under no supervision that any other RC can see. This is the only place in
      * Lyrebird where that becomes visible from another device.
      */
-    private fun alertsFor(views: List<FleetPeerView>, nowMs: Long): List<FleetAlert> {
+    private fun alertsFor(
+        views: List<FleetPeerView>,
+        nowMs: Long,
+    ): List<FleetAlert> {
         val alerts = mutableListOf<FleetAlert>()
         views.forEach { view ->
             val wasFlying = view.peer.lastFlyingMs != null
             if (wasFlying && view.liveness != PeerLiveness.LIVE) {
                 val silentForS = (nowMs - view.peer.lastSeenMs) / MILLIS_PER_SECOND
-                alerts += FleetAlert(
-                    kind = FleetAlertKind.PEER_SILENT_WHILE_FLYING,
-                    severity = if (view.liveness == PeerLiveness.LOST) {
-                        ConflictSeverity.CRITICAL
-                    } else {
-                        ConflictSeverity.WARNING
-                    },
-                    summary = "${view.displayName} was airborne and has been silent for ${silentForS}s.",
-                    peerName = view.displayName
-                )
+                alerts +=
+                    FleetAlert(
+                        kind = FleetAlertKind.PEER_SILENT_WHILE_FLYING,
+                        severity =
+                            if (view.liveness == PeerLiveness.LOST) {
+                                ConflictSeverity.CRITICAL
+                            } else {
+                                ConflictSeverity.WARNING
+                            },
+                        summary = "${view.displayName} was airborne and has been silent for ${silentForS}s.",
+                        peerName = view.displayName,
+                    )
             }
             if (view.peer.restartedSinceFirstSeen && view.liveness == PeerLiveness.LIVE) {
-                alerts += FleetAlert(
-                    kind = FleetAlertKind.PEER_APP_RESTARTED,
-                    severity = ConflictSeverity.WARNING,
-                    summary = "${view.displayName} restarted its app during this session.",
-                    peerName = view.displayName
-                )
+                alerts +=
+                    FleetAlert(
+                        kind = FleetAlertKind.PEER_APP_RESTARTED,
+                        severity = ConflictSeverity.WARNING,
+                        summary = "${view.displayName} restarted its app during this session.",
+                        peerName = view.displayName,
+                    )
             }
         }
         return alerts.sortedByDescending { it.severity.ordinal }

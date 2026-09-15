@@ -7,8 +7,8 @@ import org.webrtc.JavaI420Buffer
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoFrame
-import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -28,13 +28,15 @@ internal class DjiSurfaceVideoCapturer : VideoCapturer {
         private const val DEFAULT_HEIGHT = 1080
     }
 
-    private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "DjiSurfaceFrameDriver").apply { isDaemon = true }
-    }
+    private val executor: ScheduledExecutorService =
+        Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "DjiSurfaceFrameDriver").apply { isDaemon = true }
+        }
     private val isCapturing = AtomicBoolean(false)
     private val totalFrameCount = AtomicLong(0)
     private val windowFrameCount = AtomicLong(0)
     private var capturerObserver: CapturerObserver? = null
+
     @Volatile var metricsListener: ((WebRTCStreamMetrics) -> Unit)? = null
     private var frameBuffer: JavaI420Buffer? = null
     private var frameTask: ScheduledFuture<*>? = null
@@ -45,12 +47,16 @@ internal class DjiSurfaceVideoCapturer : VideoCapturer {
     override fun initialize(
         surfaceTextureHelper: SurfaceTextureHelper?,
         applicationContext: Context,
-        capturerObserver: CapturerObserver
+        capturerObserver: CapturerObserver,
     ) {
         this.capturerObserver = capturerObserver
     }
 
-    override fun startCapture(width: Int, height: Int, framerate: Int) {
+    override fun startCapture(
+        width: Int,
+        height: Int,
+        framerate: Int,
+    ) {
         if (!isCapturing.compareAndSet(false, true)) return
         this.width = width.takeIf { it > 0 } ?: DEFAULT_WIDTH
         this.height = height.takeIf { it > 0 } ?: DEFAULT_HEIGHT
@@ -96,8 +102,8 @@ internal class DjiSurfaceVideoCapturer : VideoCapturer {
                 activeCamera = "surface",
                 status = if (isCapturing.get()) "running" else "idle",
                 configuredFps = DRIVER_FPS,
-                scaleMode = "surface"
-            )
+                scaleMode = "surface",
+            ),
         )
         lastMetricsAtNs = nowNs
     }
@@ -111,7 +117,11 @@ internal class DjiSurfaceVideoCapturer : VideoCapturer {
         Log.i(TAG, "Stopped synthetic driver")
     }
 
-    override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) {
+    override fun changeCaptureFormat(
+        width: Int,
+        height: Int,
+        framerate: Int,
+    ) {
         if (width > 0 && height > 0 && (width != this.width || height != this.height)) {
             frameBuffer?.release()
             this.width = width

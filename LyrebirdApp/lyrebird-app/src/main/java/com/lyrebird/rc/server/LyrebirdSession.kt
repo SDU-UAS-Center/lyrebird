@@ -40,7 +40,10 @@ internal interface SessionAdvertiser {
      * @param httpPort the command port, or null when it is not answering.
      * @param telemetryPort the telemetry port, or null when it is not answering.
      */
-    fun advertise(httpPort: Int?, telemetryPort: Int?)
+    fun advertise(
+        httpPort: Int?,
+        telemetryPort: Int?,
+    )
 
     /** Withdraws everything advertised by [advertise]. */
     fun stopAdvertising()
@@ -156,7 +159,7 @@ internal class LyrebirdSession(
     fun hasTelemetryClients(): Boolean = (telemetry as? ClientAwareServer)?.hasClients() == true
 
     /** Stops serving, in the reverse order of [start]. Safe to call more than once. */
-    fun stop() {        // Point clients elsewhere before the sockets go: a client still being told we are here,
+    fun stop() { // Point clients elsewhere before the sockets go: a client still being told we are here,
         // about a session that has already left, would reconnect to nothing.
         advertiser.stopAdvertising()
         http.stop()

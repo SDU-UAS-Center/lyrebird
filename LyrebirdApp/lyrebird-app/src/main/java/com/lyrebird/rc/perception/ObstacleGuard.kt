@@ -42,7 +42,6 @@ import dji.v5.manager.aircraft.perception.listener.ObstacleDataListener
  * to fly somewhere you would not have flown without it.
  */
 internal object ObstacleGuard {
-
     private const val TAG = "LyrebirdObstacle"
 
     /** Master switch. Default off: it changes flight behaviour, so it is opted into. */
@@ -66,7 +65,7 @@ internal object ObstacleGuard {
         val clearanceM: Double,
         val requiredM: Double,
         val bearingFromNoseDeg: Double,
-        val atElapsedMs: Long
+        val atElapsedMs: Long,
     )
 
     /** Fired on the SDK's callback thread after the guard has stopped the aircraft. */
@@ -87,7 +86,7 @@ internal object ObstacleGuard {
         val velocityNorthMps: Double,
         val velocityEastMps: Double,
         val velocityDownMps: Double,
-        val headingDeg: Double
+        val headingDeg: Double,
     )
 
     @Volatile
@@ -184,15 +183,16 @@ internal object ObstacleGuard {
      */
     private fun onObstacleData(data: ObstacleData?) {
         if (data == null) return
-        val reading = runCatching {
-            ObstacleReading.fromMillimetres(
-                horizontalMm = data.horizontalObstacleDistance.orEmpty(),
-                angleIntervalDeg = data.horizontalAngleInterval.toDouble(),
-                upwardMm = data.upwardObstacleDistance,
-                downwardMm = data.downwardObstacleDistance,
-                timestampMs = SystemClock.elapsedRealtime()
-            )
-        }.getOrNull() ?: return
+        val reading =
+            runCatching {
+                ObstacleReading.fromMillimetres(
+                    horizontalMm = data.horizontalObstacleDistance.orEmpty(),
+                    angleIntervalDeg = data.horizontalAngleInterval.toDouble(),
+                    upwardMm = data.upwardObstacleDistance,
+                    downwardMm = data.downwardObstacleDistance,
+                    timestampMs = SystemClock.elapsedRealtime(),
+                )
+            }.getOrNull() ?: return
         lastReading = reading
 
         if (isLatched) return
@@ -201,35 +201,41 @@ internal object ObstacleGuard {
         // The gate that matters. Only motion this app is commanding is motion this app may stop:
         // a pilot on the sticks is flying with the vendor's own avoidance and must never be
         // countermanded by a phone, and a native wayline is the flight controller's to brake.
-        val decision = ObstacleBrake.evaluate(
-            reading = reading,
-            velocityNorthMps = motion.velocityNorthMps,
-            velocityEastMps = motion.velocityEastMps,
-            velocityDownMps = motion.velocityDownMps,
-            headingDeg = motion.headingDeg,
-            autonomousMotionActive = DroneController.isAutonomousFlightActive &&
-                !DroneController.isManualOverrideActive,
-            marginM = marginM
-        )
+        val decision =
+            ObstacleBrake.evaluate(
+                reading = reading,
+                velocityNorthMps = motion.velocityNorthMps,
+                velocityEastMps = motion.velocityEastMps,
+                velocityDownMps = motion.velocityDownMps,
+                headingDeg = motion.headingDeg,
+                autonomousMotionActive =
+                    DroneController.isAutonomousFlightActive &&
+                        !DroneController.isManualOverrideActive,
+                marginM = marginM,
+            )
         if (!decision.shouldBrake) return
 
         applyBrake(decision, reading)
     }
 
-    private fun applyBrake(decision: BrakeDecision, reading: ObstacleReading) {
+    private fun applyBrake(
+        decision: BrakeDecision,
+        reading: ObstacleReading,
+    ) {
         latchedUntilElapsedMs = SystemClock.elapsedRealtime() + BRAKE_LATCH_MS
-        val event = BrakeEvent(
-            reason = decision.reason,
-            clearanceM = decision.clearanceM,
-            requiredM = decision.requiredM,
-            bearingFromNoseDeg = decision.bearingFromNoseDeg,
-            atElapsedMs = SystemClock.elapsedRealtime()
-        )
+        val event =
+            BrakeEvent(
+                reason = decision.reason,
+                clearanceM = decision.clearanceM,
+                requiredM = decision.requiredM,
+                bearingFromNoseDeg = decision.bearingFromNoseDeg,
+                atElapsedMs = SystemClock.elapsedRealtime(),
+            )
         lastBrake = event
         Log.w(
             TAG,
             "Stopping: ${decision.reason} clearance=${"%.1f".format(decision.clearanceM)}m " +
-                "required=${"%.1f".format(decision.requiredM)}m"
+                "required=${"%.1f".format(decision.requiredM)}m",
         )
         // Record which direction was measured as the hazard, centred on the closest sector in the
         // arc that produced the brake rather than on the requested travel bearing: the ring is
@@ -241,7 +247,7 @@ internal object ObstacleGuard {
             ?.let { closest ->
                 BlockedArc.fromBrake(
                     decision.copy(bearingFromNoseDeg = closest),
-                    SystemClock.elapsedRealtime()
+                    SystemClock.elapsedRealtime(),
                 )
             } ?: BlockedArc.fromBrake(decision, SystemClock.elapsedRealtime())
         // Cancels the PID loop and zeroes the sticks, so the aircraft holds position. Virtual

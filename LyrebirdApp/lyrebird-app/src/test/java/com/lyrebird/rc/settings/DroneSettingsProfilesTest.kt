@@ -79,7 +79,7 @@ class DroneSettingsProfilesTest {
     }
 
     /** Minimal in-memory SharedPreferences so the round-trip runs without Robolectric. */
-    private class FakePrefs(initial: Map<String, Any>) : SharedPreferences {
+    internal class FakePrefs(initial: Map<String, Any>) : SharedPreferences {
         private val store = initial.toMutableMap()
         private val removed = Any()
 

@@ -38,14 +38,15 @@ data class WebRTCStreamMetrics(
     // (WHEP/RTSP/RTMP/HLS) attached to that path -- shown on-screen so a wrong or unreachable
     // publish target is obvious from the phone itself instead of only from Logcat/MediaMTX.
     val whipHost: String? = null,
-    val readerCount: Int? = null
+    val readerCount: Int? = null,
 ) {
     val resolutionLabel: String
-        get() = if (outputWidth > 0 && outputHeight > 0) {
-            "${outputWidth}x${outputHeight}"
-        } else {
-            "waiting"
-        }
+        get() =
+            if (outputWidth > 0 && outputHeight > 0) {
+                "${outputWidth}x$outputHeight"
+            } else {
+                "waiting"
+            }
 
     fun compactLabel(): String {
         val saturationLabel = if (saturationState != "ok") " sat $saturationState" else ""
@@ -54,16 +55,16 @@ data class WebRTCStreamMetrics(
         val networkLabel = networkLabel()
         val hostLabel = whipHost?.let { " host $it" }.orEmpty()
         val listenersLabel = readerCount?.let { " listeners $it" }.orEmpty()
-            return buildString {
-                append("WHIP $status$saturationLabel$hostLabel$listenersLabel out $resolutionLabel")
-                append(" req ${requestedLabel()} src ${sourceLabel()}")
-                append(" fps ${fpsLabel()} drop ${droppedFps.format1()}")
-                append(" resize ${averageFrameProcessingMs.format1()}ms")
-                append(" scale $scaleMode clients $observerCount")
-                append(errorLabel)
-                append(recoveryLabel)
-                append(networkLabel)
-            }
+        return buildString {
+            append("WHIP $status$saturationLabel$hostLabel$listenersLabel out $resolutionLabel")
+            append(" req ${requestedLabel()} src ${sourceLabel()}")
+            append(" fps ${fpsLabel()} drop ${droppedFps.format1()}")
+            append(" resize ${averageFrameProcessingMs.format1()}ms")
+            append(" scale $scaleMode clients $observerCount")
+            append(errorLabel)
+            append(recoveryLabel)
+            append(networkLabel)
+        }
     }
 
     /**
@@ -78,22 +79,25 @@ data class WebRTCStreamMetrics(
         return if (parts.isEmpty()) "" else " " + parts.joinToString(" ")
     }
 
-        private fun requestedLabel(): String = if (requestedWidth > 0 && requestedHeight > 0) {
-            "${requestedWidth}x${requestedHeight}"
+    private fun requestedLabel(): String =
+        if (requestedWidth > 0 && requestedHeight > 0) {
+            "${requestedWidth}x$requestedHeight"
         } else {
             "native"
         }
 
-        private fun sourceLabel(): String = if (sourceWidth > 0 && sourceHeight > 0) {
-            "${sourceWidth}x${sourceHeight}"
+    private fun sourceLabel(): String =
+        if (sourceWidth > 0 && sourceHeight > 0) {
+            "${sourceWidth}x$sourceHeight"
         } else {
             "waiting"
         }
 
-        private fun fpsLabel(): String = if (configuredFps > 0 && configuredFps != targetFps) {
-            "${outputFps.format1()}/${targetFps} cfg $configuredFps"
+    private fun fpsLabel(): String =
+        if (configuredFps > 0 && configuredFps != targetFps) {
+            "${outputFps.format1()}/$targetFps cfg $configuredFps"
         } else {
-            "${outputFps.format1()}/${targetFps}"
+            "${outputFps.format1()}/$targetFps"
         }
 
     private fun Double.format1(): String = String.format(java.util.Locale.US, "%.1f", this)

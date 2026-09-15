@@ -32,7 +32,6 @@ package com.lyrebird.rc.controller
  * check-and-latch in [authorizeControlCommand]/[releaseSafetyControl] is @Synchronized.
  */
 object ControlAuthority {
-
     /** Which computer currently holds command authority. */
     enum class Authority { PILOT, SAFETY }
 
@@ -49,6 +48,7 @@ object ControlAuthority {
     interface Listener {
         fun onAuthorityChanged(authority: Authority)
     }
+
     var listener: Listener? = null
 
     /**
@@ -57,7 +57,10 @@ object ControlAuthority {
      * Until this is called the latch is in-memory, which is what the tests and any host without
      * storage get. The app calls it during startup, before the servers accept anything.
      */
-    internal fun attachPersistence(store: AuthorityLatch.LatchStore, aircraftSerial: () -> String) {
+    internal fun attachPersistence(
+        store: AuthorityLatch.LatchStore,
+        aircraftSerial: () -> String,
+    ) {
         latch.attach(store, aircraftSerial)
         restoreLatch()
     }

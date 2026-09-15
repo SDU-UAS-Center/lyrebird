@@ -22,7 +22,9 @@ internal enum class AdvisoryLevel {
     CAUTION,
 
     /** Converging fast, or very close. Worth acting on. */
-    WARNING;
+    WARNING,
+
+    ;
 
     fun atLeast(other: AdvisoryLevel): Boolean = ordinal >= other.ordinal
 }
@@ -49,7 +51,7 @@ internal data class TrafficSolution(
     val closestApproachHorizontalM: Double?,
     /** Vertical separation at closest approach, or null when the tracks are diverging. */
     val closestApproachVerticalM: Double?,
-    val level: AdvisoryLevel
+    val level: AdvisoryLevel,
 )
 
 /**
@@ -66,7 +68,6 @@ internal data class TrafficSolution(
  * second old by the time it is read, and neither track accounts for what either pilot does next.
  */
 internal object TrafficAdvisory {
-
     /** Inside this slant range an airborne peer is a warning whatever the tracks are doing. */
     const val WARNING_RANGE_M = 35.0
 
@@ -100,14 +101,18 @@ internal object TrafficAdvisory {
         ownVelocityEastMps: Double,
         ownVelocityDownMps: Double,
         ownFlying: Boolean,
-        peer: FleetBeacon
+        peer: FleetBeacon,
     ): TrafficSolution? {
         if (!FleetGeo.isRealPosition(ownLatitudeDeg, ownLongitudeDeg)) return null
         if (!peer.hasRealPosition()) return null
 
-        val (relativeEastM, relativeNorthM) = FleetGeo.eastNorthOffsetM(
-            ownLatitudeDeg, ownLongitudeDeg, peer.latitudeDeg, peer.longitudeDeg
-        )
+        val (relativeEastM, relativeNorthM) =
+            FleetGeo.eastNorthOffsetM(
+                ownLatitudeDeg,
+                ownLongitudeDeg,
+                peer.latitudeDeg,
+                peer.longitudeDeg,
+            )
         val relativeUpM = peer.altitudeAslM - ownAltitudeAslM
 
         // Up-positive throughout: both sides report down-positive on the wire.
@@ -116,40 +121,57 @@ internal object TrafficAdvisory {
         val relativeUpMps = -(peer.velocityDownMps - ownVelocityDownMps)
 
         val horizontalDistanceM = hypot(relativeEastM, relativeNorthM)
-        val slantRangeM = sqrt(
-            relativeEastM * relativeEastM + relativeNorthM * relativeNorthM + relativeUpM * relativeUpM
-        )
+        val slantRangeM =
+            sqrt(
+                relativeEastM * relativeEastM + relativeNorthM * relativeNorthM + relativeUpM * relativeUpM,
+            )
 
-        val timeToCpaS = FleetGeo.timeToClosestApproachS(
-            relativeEastM, relativeNorthM, relativeUpM,
-            relativeEastMps, relativeNorthMps, relativeUpMps
-        )
-        val cpaHorizontalM = timeToCpaS?.let {
-            hypot(relativeEastM + relativeEastMps * it, relativeNorthM + relativeNorthMps * it)
-        }
+        val timeToCpaS =
+            FleetGeo.timeToClosestApproachS(
+                relativeEastM,
+                relativeNorthM,
+                relativeUpM,
+                relativeEastMps,
+                relativeNorthMps,
+                relativeUpMps,
+            )
+        val cpaHorizontalM =
+            timeToCpaS?.let {
+                hypot(relativeEastM + relativeEastMps * it, relativeNorthM + relativeNorthMps * it)
+            }
         val cpaVerticalM = timeToCpaS?.let { abs(relativeUpM + relativeUpMps * it) }
 
         return TrafficSolution(
             horizontalDistanceM = horizontalDistanceM,
             verticalSeparationM = relativeUpM,
             slantRangeM = slantRangeM,
-            bearingDeg = FleetGeo.bearingDeg(
-                ownLatitudeDeg, ownLongitudeDeg, peer.latitudeDeg, peer.longitudeDeg
-            ),
-            closingSpeedMps = FleetGeo.closingSpeedMps(
-                relativeEastM, relativeNorthM, relativeUpM,
-                relativeEastMps, relativeNorthMps, relativeUpMps
-            ),
+            bearingDeg =
+                FleetGeo.bearingDeg(
+                    ownLatitudeDeg,
+                    ownLongitudeDeg,
+                    peer.latitudeDeg,
+                    peer.longitudeDeg,
+                ),
+            closingSpeedMps =
+                FleetGeo.closingSpeedMps(
+                    relativeEastM,
+                    relativeNorthM,
+                    relativeUpM,
+                    relativeEastMps,
+                    relativeNorthMps,
+                    relativeUpMps,
+                ),
             timeToClosestApproachS = timeToCpaS,
             closestApproachHorizontalM = cpaHorizontalM,
             closestApproachVerticalM = cpaVerticalM,
-            level = level(
-                airborne = ownFlying || peer.flying,
-                slantRangeM = slantRangeM,
-                timeToCpaS = timeToCpaS,
-                cpaHorizontalM = cpaHorizontalM,
-                cpaVerticalM = cpaVerticalM
-            )
+            level =
+                level(
+                    airborne = ownFlying || peer.flying,
+                    slantRangeM = slantRangeM,
+                    timeToCpaS = timeToCpaS,
+                    cpaHorizontalM = cpaHorizontalM,
+                    cpaVerticalM = cpaVerticalM,
+                ),
         )
     }
 
@@ -165,20 +187,26 @@ internal object TrafficAdvisory {
         slantRangeM: Double,
         timeToCpaS: Double?,
         cpaHorizontalM: Double?,
-        cpaVerticalM: Double?
+        cpaVerticalM: Double?,
     ): AdvisoryLevel {
         if (!airborne) return AdvisoryLevel.NONE
 
-        val convergingWarning = timeToCpaS != null && cpaHorizontalM != null && cpaVerticalM != null &&
-            timeToCpaS <= WARNING_CPA_SECONDS &&
-            cpaHorizontalM <= WARNING_CPA_HORIZONTAL_M &&
-            cpaVerticalM <= WARNING_CPA_VERTICAL_M
+        val convergingWarning =
+            timeToCpaS != null &&
+                cpaHorizontalM != null &&
+                cpaVerticalM != null &&
+                timeToCpaS <= WARNING_CPA_SECONDS &&
+                cpaHorizontalM <= WARNING_CPA_HORIZONTAL_M &&
+                cpaVerticalM <= WARNING_CPA_VERTICAL_M
         if (slantRangeM <= WARNING_RANGE_M || convergingWarning) return AdvisoryLevel.WARNING
 
-        val convergingCaution = timeToCpaS != null && cpaHorizontalM != null && cpaVerticalM != null &&
-            timeToCpaS <= CAUTION_CPA_SECONDS &&
-            cpaHorizontalM <= CAUTION_CPA_HORIZONTAL_M &&
-            cpaVerticalM <= CAUTION_CPA_VERTICAL_M
+        val convergingCaution =
+            timeToCpaS != null &&
+                cpaHorizontalM != null &&
+                cpaVerticalM != null &&
+                timeToCpaS <= CAUTION_CPA_SECONDS &&
+                cpaHorizontalM <= CAUTION_CPA_HORIZONTAL_M &&
+                cpaVerticalM <= CAUTION_CPA_VERTICAL_M
         if (slantRangeM <= CAUTION_RANGE_M || convergingCaution) return AdvisoryLevel.CAUTION
 
         return if (slantRangeM <= ADVISORY_RANGE_M) AdvisoryLevel.ADVISORY else AdvisoryLevel.NONE

@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * silently waiting several seconds for a picture because a flaky poll turned the safety net off.
  */
 internal class MediaMtxConsumerWatcher(
-    private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS
+    private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
 ) {
     companion object {
         private const val TAG = "MediaMtxConsumerWatcher"
@@ -53,13 +53,19 @@ internal class MediaMtxConsumerWatcher(
      * the WHIP URL, see [mediaMtxHostAndPathFromWhipUrl]) — MediaMTX's API lives on the same
      * host, port 9997 by convention (the same one `groundstation.md` documents).
      */
-    fun start(host: String, pathName: String) {
+    fun start(
+        host: String,
+        pathName: String,
+    ) {
         if (!isRunning.compareAndSet(false, true)) return
         shouldForceKeyframe = true
         val scheduler = Executors.newSingleThreadScheduledExecutor()
         executor = scheduler
         scheduler.scheduleWithFixedDelay(
-            { pollOnce(host, pathName) }, 0, pollIntervalMs, TimeUnit.MILLISECONDS
+            { pollOnce(host, pathName) },
+            0,
+            pollIntervalMs,
+            TimeUnit.MILLISECONDS,
         )
     }
 
@@ -81,23 +87,27 @@ internal class MediaMtxConsumerWatcher(
      * worse than any single failure this method could otherwise report. Logs the outcome either
      * way so "quietly succeeding" and "silently died" are never ambiguous from the outside again.
      */
-    private fun pollOnce(host: String, pathName: String) {
+    private fun pollOnce(
+        host: String,
+        pathName: String,
+    ) {
         runCatching {
             val body = fetchPathsList(host)
             val decision = shouldForceKeyframeFor(body, pathName)
             readerCount = readerCountFor(body, pathName) ?: readerCount
             val inboundFramesInError = inboundFrameErrorsFor(body, pathName)
-            val packetLossRecovery = hasNewInboundFrameErrors(
-                lastInboundFramesInError,
-                inboundFramesInError
-            )
+            val packetLossRecovery =
+                hasNewInboundFrameErrors(
+                    lastInboundFramesInError,
+                    inboundFramesInError,
+                )
             lastInboundFramesInError = inboundFramesInError
             shouldForceKeyframe = decision || packetLossRecovery
             if (packetLossRecovery) {
                 Log.w(
                     TAG,
                     "MediaMTX reported new H264 ingest errors ($inboundFramesInError), " +
-                        "forcing a recovery keyframe"
+                        "forcing a recovery keyframe",
                 )
             } else {
                 Log.d(TAG, "MediaMTX poll ok, forceKeyframe=$decision")
@@ -128,11 +138,12 @@ internal class MediaMtxConsumerWatcher(
  * `groundstation.md`/`mavlink.md` document) into the ground-station host and the MediaMTX path
  * name, or null if it doesn't look like that shape. Pure and testable without a real URL/network.
  */
-internal fun mediaMtxHostAndPathFromWhipUrl(whipUrl: String): Pair<String, String>? = runCatching {
-    val url = URL(whipUrl)
-    val pathName = url.path.trim('/').removeSuffix("/whip")
-    if (url.host.isBlank() || pathName.isBlank()) null else url.host to pathName
-}.getOrNull()
+internal fun mediaMtxHostAndPathFromWhipUrl(whipUrl: String): Pair<String, String>? =
+    runCatching {
+        val url = URL(whipUrl)
+        val pathName = url.path.trim('/').removeSuffix("/whip")
+        if (url.host.isBlank() || pathName.isBlank()) null else url.host to pathName
+    }.getOrNull()
 
 /**
  * Pure parsing: true (force the keyframe) unless [pathName] is found in [pathsListJson] and
@@ -142,13 +153,17 @@ internal fun mediaMtxHostAndPathFromWhipUrl(whipUrl: String): Pair<String, Strin
  * to false: nothing is attached to miss out on a fast join, so forcing a keyframe would be pure
  * waste.
  */
-internal fun shouldForceKeyframeFor(pathsListJson: String, pathName: String): Boolean {
-    val path = runCatching {
-        val items = JSONObject(pathsListJson).getJSONArray("items")
-        (0 until items.length())
-            .map { items.getJSONObject(it) }
-            .firstOrNull { it.optString("name") == pathName }
-    }.getOrNull() ?: return true
+internal fun shouldForceKeyframeFor(
+    pathsListJson: String,
+    pathName: String,
+): Boolean {
+    val path =
+        runCatching {
+            val items = JSONObject(pathsListJson).getJSONArray("items")
+            (0 until items.length())
+                .map { items.getJSONObject(it) }
+                .firstOrNull { it.optString("name") == pathName }
+        }.getOrNull() ?: return true
 
     val readers = runCatching { path.getJSONArray("readers") }.getOrNull() ?: return true
     for (i in 0 until readers.length()) {
@@ -159,29 +174,41 @@ internal fun shouldForceKeyframeFor(pathsListJson: String, pathName: String): Bo
 }
 
 /** Returns the number of readers (WHEP/RTSP/RTMP/HLS) currently attached to [pathName], or null when unavailable. */
-internal fun readerCountFor(pathsListJson: String, pathName: String): Int? = runCatching {
-    val items = JSONObject(pathsListJson).getJSONArray("items")
-    val path = (0 until items.length())
-        .map { items.getJSONObject(it) }
-        .firstOrNull { it.optString("name") == pathName }
-        ?: return@runCatching null
-    path.optJSONArray("readers")?.length()
-}.getOrNull()
+internal fun readerCountFor(
+    pathsListJson: String,
+    pathName: String,
+): Int? =
+    runCatching {
+        val items = JSONObject(pathsListJson).getJSONArray("items")
+        val path =
+            (0 until items.length())
+                .map { items.getJSONObject(it) }
+                .firstOrNull { it.optString("name") == pathName }
+                ?: return@runCatching null
+        path.optJSONArray("readers")?.length()
+    }.getOrNull()
 
 /** Returns MediaMTX's cumulative H264 ingest-error count for [pathName], or null when unavailable. */
-internal fun inboundFrameErrorsFor(pathsListJson: String, pathName: String): Int? = runCatching {
-    val items = JSONObject(pathsListJson).getJSONArray("items")
-    val path = (0 until items.length())
-        .map { items.getJSONObject(it) }
-        .firstOrNull { it.optString("name") == pathName }
-        ?: return@runCatching null
-    if (!path.has("inboundFramesInError") || path.isNull("inboundFramesInError")) {
-        null
-    } else {
-        path.optInt("inboundFramesInError").coerceAtLeast(0)
-    }
-}.getOrNull()
+internal fun inboundFrameErrorsFor(
+    pathsListJson: String,
+    pathName: String,
+): Int? =
+    runCatching {
+        val items = JSONObject(pathsListJson).getJSONArray("items")
+        val path =
+            (0 until items.length())
+                .map { items.getJSONObject(it) }
+                .firstOrNull { it.optString("name") == pathName }
+                ?: return@runCatching null
+        if (!path.has("inboundFramesInError") || path.isNull("inboundFramesInError")) {
+            null
+        } else {
+            path.optInt("inboundFramesInError").coerceAtLeast(0)
+        }
+    }.getOrNull()
 
 /** A counter reset after a relay restart is not itself a new packet-loss event. */
-internal fun hasNewInboundFrameErrors(previous: Int?, current: Int?): Boolean =
-    previous != null && current != null && current > previous
+internal fun hasNewInboundFrameErrors(
+    previous: Int?,
+    current: Int?,
+): Boolean = previous != null && current != null && current > previous

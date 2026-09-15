@@ -33,6 +33,7 @@ internal class TelemetryServer(
 
     private var serverSocket: ServerSocket? = null
     private val executor = Executors.newCachedThreadPool()
+
     @Volatile
     private var isRunning = false
     private var serverThread: Thread? = null
@@ -44,7 +45,9 @@ internal class TelemetryServer(
     override fun hasClients(): Boolean = clients.isNotEmpty()
 
     /** One connected socket and whether it asked for the trimmed, MAVLink-gap-only stream. */
-    private class ClientConnection(val writer: PrintWriter) {
+    private class ClientConnection(
+        val writer: PrintWriter,
+    ) {
         @Volatile
         var gapOnly: Boolean = false
     }
@@ -113,10 +116,18 @@ internal class TelemetryServer(
         }
     }
 
-    private fun detectGapOnlyMode(socket: Socket, connection: ClientConnection) {
+    private fun detectGapOnlyMode(
+        socket: Socket,
+        connection: ClientConnection,
+    ) {
         runCatching {
             socket.soTimeout = MODE_DETECT_TIMEOUT_MS
-            if (socket.getInputStream().bufferedReader().readLine()?.trim() == MODE_GAP_REQUEST) {
+            if (socket
+                    .getInputStream()
+                    .bufferedReader()
+                    .readLine()
+                    ?.trim() == MODE_GAP_REQUEST
+            ) {
                 connection.gapOnly = true
                 Log.i("TelemetryServer", "Client requested gap-only telemetry (already on MAVLink)")
             }
@@ -137,8 +148,11 @@ internal class TelemetryServer(
         }
     }
 
-    private fun sendTelemetryToClients(fullJson: String, gapJson: String?): List<Socket> {
-        return clients.mapNotNull { (socket, connection) ->
+    private fun sendTelemetryToClients(
+        fullJson: String,
+        gapJson: String?,
+    ): List<Socket> =
+        clients.mapNotNull { (socket, connection) ->
             if (socket.isClosed || !socket.isConnected) {
                 socket
             } else {
@@ -146,7 +160,6 @@ internal class TelemetryServer(
                 socket.takeIf { connection.writer.checkError() }
             }
         }
-    }
 
     private fun removeDisconnectedClients(clientsToRemove: List<Socket>) {
         clientsToRemove.forEach { socket ->
@@ -183,4 +196,3 @@ internal class TelemetryServer(
         }.onFailure { error -> Log.e("TelemetryServer", "Error stopping server: ${error.message}") }
     }
 }
-

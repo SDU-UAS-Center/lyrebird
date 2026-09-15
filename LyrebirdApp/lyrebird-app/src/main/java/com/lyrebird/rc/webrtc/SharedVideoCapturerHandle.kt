@@ -12,9 +12,8 @@ import org.webrtc.VideoCapturer
 @Suppress("TooManyFunctions")
 class SharedVideoCapturerHandle(
     private val clientId: String,
-    private val source: SharedDJIFrameSource
+    private val source: SharedDJIFrameSource,
 ) : VideoCapturer {
-
     var metadataListener: DJIV5VideoCapturer.FrameMetadataListener? = null
         set(value) {
             field = value
@@ -24,12 +23,16 @@ class SharedVideoCapturerHandle(
     override fun initialize(
         surfaceTextureHelper: SurfaceTextureHelper?,
         applicationContext: Context,
-        capturerObserver: CapturerObserver
+        capturerObserver: CapturerObserver,
     ) {
         source.registerObserver(clientId, capturerObserver)
     }
 
-    override fun startCapture(width: Int, height: Int, framerate: Int) {
+    override fun startCapture(
+        width: Int,
+        height: Int,
+        framerate: Int,
+    ) {
         source.startClient(clientId, width, height, framerate)
     }
 
@@ -37,7 +40,10 @@ class SharedVideoCapturerHandle(
         source.stopClient(clientId)
     }
 
-    fun changeResolution(width: Int, height: Int) {
+    fun changeResolution(
+        width: Int,
+        height: Int,
+    ) {
         source.changeResolution(width, height)
     }
 
@@ -47,9 +53,10 @@ class SharedVideoCapturerHandle(
 
     fun totalOutputFrames(): Long = source.totalOutputFrames()
 
-    fun waitForOutputFrameAfter(frameCount: Long, timeoutMs: Long): Boolean {
-        return source.waitForOutputFrameAfter(frameCount, timeoutMs)
-    }
+    fun waitForOutputFrameAfter(
+        frameCount: Long,
+        timeoutMs: Long,
+    ): Boolean = source.waitForOutputFrameAfter(frameCount, timeoutMs)
 
     fun recoverCapture(reason: String) {
         source.recoverCapture(reason)
@@ -57,7 +64,11 @@ class SharedVideoCapturerHandle(
 
     fun awaitInFlightFramesIdle(timeoutMs: Long): Boolean = source.awaitInFlightFramesIdle(timeoutMs)
 
-    override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) {
+    override fun changeCaptureFormat(
+        width: Int,
+        height: Int,
+        framerate: Int,
+    ) {
         source.changeResolution(width, height)
         source.changeFrameRate(framerate)
     }

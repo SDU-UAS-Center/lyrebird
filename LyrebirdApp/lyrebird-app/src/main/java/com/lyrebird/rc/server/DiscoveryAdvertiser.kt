@@ -13,7 +13,10 @@ internal class DiscoveryAdvertiser(
     private val discovery: LyrebirdDiscoveryManager,
     private val droneSerialNumber: () -> String,
 ) : SessionAdvertiser {
-    override fun advertise(httpPort: Int?, telemetryPort: Int?) {
+    override fun advertise(
+        httpPort: Int?,
+        telemetryPort: Int?,
+    ) {
         // mDNS carries the command port as its service port, so a session whose command server did
         // not bind has nothing to register. The UDP responder still answers either way: its reply
         // names the device, not a port.

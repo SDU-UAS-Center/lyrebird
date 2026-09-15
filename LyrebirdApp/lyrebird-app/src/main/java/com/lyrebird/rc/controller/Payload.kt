@@ -19,6 +19,8 @@ import dji.sdk.keyvalue.value.camera.LaserMeasureState
 import dji.sdk.keyvalue.value.camera.LaserWorkMode
 import dji.sdk.keyvalue.value.camera.MediaFileType
 import dji.sdk.keyvalue.value.file.FileListRequestTimeOrderType
+import dji.sdk.keyvalue.value.payload.WidgetType
+import dji.sdk.keyvalue.value.payload.WidgetValue
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.et.create
@@ -29,8 +31,6 @@ import dji.v5.manager.KeyManager
 import dji.v5.manager.aircraft.payload.PayloadIndexType
 import dji.v5.manager.datacenter.media.MediaFile
 import dji.v5.manager.datacenter.media.MediaFileDownloadListener
-import dji.sdk.keyvalue.value.payload.WidgetType
-import dji.sdk.keyvalue.value.payload.WidgetValue
 import java.io.OutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -47,7 +47,6 @@ import kotlin.math.roundToInt
  *
  */
 object Payload {
-
     private const val TAG = "Payload"
 
     // ==================== Laser Range Finder (LRF) ====================
@@ -65,16 +64,18 @@ object Payload {
         laserEnabledKey.set(
             true,
             onSuccess = { Log.i(TAG, "LRF measure enabled") },
-            onFailure = { error -> Log.e(TAG, "LRF measure enable failed: ${error.description()}") }
+            onFailure = { error -> Log.e(TAG, "LRF measure enable failed: ${error.description()}") },
         )
         laserKey.set(
             LaserWorkMode.OPEN_ALWAYS,
             onSuccess = { Log.i(TAG, "LRF laser opened") },
-            onFailure = { error -> Log.e(TAG, "LRF laser open failed: ${error.description()}") }
+            onFailure = { error -> Log.e(TAG, "LRF laser open failed: ${error.description()}") },
         )
     }
 
-    init { enableLaser() }
+    init {
+        enableLaser()
+    }
 
     // ==================== Thermal sensor "sun protection" ====================
 
@@ -83,9 +84,9 @@ object Payload {
 
     @Volatile
     private var lrfInfo: LaserMeasureInformation? = null
+
     @Volatile
     private var lrfListenerRegistered: Boolean = false
-
 
     // Register a persistent listener that caches the latest laser measurement. Idempotent.
     private fun setupLaserMeasureListener() {
@@ -100,49 +101,50 @@ object Payload {
 
     // Fire the laser, wait for a fresh measurement, then turn the laser off.
     // Blocking, call from a worker thread.
-    fun takeFreshLrfReading(timeoutMs: Long = 2000L): LaserMeasureInformation? = synchronized(lrfReadingLock) {
-        setupLaserMeasureListener()
-        lrfInfo = null
+    fun takeFreshLrfReading(timeoutMs: Long = 2000L): LaserMeasureInformation? =
+        synchronized(lrfReadingLock) {
+            setupLaserMeasureListener()
+            lrfInfo = null
 
-        try {
-            // Re-apply: the init-time enable runs before the SDK is connected and silently fails,
-            // so the first real reading must turn the laser on itself.
-            enableLaser()
+            try {
+                // Re-apply: the init-time enable runs before the SDK is connected and silently fails,
+                // so the first real reading must turn the laser on itself.
+                enableLaser()
 
-            // Poll the key directly for fresh values; wait for the laser to lock (state == NORMAL)
-            val deadline = System.currentTimeMillis() + timeoutMs
-            var reading: LaserMeasureInformation? = null
-            while (System.currentTimeMillis() < deadline) {
-                val current = laserMeasureKey.get() ?: lrfInfo
-                if (current != null) {
-                    reading = current
-                    if (current.laserMeasureState == LaserMeasureState.NORMAL) break
+                // Poll the key directly for fresh values; wait for the laser to lock (state == NORMAL)
+                val deadline = System.currentTimeMillis() + timeoutMs
+                var reading: LaserMeasureInformation? = null
+                while (System.currentTimeMillis() < deadline) {
+                    val current = laserMeasureKey.get() ?: lrfInfo
+                    if (current != null) {
+                        reading = current
+                        if (current.laserMeasureState == LaserMeasureState.NORMAL) break
+                    }
+                    try {
+                        Thread.sleep(50)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
                 }
-                try {
-                    Thread.sleep(50)
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
+                if (reading == null) {
+                    Log.w(TAG, "LRF reading timed out after ${timeoutMs}ms (no data from laser)")
+                } else {
+                    Log.i(TAG, "LRF reading: ${reading.distance} m, state=${reading.laserMeasureState}")
                 }
-            }
-            if (reading == null) {
-                Log.w(TAG, "LRF reading timed out after ${timeoutMs}ms (no data from laser)")
-            } else {
-                Log.i(TAG, "LRF reading: ${reading.distance} m, state=${reading.laserMeasureState}")
-            }
-            reading
-        } finally {
+                reading
+            } finally {
 //            // Return the laser to on-demand (closed)
 //            laserKey.set(
 //                LaserWorkMode.OPEN_ON_DEMAND,
 //                onSuccess = { Log.i(TAG, "LRF laser set to OPEN_ON_DEMAND (off)") },
 //                onFailure = { error -> Log.e(TAG, "LRF laser close failed: ${error.description()}") } )
+            }
         }
-    }
     // ==================== Multi-lens photo capture (H20T / H20N / H30T) ====================
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private const val MEDIA_PULL_TIMEOUT_MS = 6000L      // per single list refresh
+    private const val MEDIA_PULL_TIMEOUT_MS = 6000L // per single list refresh
     private const val CAPTURE_OVERALL_TIMEOUT_MS = 30000L // whole capture resolution
 
     private const val CAPTURE_PULL_COUNT = 16
@@ -152,7 +154,7 @@ object Payload {
     // shutter writes — index + lens (dcf_type) but NO downloadable handle. We wait on these cheap
     // local signals (zero camera round trips) to learn the shot's files have landed, then do ONE
     // list pull to materialise the handles.
-    private const val EVENT_SETTLE_MS = 1500L       // no new file event this long => shot's files all landed
+    private const val EVENT_SETTLE_MS = 1500L // no new file event this long => shot's files all landed
     private const val EVENT_FIRST_TIMEOUT_MS = 6000L // no event AT ALL this long => key lagged; use pull loop
 
     @Volatile
@@ -161,18 +163,22 @@ object Payload {
     // Identifies the attached payload so capture can adapt to it. LEFT_OR_MAIN component index,
     // matching the mediaVM the host activity wires up. Null until the camera is connected.
     private val cameraTypeKey: DJIKey<CameraType> = CameraKey.KeyCameraType.create()
+
     private fun activeCameraType(): CameraType? = cameraTypeKey.get()
 
     // Fires when the camera writes a new photo to the SD card; carries the new file's index.
     private val keyNewlyGeneratedMediaFile = KeyTools.createKey(CameraKey.KeyNewlyGeneratedMediaFile)
+
     @Volatile
     private var latestGeneratedMediaInfo: GeneratedMediaFileInfo? = null
+
     @Volatile
     private var newMediaListenerRegistered = false
 
     // During a capture, every KeyNewlyGeneratedMediaFile push is queued here so captureNewMediaFiles
     // can block on cheap local signals instead of re-pulling the media list once per file.
     private val mediaEventQueue = java.util.concurrent.LinkedBlockingQueue<GeneratedMediaFileInfo>()
+
     @Volatile
     private var collectingEvents = false
 
@@ -187,8 +193,9 @@ object Payload {
 
     // Lens of a pushed event, from its DCF camera type (handle-free; no list pull needed).
     private fun isThermalLens(t: DCFCameraType?): Boolean = t == DCFCameraType.INFRARED
-    private fun isWideLens(t: DCFCameraType?): Boolean =
-        t == DCFCameraType.WIDE || t == DCFCameraType.VISIBLE || t == DCFCameraType.RGB
+
+    private fun isWideLens(t: DCFCameraType?): Boolean = t == DCFCameraType.WIDE || t == DCFCameraType.VISIBLE || t == DCFCameraType.RGB
+
     private fun isZoomLens(t: DCFCameraType?): Boolean = t == DCFCameraType.ZOOM
 
     @Volatile
@@ -215,22 +222,26 @@ object Payload {
     }
 
     // Allow the next connection to warm up again. Call when the aircraft disconnects.
-    fun resetMediaWarmup() { mediaWarmedUp = false }
+    fun resetMediaWarmup() {
+        mediaWarmedUp = false
+    }
 
     // A single shutter on the H20T/H20N/H30T writes co-aligned files to the SD card with the same
     // timestamp and scene: a radiometric thermal R-JPEG, the wide visual photo, and the zoom-lens
     // photo.
-    data class ThermalCapture(val thermal: MediaFile?, val visual: MediaFile?, val zoom: MediaFile?)
+    data class ThermalCapture(
+        val thermal: MediaFile?,
+        val visual: MediaFile?,
+        val zoom: MediaFile?,
+    )
 
     // Per-lens filename suffixes (before the extension), shared by the H20T/H20N/H30T:
     // _T = thermal R-JPEG, _W = wide / _V = visible (RGB or starlight), _Z = zoom.
-    private fun baseNameNoExt(name: String?): String =
-        (name ?: "").substringBeforeLast('.').uppercase()
+    private fun baseNameNoExt(name: String?): String = (name ?: "").substringBeforeLast('.').uppercase()
 
     private fun isThermalName(name: String?): Boolean = baseNameNoExt(name).endsWith("_T")
 
-    private fun isWideName(name: String?): Boolean =
-        baseNameNoExt(name).let { it.endsWith("_W") || it.endsWith("_V") }
+    private fun isWideName(name: String?): Boolean = baseNameNoExt(name).let { it.endsWith("_W") || it.endsWith("_V") }
 
     private fun isZoomName(name: String?): Boolean = baseNameNoExt(name).endsWith("_Z")
 
@@ -238,8 +249,8 @@ object Payload {
     // suffix (e.g. DJI_20260613223116_0001_T / _W / _Z). Stripping that suffix groups the siblings
 
     private val lensSuffixRegex = Regex("_[TWVZ]$")
-    private fun lensGroupBase(name: String?): String =
-        lensSuffixRegex.replace(baseNameNoExt(name), "")
+
+    private fun lensGroupBase(name: String?): String = lensSuffixRegex.replace(baseNameNoExt(name), "")
 
     // Fire one shutter and return the thermal, wide-visual (RGB) and zoom MediaFiles from it.
     // Internal helper for captureThermal. Blocking, call from a worker thread.
@@ -248,6 +259,7 @@ object Payload {
         if (newFiles.isEmpty()) return ThermalCapture(null, null, null)
 
         val variants = LinkedHashMap<String, MediaFile>()
+
         fun add(file: MediaFile?) {
             if (file?.fileName == null) return
             variants.putIfAbsent(file.fileName, file)
@@ -256,17 +268,23 @@ object Payload {
         newFiles.forEach { add(it) }
 
         val imageTypes = setOf(MediaFileType.JPEG, MediaFileType.DNG, MediaFileType.TIFF)
-        val all = variants.values.filter { it.fileType in imageTypes }
-            .ifEmpty { variants.values.toList() }
-        Log.i(TAG, "Lens files this shutter (cam=${activeCameraType()}): " +
-            all.joinToString { "${it.fileName}#${it.fileIndex}(${it.fileSize}B)" })
+        val all =
+            variants.values
+                .filter { it.fileType in imageTypes }
+                .ifEmpty { variants.values.toList() }
+        Log.i(
+            TAG,
+            "Lens files this shutter (cam=${activeCameraType()}): " +
+                all.joinToString { "${it.fileName}#${it.fileIndex}(${it.fileSize}B)" },
+        )
 
         // Thermal: the _T file by name; failing that the SMALLEST image (the radiometric R-JPEG is
         // far smaller than the full-res wide/zoom visuals), which is a much safer fallback than
         // blindly trusting the first-reported file.
-        val thermal = all.firstOrNull { isThermalName(it.fileName) }
-            ?: all.minByOrNull { it.fileSize }
-            ?: newFiles.first()
+        val thermal =
+            all.firstOrNull { isThermalName(it.fileName) }
+                ?: all.minByOrNull { it.fileSize }
+                ?: newFiles.first()
         // Wide visual (RGB) and zoom siblings, distinguished by lens suffix.
         val visual = all.firstOrNull { isWideName(it.fileName) && it.fileName != thermal.fileName }
         val zoom = all.firstOrNull { isZoomName(it.fileName) && it.fileName != thermal.fileName }
@@ -274,8 +292,11 @@ object Payload {
         if (visual == null && zoom == null) {
             Log.w(TAG, "No wide/zoom siblings found — payload may be set to store infrared only")
         } else {
-            Log.i(TAG, "Paired thermal=${thermal.fileName} (${thermal.fileSize}B) " +
-                "visual=${visual?.fileName} (${visual?.fileSize}B) zoom=${zoom?.fileName} (${zoom?.fileSize}B)")
+            Log.i(
+                TAG,
+                "Paired thermal=${thermal.fileName} (${thermal.fileSize}B) " +
+                    "visual=${visual?.fileName} (${visual?.fileSize}B) zoom=${zoom?.fileName} (${zoom?.fileSize}B)",
+            )
         }
         return ThermalCapture(thermal, visual, zoom)
     }
@@ -308,13 +329,14 @@ object Payload {
             "\"wide\":${jsonName(capture.visual?.fileName)}," +
             "\"zoom\":${jsonName(capture.zoom?.fileName)}}"
     }
+
     /** What the camera's push events reported for one shutter. */
     private data class ShutterEvents(
         val indices: Set<Int>,
         val thermal: Boolean,
         val wide: Boolean,
         val zoom: Boolean,
-        val elapsedMs: Long
+        val elapsedMs: Long,
     )
 
     // Fault barrier: the DJI SDK does not document an exception hierarchy for these calls, so a
@@ -328,7 +350,10 @@ object Payload {
         try {
             setupNewMediaListener()
             val keyBaseline = (keyNewlyGeneratedMediaFile.get() ?: latestGeneratedMediaInfo)?.index
-            val listBaseline = mediaVM.mediaFileListData.value?.data?.maxOfOrNull { it.fileIndex }
+            val listBaseline =
+                mediaVM.mediaFileListData.value
+                    ?.data
+                    ?.maxOfOrNull { it.fileIndex }
             val baselineIndex = listOfNotNull(keyBaseline, listBaseline).maxOrNull()
             latestGeneratedMediaInfo = null
             Log.i(TAG, "Pre-shutter baseline index=$baselineIndex (key=$keyBaseline, list=$listBaseline)")
@@ -343,9 +368,12 @@ object Payload {
 
             val events = awaitShutterEvents(baselineIndex, overallDeadline)
             collectingEvents = false
-            Log.i(TAG, "Events after shutter in ${events.elapsedMs}ms: " +
-                "indices=${events.indices} " +
-                "(thermal=${events.thermal} wide=${events.wide} zoom=${events.zoom})")
+            Log.i(
+                TAG,
+                "Events after shutter in ${events.elapsedMs}ms: " +
+                    "indices=${events.indices} " +
+                    "(thermal=${events.thermal} wide=${events.wide} zoom=${events.zoom})",
+            )
 
             resolveFromSinglePull(mediaVM, baselineIndex, events.indices)?.let { return it }
 
@@ -364,16 +392,19 @@ object Payload {
         var photoError: String? = null
         val photoLatch = CountDownLatch(1)
         mainHandler.post {
-            mediaVM.takePhoto(object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    photoLatch.countDown()
-                }
-                override fun onFailure(error: IDJIError) {
-                    photoError = error.description()
-                    Log.e(TAG, "Photo capture failed: $photoError")
-                    photoLatch.countDown()
-                }
-            })
+            mediaVM.takePhoto(
+                object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        photoLatch.countDown()
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        photoError = error.description()
+                        Log.e(TAG, "Photo capture failed: $photoError")
+                        photoLatch.countDown()
+                    }
+                },
+            )
         }
         if (!photoLatch.await(8, TimeUnit.SECONDS)) {
             Log.e(TAG, "Timeout waiting for shutter")
@@ -394,9 +425,14 @@ object Payload {
      * If NO event arrives within EVENT_FIRST_TIMEOUT_MS the key lagged/dropped (the known
      * rapid-fire failure mode) — bail out and let the pull loop take over.
      */
-    private fun awaitShutterEvents(baselineIndex: Int?, overallDeadline: Long): ShutterEvents {
+    private fun awaitShutterEvents(
+        baselineIndex: Int?,
+        overallDeadline: Long,
+    ): ShutterEvents {
         val seenIndices = HashSet<Int>()
-        var thermalSeen = false; var wideSeen = false; var zoomSeen = false
+        var thermalSeen = false
+        var wideSeen = false
+        var zoomSeen = false
         val phaseStart = System.currentTimeMillis()
         while (System.currentTimeMillis() < overallDeadline) {
             val waitMs = (overallDeadline - System.currentTimeMillis()).coerceAtMost(EVENT_SETTLE_MS)
@@ -411,11 +447,11 @@ object Payload {
                         isZoomLens(ev.dcf_type) -> zoomSeen = true
                     }
                 }
-                if (thermalSeen && wideSeen && zoomSeen) break          // COMPLETE
+                if (thermalSeen && wideSeen && zoomSeen) break // COMPLETE
             } else if (thermalSeen || seenIndices.isNotEmpty()) {
-                break                                                   // SETTLED (event gap elapsed)
+                break // SETTLED (event gap elapsed)
             } else if (System.currentTimeMillis() - phaseStart >= EVENT_FIRST_TIMEOUT_MS) {
-                break                                                   // nothing landed -> fall back
+                break // nothing landed -> fall back
             }
         }
         return ShutterEvents(
@@ -423,7 +459,7 @@ object Payload {
             thermal = thermalSeen,
             wide = wideSeen,
             zoom = zoomSeen,
-            elapsedMs = System.currentTimeMillis() - phaseStart
+            elapsedMs = System.currentTimeMillis() - phaseStart,
         )
     }
 
@@ -437,29 +473,39 @@ object Payload {
     private fun resolveFromSinglePull(
         mediaVM: MediaVM,
         baselineIndex: Int?,
-        seenIndices: Set<Int>
+        seenIndices: Set<Int>,
     ): List<MediaFile>? {
         if (seenIndices.isNotEmpty()) {
-            val data = if (narrowPullSupported)
-                mediaVM.pullAndAwait(
-                    MEDIA_PULL_TIMEOUT_MS,
-                    CAPTURE_PULL_COUNT,
-                    FileListRequestTimeOrderType.NEW_FIRST
-                )
-            else
-                mediaVM.pullAndAwait(MEDIA_PULL_TIMEOUT_MS)
-            val anchor = data.filter { baselineIndex == null || it.fileIndex > baselineIndex }
-                .maxByOrNull { it.fileIndex }
-                ?: data.filter { it.fileIndex in seenIndices }.maxByOrNull { it.fileIndex }
+            val data =
+                if (narrowPullSupported) {
+                    mediaVM.pullAndAwait(
+                        MEDIA_PULL_TIMEOUT_MS,
+                        CAPTURE_PULL_COUNT,
+                        FileListRequestTimeOrderType.NEW_FIRST,
+                    )
+                } else {
+                    mediaVM.pullAndAwait(MEDIA_PULL_TIMEOUT_MS)
+                }
+            val anchor =
+                data
+                    .filter { baselineIndex == null || it.fileIndex > baselineIndex }
+                    .maxByOrNull { it.fileIndex }
+                    ?: data.filter { it.fileIndex in seenIndices }.maxByOrNull { it.fileIndex }
             if (anchor != null) {
                 val groupBase = lensGroupBase(anchor.fileName)
-                val group = data.filter {
-                    lensGroupBase(it.fileName) == groupBase ||
-                        (baselineIndex != null && it.fileIndex > baselineIndex) ||
-                        it.fileIndex in seenIndices
-                }.distinctBy { it.fileName }.ifEmpty { listOf(anchor) }
-                Log.i(TAG, "Resolved ${group.size} file(s) above baseline $baselineIndex in one pull: " +
-                    group.joinToString { "${it.fileName}#${it.fileIndex}" })
+                val group =
+                    data
+                        .filter {
+                            lensGroupBase(it.fileName) == groupBase ||
+                                (baselineIndex != null && it.fileIndex > baselineIndex) ||
+                                it.fileIndex in seenIndices
+                        }.distinctBy { it.fileName }
+                        .ifEmpty { listOf(anchor) }
+                Log.i(
+                    TAG,
+                    "Resolved ${group.size} file(s) above baseline $baselineIndex in one pull: " +
+                        group.joinToString { "${it.fileName}#${it.fileIndex}" },
+                )
                 return group
             }
             Log.w(TAG, "Single pull found no handle for seen indices $seenIndices; falling back to pull loop")
@@ -477,7 +523,7 @@ object Payload {
     private fun resolveByPullLoop(
         mediaVM: MediaVM,
         baselineIndex: Int?,
-        overallDeadline: Long
+        overallDeadline: Long,
     ): List<MediaFile> {
         var bestGroup: List<MediaFile> = emptyList()
         var prevGroupNames: Set<String> = emptySet()
@@ -485,28 +531,36 @@ object Payload {
 
         while (System.currentTimeMillis() < overallDeadline) {
             val narrow = narrowPullSupported
-            val data = if (narrow)
-                mediaVM.pullAndAwait(
-                    MEDIA_PULL_TIMEOUT_MS,
-                    CAPTURE_PULL_COUNT,
-                    FileListRequestTimeOrderType.NEW_FIRST
-                )
-            else
-                mediaVM.pullAndAwait(MEDIA_PULL_TIMEOUT_MS)
+            val data =
+                if (narrow) {
+                    mediaVM.pullAndAwait(
+                        MEDIA_PULL_TIMEOUT_MS,
+                        CAPTURE_PULL_COUNT,
+                        FileListRequestTimeOrderType.NEW_FIRST,
+                    )
+                } else {
+                    mediaVM.pullAndAwait(MEDIA_PULL_TIMEOUT_MS)
+                }
 
-            val anchor = data.filter { baselineIndex == null || it.fileIndex > baselineIndex }
-                .maxByOrNull { it.fileIndex }
+            val anchor =
+                data
+                    .filter { baselineIndex == null || it.fileIndex > baselineIndex }
+                    .maxByOrNull { it.fileIndex }
 
             // Detect a firmware that ignores NEW_FIRST: a FULL newest-window whose max index is
             // strictly BELOW the baseline can only be the oldest files (wrong order). A shot that
             // simply hasn't landed yet leaves max == baseline, so this never misfires on a slow
             // write. After a few such pulls, drop to full pulls for the rest of the session.
             if (narrow && baselineIndex != null && data.size >= CAPTURE_PULL_COUNT &&
-                (data.maxOfOrNull { it.fileIndex } ?: Int.MAX_VALUE) < baselineIndex) {
+                (data.maxOfOrNull { it.fileIndex } ?: Int.MAX_VALUE) < baselineIndex
+            ) {
                 if (++emptyNarrowPulls >= NARROW_PULL_FALLBACK_TRIES) {
                     narrowPullSupported = false
-                    Log.w(TAG, "Narrow pull returned only files older than baseline $baselineIndex " +
-                        "($emptyNarrowPulls times); firmware ignores NEW_FIRST — using full pulls for the session")
+                    Log.w(
+                        TAG,
+                        "Narrow pull returned only files older than baseline $baselineIndex " +
+                            "($emptyNarrowPulls times); firmware ignores NEW_FIRST — using full pulls for the session",
+                    )
                 }
             }
             if (anchor != null) {
@@ -525,14 +579,18 @@ object Payload {
                 val hasThermal = bestGroup.any { isThermalName(it.fileName) }
 
                 // (1) Complete: all three exposed lenses present — return immediately, no extra pull.
-                val complete = hasThermal &&
-                    bestGroup.any { isWideName(it.fileName) } &&
-                    bestGroup.any { isZoomName(it.fileName) }
+                val complete =
+                    hasThermal &&
+                        bestGroup.any { isWideName(it.fileName) } &&
+                        bestGroup.any { isZoomName(it.fileName) }
                 // (2) Quiescent: this refresh added nothing new to the group, thermal present.
                 if (complete || (hasThermal && names == prevGroupNames)) {
-                    Log.i(TAG, "Resolved ${bestGroup.size} file(s) above baseline $baselineIndex " +
-                        "(${if (complete) "complete" else "settled"}): " +
-                        bestGroup.joinToString { "${it.fileName}#${it.fileIndex}" })
+                    Log.i(
+                        TAG,
+                        "Resolved ${bestGroup.size} file(s) above baseline $baselineIndex " +
+                            "(${if (complete) "complete" else "settled"}): " +
+                            bestGroup.joinToString { "${it.fileName}#${it.fileIndex}" },
+                    )
                     return bestGroup
                 }
                 prevGroupNames = names
@@ -542,14 +600,16 @@ object Payload {
         // Hit the safety cap before the group settled. Return the best (largest) group seen so the
         // caller still gets whatever lenses did surface; empty only if nothing ever matched.
         if (bestGroup.isNotEmpty()) {
-            Log.w(TAG, "Group above baseline $baselineIndex did not settle with thermal; returning " +
-                "best-effort ${bestGroup.size} file(s): " + bestGroup.joinToString { "${it.fileName}#${it.fileIndex}" })
+            Log.w(
+                TAG,
+                "Group above baseline $baselineIndex did not settle with thermal; returning " +
+                    "best-effort ${bestGroup.size} file(s): " + bestGroup.joinToString { "${it.fileName}#${it.fileIndex}" },
+            )
             return bestGroup
         }
         Log.e(TAG, "No new files surfaced above baseline $baselineIndex after shutter")
         return emptyList()
     }
-
 
     // Download a MediaFile from the camera straight into memory (no disk round-trip) and return
     // its bytes, or null on failure. Blocking. The DJI-link download is the bottleneck; skipping
@@ -563,22 +623,35 @@ object Payload {
         val downloadLatch = CountDownLatch(1)
         var downloadError: String? = null
 
-        photoFile.pullOriginalMediaFileFromCamera(0L, object : MediaFileDownloadListener {
-            override fun onStart() { /* no-op */ }
-            override fun onProgress(total: Long, current: Long) { /* no-op */ }
-            override fun onRealtimeDataUpdate(data: ByteArray, position: Long) {
-                // Callbacks arrive in order from offset 0, so a plain append reconstructs the file.
-                buffer.write(data, 0, data.size)
-            }
-            override fun onFinish() {
-                downloadLatch.countDown()
-            }
-            override fun onFailure(error: IDJIError?) {
-                downloadError = error?.description() ?: "Unknown download error"
-                Log.e(TAG, "Download failed for ${photoFile.fileName}: $downloadError")
-                downloadLatch.countDown()
-            }
-        })
+        photoFile.pullOriginalMediaFileFromCamera(
+            0L,
+            object : MediaFileDownloadListener {
+                override fun onStart() { /* no-op */ }
+
+                override fun onProgress(
+                    total: Long,
+                    current: Long,
+                ) { /* no-op */ }
+
+                override fun onRealtimeDataUpdate(
+                    data: ByteArray,
+                    position: Long,
+                ) {
+                    // Callbacks arrive in order from offset 0, so a plain append reconstructs the file.
+                    buffer.write(data, 0, data.size)
+                }
+
+                override fun onFinish() {
+                    downloadLatch.countDown()
+                }
+
+                override fun onFailure(error: IDJIError?) {
+                    downloadError = error?.description() ?: "Unknown download error"
+                    Log.e(TAG, "Download failed for ${photoFile.fileName}: $downloadError")
+                    downloadLatch.countDown()
+                }
+            },
+        )
 
         if (!downloadLatch.await(120, TimeUnit.SECONDS)) {
             Log.e(TAG, "Timeout downloading ${photoFile.fileName}")
@@ -601,7 +674,10 @@ object Payload {
     // Decode a JPEG, downscale so its SHORTER side is ~1080 px (aspect preserved, never upscaled),
     // and re-encode to JPEG. The re-encode discards all EXIF/metadata by design. Returns the
     // original bytes unchanged if the image can't be decoded or is already <= the target.
-    private fun downscaleZoomTo1080p(jpeg: ByteArray, label: String): ByteArray {
+    private fun downscaleZoomTo1080p(
+        jpeg: ByteArray,
+        label: String,
+    ): ByteArray {
         // Pass 1: read dimensions only, no pixel allocation.
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
@@ -612,17 +688,21 @@ object Payload {
             return jpeg
         }
         val shortSide = minOf(srcW, srcH)
-        if (shortSide <= ZOOM_TARGET_SHORT_SIDE) return jpeg  // already small enough
+        if (shortSide <= ZOOM_TARGET_SHORT_SIDE) return jpeg // already small enough
 
         // Pass 2: power-of-2 subsample to just above target (bounds peak memory), then exact scale.
         var sample = 1
         while (shortSide / (sample * 2) >= ZOOM_TARGET_SHORT_SIDE) sample *= 2
-        val decoded = BitmapFactory.decodeByteArray(
-            jpeg, 0, jpeg.size, BitmapFactory.Options().apply { inSampleSize = sample }
-        ) ?: run {
-            Log.w(TAG, "Zoom downscale: decode failed $label, sending original")
-            return jpeg
-        }
+        val decoded =
+            BitmapFactory.decodeByteArray(
+                jpeg,
+                0,
+                jpeg.size,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            ) ?: run {
+                Log.w(TAG, "Zoom downscale: decode failed $label, sending original")
+                return jpeg
+            }
 
         val scale = ZOOM_TARGET_SHORT_SIDE.toFloat() / minOf(decoded.width, decoded.height)
         val dstW = (decoded.width * scale).roundToInt()
@@ -650,8 +730,12 @@ object Payload {
     // their subMediaFile variants. The cached snapshot can lag a just-taken shot, so if the name is
     // absent we refresh (event-driven, blocking on each pull's completion) and retry until the
     // overall safety cap. Returns null if it never surfaces.
-    private fun findMediaFile(mediaVM: MediaVM, fileName: String): MediaFile? {
+    private fun findMediaFile(
+        mediaVM: MediaVM,
+        fileName: String,
+    ): MediaFile? {
         setupNewMediaListener()
+
         fun search(data: List<MediaFile>?): MediaFile? {
             data ?: return null
             for (f in data) {
@@ -703,10 +787,11 @@ object Payload {
             files = next
         }
 
-        val items = files.values.joinToString(",") { f ->
-            "{\"name\":${jsonName(f.fileName)},\"index\":${f.fileIndex}," +
-                "\"size\":${f.fileSize},\"type\":${jsonName(f.fileType?.name)}}"
-        }
+        val items =
+            files.values.joinToString(",") { f ->
+                "{\"name\":${jsonName(f.fileName)},\"index\":${f.fileIndex}," +
+                    "\"size\":${f.fileSize},\"type\":${jsonName(f.fileType?.name)}}"
+            }
         Log.i(TAG, "Listed ${files.size} media file(s) on SD card")
         return "{\"count\":${files.size},\"files\":[$items]}"
     }
@@ -732,14 +817,21 @@ object Payload {
 
     // Download one named file into memory, or null when it cannot be resolved or downloaded.
     // The MAVLink FTP server holds the result for a read session. Blocking, call from a worker.
-    fun downloadMediaBytes(mediaVM: MediaVM, fileName: String): ByteArray? {
+    fun downloadMediaBytes(
+        mediaVM: MediaVM,
+        fileName: String,
+    ): ByteArray? {
         val mediaFile = findMediaFile(mediaVM, fileName) ?: return null
         return downloadToBytes(mediaFile)
     }
 
     // Resolve a file by name from the live SD-card list and stream it back as image/jpeg. Works for
     // any file on the card. Blocking, call from a worker thread.
-    fun sendMediaFileByName(mediaVM: MediaVM, fileName: String, outputStream: OutputStream) {
+    fun sendMediaFileByName(
+        mediaVM: MediaVM,
+        fileName: String,
+        outputStream: OutputStream,
+    ) {
         val mediaFile = findMediaFile(mediaVM, fileName)
         if (mediaFile == null) {
             sendErrorResponse(outputStream, "File not found on SD card: $fileName")
@@ -753,7 +845,11 @@ object Payload {
     // Fault barrier: the DJI SDK does not document an exception hierarchy for these calls, so a
     // narrower catch would let an unanticipated type escape. This boundary must degrade, not throw.
     @Suppress("TooGenericExceptionCaught")
-    private fun streamMediaFile(mediaFile: MediaFile, label: String, outputStream: OutputStream) {
+    private fun streamMediaFile(
+        mediaFile: MediaFile,
+        label: String,
+        outputStream: OutputStream,
+    ) {
         try {
             val original = downloadToBytes(mediaFile)
             if (original == null) {
@@ -763,19 +859,21 @@ object Payload {
             // Zoom lens shots are full-res (very large). Downscale to 1080p before sending; the
             // re-encode also strips all EXIF/metadata, which we don't want forwarded. Other lenses
             // (wide/thermal) are sent untouched.
-            val bytes = if (isZoomName(mediaFile.fileName)) {
-                downscaleZoomTo1080p(original, mediaFile.fileName)
-            } else {
-                original
-            }
-            val headers = StringBuilder().apply {
-                append("HTTP/1.1 200 OK\r\n")
-                append("Content-Type: image/jpeg\r\n")
-                append("Content-Length: ${bytes.size}\r\n")
-                append("Content-Disposition: attachment; filename=\"${mediaFile.fileName}\"\r\n")
-                append("Access-Control-Allow-Origin: *\r\n")
-                append("\r\n")
-            }
+            val bytes =
+                if (isZoomName(mediaFile.fileName)) {
+                    downscaleZoomTo1080p(original, mediaFile.fileName)
+                } else {
+                    original
+                }
+            val headers =
+                StringBuilder().apply {
+                    append("HTTP/1.1 200 OK\r\n")
+                    append("Content-Type: image/jpeg\r\n")
+                    append("Content-Length: ${bytes.size}\r\n")
+                    append("Content-Disposition: attachment; filename=\"${mediaFile.fileName}\"\r\n")
+                    append("Access-Control-Allow-Origin: *\r\n")
+                    append("\r\n")
+                }
             outputStream.write(headers.toString().toByteArray())
             outputStream.write(bytes)
             outputStream.flush()
@@ -794,15 +892,19 @@ object Payload {
         }
     }
 
-    fun sendErrorResponse(outputStream: OutputStream, message: String) {
+    fun sendErrorResponse(
+        outputStream: OutputStream,
+        message: String,
+    ) {
         val body = message.toByteArray()
-        val headers = StringBuilder().apply {
-            append("HTTP/1.1 500 Internal Server Error\r\n")
-            append("Content-Type: text/plain\r\n")
-            append("Content-Length: ${body.size}\r\n")
-            append("Access-Control-Allow-Origin: *\r\n")
-            append("\r\n")
-        }
+        val headers =
+            StringBuilder().apply {
+                append("HTTP/1.1 500 Internal Server Error\r\n")
+                append("Content-Type: text/plain\r\n")
+                append("Content-Length: ${body.size}\r\n")
+                append("Access-Control-Allow-Origin: *\r\n")
+                append("\r\n")
+            }
         outputStream.write(headers.toString().toByteArray())
         outputStream.write(body)
         outputStream.flush()
@@ -834,27 +936,29 @@ object Payload {
         payloadWidgetVM: PayloadWidgetVM,
         indexType: PayloadIndexType,
         armSwitchIndex: Int = 0,
-        releaseButtonIndex: Int = 2
-    ): Boolean {
-        return try {
+        releaseButtonIndex: Int = 2,
+    ): Boolean =
+        try {
             if (dropListenerIndex != indexType) {
                 payloadWidgetVM.initListener(indexType)
                 dropListenerIndex = indexType
             }
 
-            val armSwitch = WidgetValue().apply {
-                type = WidgetType.SWITCH
-                index = armSwitchIndex
-                value = 1
-            }
+            val armSwitch =
+                WidgetValue().apply {
+                    type = WidgetType.SWITCH
+                    index = armSwitchIndex
+                    value = 1
+                }
             payloadWidgetVM.setWidgetValue(armSwitch)
             Thread.sleep(300)
 
-            val releaseButton = WidgetValue().apply {
-                type = WidgetType.BUTTON
-                index = releaseButtonIndex
-                value = 1
-            }
+            val releaseButton =
+                WidgetValue().apply {
+                    type = WidgetType.BUTTON
+                    index = releaseButtonIndex
+                    value = 1
+                }
             payloadWidgetVM.setWidgetValue(releaseButton)
             Thread.sleep(300)
 
@@ -871,7 +975,6 @@ object Payload {
             Log.e(TAG, "Payload drop failed: ${e.message}", e)
             false
         }
-    }
 
     // Cancel payload key listeners. Call from the host activity's onDestroy.
     fun destroy() {

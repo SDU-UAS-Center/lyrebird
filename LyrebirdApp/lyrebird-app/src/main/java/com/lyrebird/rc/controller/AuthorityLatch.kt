@@ -37,7 +37,10 @@ internal class AuthorityLatch(
         fun read(aircraftSerial: String): ControlAuthority.Authority?
 
         /** Records the latched authority for this aircraft. */
-        fun write(aircraftSerial: String, authority: ControlAuthority.Authority)
+        fun write(
+            aircraftSerial: String,
+            authority: ControlAuthority.Authority,
+        )
     }
 
     /** What the latch decided about one request. */
@@ -53,7 +56,10 @@ internal class AuthorityLatch(
      * The serial is a provider rather than a value because the aircraft identity arrives
      * asynchronously from the SDK; every read and write asks for it as it is at that moment.
      */
-    fun attach(store: LatchStore, aircraftSerial: () -> String) {
+    fun attach(
+        store: LatchStore,
+        aircraftSerial: () -> String,
+    ) {
         this.store = store
         this.aircraftSerial = aircraftSerial
     }

@@ -15,7 +15,7 @@ internal enum class BrakeReason {
     UPWARD,
 
     /** Something is below and the aircraft is descending toward it. */
-    DOWNWARD
+    DOWNWARD,
 }
 
 /**
@@ -30,7 +30,7 @@ internal data class BrakeDecision(
     val clearanceM: Double,
     val requiredM: Double,
     /** Bearing of the hazard from the nose, degrees. NaN for the vertical cases. */
-    val bearingFromNoseDeg: Double
+    val bearingFromNoseDeg: Double,
 ) {
     companion object {
         val CLEAR = BrakeDecision(false, BrakeReason.NONE, Double.NaN, 0.0, Double.NaN)
@@ -62,7 +62,6 @@ internal data class BrakeDecision(
  * see far enough ahead to stop, and [canStopWithinSensorRange] says so.
  */
 internal object ObstacleBrake {
-
     /** Sensor sweep to stick command: listener hop, decision, control loop tick. */
     const val REACTION_TIME_S = 0.5
 
@@ -92,7 +91,10 @@ internal object ObstacleBrake {
      * Reaction distance plus braking distance plus the standoff. The braking term is the standard
      * v²/2a; it dominates above a few metres per second, which is why the result is not linear.
      */
-    fun requiredClearanceM(speedMps: Double, marginM: Double = DEFAULT_MARGIN_M): Double {
+    fun requiredClearanceM(
+        speedMps: Double,
+        marginM: Double = DEFAULT_MARGIN_M,
+    ): Double {
         val speed = speedMps.coerceAtLeast(0.0)
         val reactionM = speed * REACTION_TIME_S
         val brakingM = speed * speed / (2.0 * BRAKING_DECELERATION_MPS2)
@@ -108,7 +110,7 @@ internal object ObstacleBrake {
     fun canStopWithinSensorRange(
         speedMps: Double,
         sensorRangeM: Double,
-        marginM: Double = DEFAULT_MARGIN_M
+        marginM: Double = DEFAULT_MARGIN_M,
     ): Boolean = requiredClearanceM(speedMps, marginM) <= sensorRangeM
 
     /**
@@ -127,7 +129,7 @@ internal object ObstacleBrake {
         velocityDownMps: Double,
         headingDeg: Double,
         autonomousMotionActive: Boolean,
-        marginM: Double = DEFAULT_MARGIN_M
+        marginM: Double = DEFAULT_MARGIN_M,
     ): BrakeDecision {
         if (!autonomousMotionActive) return BrakeDecision.CLEAR
 
@@ -140,11 +142,12 @@ internal object ObstacleBrake {
         // Hovering: no track to search along, so watch the whole ring but only at the standoff.
         // This is what catches an aircraft that has been commanded to a point it cannot safely
         // start toward, rather than one already moving at something.
-        val (searchBearing, halfAngle, required) = if (travelBearing == null) {
-            Triple(0.0, HOVER_ARC_HALF_ANGLE_DEG, marginM)
-        } else {
-            Triple(travelBearing, TRAVEL_ARC_HALF_ANGLE_DEG, requiredClearanceM(groundSpeed, marginM))
-        }
+        val (searchBearing, halfAngle, required) =
+            if (travelBearing == null) {
+                Triple(0.0, HOVER_ARC_HALF_ANGLE_DEG, marginM)
+            } else {
+                Triple(travelBearing, TRAVEL_ARC_HALF_ANGLE_DEG, requiredClearanceM(groundSpeed, marginM))
+            }
 
         val clearance = reading.minimumInArc(searchBearing, halfAngle)
         // NaN is "no information", never "clear" and never "obstacle". Braking on an absent
@@ -156,7 +159,7 @@ internal object ObstacleBrake {
             reason = BrakeReason.HORIZONTAL,
             clearanceM = clearance,
             requiredM = required,
-            bearingFromNoseDeg = searchBearing
+            bearingFromNoseDeg = searchBearing,
         )
     }
 
@@ -171,7 +174,7 @@ internal object ObstacleBrake {
     private fun verticalDecision(
         reading: ObstacleReading,
         velocityDownMps: Double,
-        marginM: Double
+        marginM: Double,
     ): BrakeDecision? {
         val climbRate = -velocityDownMps
         if (climbRate > MIN_VERTICAL_SPEED_MPS && reading.upwardM.isFinite()) {
@@ -182,7 +185,7 @@ internal object ObstacleBrake {
                     reason = BrakeReason.UPWARD,
                     clearanceM = reading.upwardM,
                     requiredM = required,
-                    bearingFromNoseDeg = Double.NaN
+                    bearingFromNoseDeg = Double.NaN,
                 )
             }
         }
@@ -194,7 +197,7 @@ internal object ObstacleBrake {
                     reason = BrakeReason.DOWNWARD,
                     clearanceM = reading.downwardM,
                     requiredM = required,
-                    bearingFromNoseDeg = Double.NaN
+                    bearingFromNoseDeg = Double.NaN,
                 )
             }
         }
