@@ -33,35 +33,152 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
         fun onReadingsChanged()
     }
 
-    private val telemetryListenerOwner = Any()
-
     @Volatile private var observer: Observer? = null
     private var telemetryStarted = false
+    private var batteryListenersStarted = false
+    private var flightStateObserver: FlightStateObserver? = null
+    private var flightStateListenersStarted = false
+
+    @Volatile private var aircraftConnected = false
+
+    @Volatile private var connectionGeneration = 0L
+
+    @Volatile private var lastObservedAtMillis = 0L
+    private var generationListenerOwner: Any? = null
+    private val connectionState = ConnectionGeneration()
+
+    interface FlightStateObserver {
+        fun onFlyingChanged(flying: Boolean)
+
+        fun onFlightModeChanged(mode: FlightMode)
+
+        fun onSatelliteCountChanged(count: Int)
+    }
+
+    fun setConnectionState(connected: Boolean) {
+        val state = connectionState.update(connected)
+        if (aircraftConnected == state.connected && connectionGeneration == state.generation) return
+        aircraftConnected = state.connected
+        connectionGeneration = state.generation
+        cancelGenerationListeners()
+        if (connected) registerGenerationListeners()
+    }
 
     fun startTelemetry(observer: Observer) {
         this.observer = observer
         if (telemetryStarted) return
         telemetryStarted = true
-        val keys = KeyManager.getInstance()
-        keys.listen(location3DKey, telemetryListenerOwner) { _, value ->
-            this.observer?.onAltitudeChanged(value?.altitude ?: 0.0)
-            this.observer?.onReadingsChanged()
-        }
-        keys.listen(gimbalAttitudeKey, telemetryListenerOwner) { _, value ->
-            this.observer?.onGimbalPitchChanged(value?.pitch ?: 0.0)
-            this.observer?.onReadingsChanged()
-        }
-        keys.listen(attitudeKey, telemetryListenerOwner) { _, _ -> this.observer?.onReadingsChanged() }
-        keys.listen(compassHeadKey, telemetryListenerOwner) { _, _ -> this.observer?.onReadingsChanged() }
-        keys.listen(flightSpeedKey, telemetryListenerOwner) { _, _ -> this.observer?.onReadingsChanged() }
-        keys.listen(batteryKey, telemetryListenerOwner) { _, _ -> this.observer?.onReadingsChanged() }
+        if (aircraftConnected) registerGenerationListeners()
+    }
+
+    fun startFlightStateUpdates(observer: FlightStateObserver) {
+        flightStateObserver = observer
+        flightStateListenersStarted = true
+        if (aircraftConnected) registerGenerationListeners()
     }
 
     fun stop() {
         observer = null
+        flightStateObserver = null
         telemetryStarted = false
-        KeyManager.getInstance().cancelListen(telemetryListenerOwner)
+        batteryListenersStarted = false
+        flightStateListenersStarted = false
+        cancelGenerationListeners()
         KeyManager.getInstance().cancelListen(this)
+    }
+
+    private fun registerGenerationListeners() {
+        cancelGenerationListeners()
+        val generation = connectionGeneration
+        val owner = Any()
+        generationListenerOwner = owner
+        val keys = KeyManager.getInstance()
+
+        fun current(): Boolean = aircraftConnected && connectionGeneration == generation
+        if (telemetryStarted) {
+            keys.listen(location3DKey, owner) { _, value ->
+                if (!current()) return@listen
+                markObserved()
+                observer?.onAltitudeChanged(value?.altitude ?: 0.0)
+                observer?.onReadingsChanged()
+            }
+            keys.listen(gimbalAttitudeKey, owner) { _, value ->
+                if (!current()) return@listen
+                markObserved()
+                observer?.onGimbalPitchChanged(value?.pitch ?: 0.0)
+                observer?.onReadingsChanged()
+            }
+            keys.listen(attitudeKey, owner) { _, _ -> if (current()) readingsChanged() }
+            keys.listen(compassHeadKey, owner) { _, _ -> if (current()) readingsChanged() }
+            keys.listen(flightSpeedKey, owner) { _, _ -> if (current()) readingsChanged() }
+            keys.listen(batteryKey, owner) { _, _ -> if (current()) readingsChanged() }
+        }
+        if (batteryListenersStarted) {
+            keys.listen(chargeRemainingKey, owner) { _, newValue ->
+                if (current()) {
+                    chargeRemainingProcessor.onNext(newValue ?: 0)
+                    markObserved()
+                }
+            }
+            keys.listen(goHomeAssessmentKey, owner) { _, newValue ->
+                if (current()) {
+                    goHomeAssessmentProcessor.onNext(newValue ?: LowBatteryRTHInfo())
+                    markObserved()
+                }
+            }
+            keys.listen(seriousLowBatteryKey, owner) { _, newValue ->
+                if (current()) {
+                    seriousLowBatteryThresholdProcessor.onNext(newValue ?: 0)
+                    markObserved()
+                }
+            }
+            keys.listen(lowBatteryKey, owner) { _, newValue ->
+                if (current()) {
+                    lowBatteryThresholdProcessor.onNext(newValue ?: 0)
+                    markObserved()
+                }
+            }
+            keys.listen(timeNeededToLandKey, owner) { _, newValue ->
+                if (current()) {
+                    timeNeededToLandProcessor.onNext(newValue?.timeNeededToLand ?: 0)
+                    markObserved()
+                }
+            }
+        }
+        if (flightStateListenersStarted) {
+            keys.listen(isFlyingKey, owner) { _, value ->
+                if (current()) {
+                    markObserved()
+                    flightStateObserver?.onFlyingChanged(value ?: false)
+                }
+            }
+            keys.listen(flightModeKey, owner) { _, value ->
+                if (current()) {
+                    markObserved()
+                    flightStateObserver?.onFlightModeChanged(value ?: FlightMode.UNKNOWN)
+                }
+            }
+            keys.listen(satelliteCountKey, owner) { _, value ->
+                if (current()) {
+                    markObserved()
+                    flightStateObserver?.onSatelliteCountChanged(value ?: -1)
+                }
+            }
+        }
+    }
+
+    private fun cancelGenerationListeners() {
+        generationListenerOwner?.let { KeyManager.getInstance().cancelListen(it) }
+        generationListenerOwner = null
+    }
+
+    private fun readingsChanged() {
+        markObserved()
+        observer?.onReadingsChanged()
+    }
+
+    private fun markObserved() {
+        lastObservedAtMillis = System.currentTimeMillis()
     }
 
     override fun read(): AircraftReadings {
@@ -109,6 +226,14 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
             batteryNeededToLandPercent = returnInfo.batteryPercentNeededToLand,
         )
     }
+
+    fun readState(): AircraftState =
+        AircraftState(
+            readings = read(),
+            connected = aircraftConnected,
+            connectionGeneration = connectionGeneration,
+            observedAtMillis = lastObservedAtMillis,
+        )
 
     // Battery and flight time data processors
     internal val chargeRemainingProcessor: DataProcessor<Int> = DataProcessor.create(0)
@@ -167,21 +292,8 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
     internal val isFlyingKey: DJIKey<Boolean> = FlightControllerKey.KeyIsFlying.create()
 
     internal fun setupBatteryAndRthListeners() {
-        KeyManager.getInstance().listen(chargeRemainingKey, this) { _, newValue ->
-            chargeRemainingProcessor.onNext(newValue ?: 0)
-        }
-        KeyManager.getInstance().listen(goHomeAssessmentKey, this) { _, newValue ->
-            goHomeAssessmentProcessor.onNext(newValue ?: LowBatteryRTHInfo())
-        }
-        KeyManager.getInstance().listen(seriousLowBatteryKey, this) { _, newValue ->
-            seriousLowBatteryThresholdProcessor.onNext(newValue ?: 0)
-        }
-        KeyManager.getInstance().listen(lowBatteryKey, this) { _, newValue ->
-            lowBatteryThresholdProcessor.onNext(newValue ?: 0)
-        }
-        KeyManager.getInstance().listen(timeNeededToLandKey, this) { _, newValue ->
-            timeNeededToLandProcessor.onNext(newValue?.timeNeededToLand ?: 0)
-        }
+        batteryListenersStarted = true
+        if (aircraftConnected) registerGenerationListeners()
     }
 
     internal fun getLocation3D(): LocationCoordinate3D = location3DKey.get(LocationCoordinate3D(0.0, 0.0, .0))

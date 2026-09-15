@@ -1447,6 +1447,7 @@ class FlightDeckActivity :
     private fun applyAircraftConnectionState(isConnected: Boolean) {
         val wasConnected = aircraftConnected
         aircraftConnected = isConnected
+        aircraftTelemetry.setConnectionState(isConnected)
         logConnectionKeySnapshot("flightController listener fired: $wasConnected -> $isConnected")
         if (isConnected && !wasConnected) {
             // The startup serial fetch fails when the app boots before the aircraft links (the
@@ -2306,7 +2307,7 @@ class FlightDeckActivity :
         }
         // Upgrade IDLE → HOVERING when the FC says the drone is airborne
         val resolved =
-            if (appStatus == DroneController.DroneStatus.IDLE && aircraftTelemetry.isFlyingKey.get(false)) {
+            if (appStatus == DroneController.DroneStatus.IDLE && aircraftTelemetry.readState().readings.flying) {
                 DroneController.DroneStatus.HOVERING
             } else {
                 appStatus
@@ -2459,54 +2460,53 @@ class FlightDeckActivity :
     }
 
     private fun setupFlightStateListeners() {
-        // Keep isAirborne in DroneController in sync with FC telemetry — used by
-        // VirtualStickVM to gate manual-override detection: only fire when airborne
-        // (prevents ground-level RC drift false-positives) or during autonomous flight.
-        KeyManager.getInstance().listen(aircraftTelemetry.isFlyingKey, this) { _, newValue ->
-            val flying = newValue ?: false
-            val wasFlying = DroneController.isAirborne
-            DroneController.isAirborne = flying
-            mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
-            // Flight log session lifecycle: open a new file on takeoff, close it on landing.
-            if (!wasFlying && flying) {
-                LyrebirdFlightLogger.startSession()
-                // Start AutoSensing on takeoff if DJI onboard detections are selected.
-                if (settings.activeDetectionSource() == DetectionSource.DJI_ONBOARD && !isAutoSensingActive) {
-                    startAutoSensing()
-                }
-            } else if (wasFlying && !flying) {
-                // 10-second grace period before closing in case of brief mid-air telemetry glitch.
-                mainHandler.postDelayed({
-                    if (!DroneController.isAirborne) {
-                        LyrebirdFlightLogger.endSession("landed")
-                        // Sync DJI TXT records — idempotent, safe to run immediately.
-                        // Any file the SDK hasn't finalised yet will be picked up next launch.
-                        syncDjiFlightLogsInBackground()
+        aircraftTelemetry.startFlightStateUpdates(
+            object : V5AircraftTelemetrySource.FlightStateObserver {
+                override fun onFlyingChanged(flying: Boolean) {
+                    val wasFlying = DroneController.isAirborne
+                    DroneController.isAirborne = flying
+                    mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
+                    // Flight log session lifecycle: open a new file on takeoff, close it on landing.
+                    if (!wasFlying && flying) {
+                        LyrebirdFlightLogger.startSession()
+                        // Start AutoSensing on takeoff if DJI onboard detections are selected.
+                        if (settings.activeDetectionSource() == DetectionSource.DJI_ONBOARD && !isAutoSensingActive) {
+                            startAutoSensing()
+                        }
+                    } else if (wasFlying && !flying) {
+                        // 10-second grace period before closing in case of brief mid-air telemetry glitch.
+                        mainHandler.postDelayed({
+                            if (!DroneController.isAirborne) {
+                                LyrebirdFlightLogger.endSession("landed")
+                                // Sync DJI TXT records — idempotent, safe to run immediately.
+                                // Any file the SDK hasn't finalised yet will be picked up next launch.
+                                syncDjiFlightLogsInBackground()
+                            }
+                        }, 10_000L)
                     }
-                }, 10_000L)
-            }
-        }
-        setupRthModeOverrideListener()
-    }
+                }
 
-    private fun setupRthModeOverrideListener() {
-        // Detect RTH triggered from the RC controller (not from our server HTTP request).
-        // When the server triggers RTH it calls startReturnToHome() which sets droneStatus
-        // to RETURNING_HOME BEFORE the DJI SDK switches to GO_HOME flight mode.
-        // If we see GO_HOME but our status is not RETURNING_HOME, the pilot pressed the
-        // RTH button on the physical controller → activate manual override so the server
-        // cannot accidentally interfere with the returning drone.
-        KeyManager.getInstance().listen(aircraftTelemetry.flightModeKey, this) { _, newValue ->
-            mainHandler.post {
-                cachedFlightMode = newValue ?: FlightMode.UNKNOWN
-                reevaluateAircraftIdle()
-            }
-            if (newValue == FlightMode.GO_HOME &&
-                DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME
-            ) {
-                mainHandler.post { DroneController.activateManualOverride() }
-            }
-        }
+                override fun onFlightModeChanged(mode: FlightMode) {
+                    mainHandler.post {
+                        cachedFlightMode = mode
+                        reevaluateAircraftIdle()
+                    }
+                    // Detect RTH triggered from the RC controller, not from our server HTTP request.
+                    if (mode == FlightMode.GO_HOME &&
+                        DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME
+                    ) {
+                        mainHandler.post { DroneController.activateManualOverride() }
+                    }
+                }
+
+                override fun onSatelliteCountChanged(count: Int) {
+                    mainHandler.post {
+                        cachedSatelliteCount = count
+                        reevaluateAircraftIdle()
+                    }
+                }
+            },
+        )
     }
 
     // ==================== Aircraft idle (low-power / eco) detection ====================
@@ -2518,16 +2518,9 @@ class FlightDeckActivity :
      * is delayed by [idleDetectDebounceMs] so transient states never flash it.
      */
     private fun setupAircraftIdleMonitor() {
-        cachedFlightMode = KeyManager.getInstance().getValue(aircraftTelemetry.flightModeKey) ?: FlightMode.UNKNOWN
-        cachedSatelliteCount = KeyManager.getInstance().getValue(aircraftTelemetry.satelliteCountKey) ?: -1
-        // Flight mode is also observed by setupRthModeOverrideListener (same key, same observer),
-        // which keeps cachedFlightMode in sync and re-evaluates idle.
-        KeyManager.getInstance().listen(aircraftTelemetry.satelliteCountKey, this) { _, newValue ->
-            mainHandler.post {
-                cachedSatelliteCount = newValue ?: -1
-                reevaluateAircraftIdle()
-            }
-        }
+        val readings = aircraftTelemetry.readState().readings
+        cachedFlightMode = FlightMode.entries.firstOrNull { it.name == readings.flightMode } ?: FlightMode.UNKNOWN
+        cachedSatelliteCount = readings.satelliteCount
         reevaluateAircraftIdle()
     }
 
@@ -3361,7 +3354,7 @@ class FlightDeckActivity :
     private fun isHomeSet(): Boolean {
         val shouldLatchHomePoint =
             !isHomePointSetLatch &&
-                !aircraftTelemetry.isFlyingKey.get(false) &&
+                !aircraftTelemetry.readState().readings.flying &&
                 run {
                     val home = aircraftTelemetry.getHomeLocation()
                     val hasHomeCoordinates = home.latitude != 0.0 && home.longitude != 0.0
@@ -3611,7 +3604,7 @@ class FlightDeckActivity :
      */
     private fun buildFleetBeacon(): FleetBeacon? {
         if (!::sharedPreferences.isInitialized) return null
-        return aircraftTelemetry.read().toFleetBeacon(
+        return aircraftTelemetry.readState().readings.toFleetBeacon(
             deviceId = fleetDeviceId(),
             droneName = droneName,
             systemId = currentMavlinkSystemId(),
@@ -3752,7 +3745,7 @@ class FlightDeckActivity :
      * reports armed while the aircraft is sitting on the ground.
      */
     private fun buildMavlinkSnapshot(): MavlinkSnapshot {
-        val readings = aircraftTelemetry.read()
+        val readings = aircraftTelemetry.readState().readings
         val lrfTarget = lrfTargetLocation
 
         return readings.toMavlinkSnapshot(
@@ -4729,7 +4722,7 @@ class FlightDeckActivity :
             val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
                 val airborne =
-                    aircraftTelemetry.isFlyingKey.get(false) &&
+                    aircraftTelemetry.readState().readings.flying &&
                         DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
                 if (airborne) {
                     Log.i(TAG, "Take-off complete; climbing to ${altitudeMeters}m")
@@ -5187,7 +5180,7 @@ class FlightDeckActivity :
                 val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
                 while (running && System.currentTimeMillis() < deadline) {
                     val airborne =
-                        aircraftTelemetry.isFlyingKey.get(false) &&
+                        aircraftTelemetry.readState().readings.flying &&
                             DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
                     if (airborne) return true
                     runCatching { Thread.sleep(TAKEOFF_POLL_MS) }.onFailure {
@@ -5354,7 +5347,7 @@ class FlightDeckActivity :
     }
 
     private fun rebuildRealTelemetryCache() {
-        val readings = aircraftTelemetry.read()
+        val readings = aircraftTelemetry.readState().readings
         readings.applyTo(telemetryCoordinator)
         val location = readings.location
         val homeLocation = readings.home
