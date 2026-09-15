@@ -41,6 +41,7 @@ internal interface LyrebirdCommandHost {
     val droneName: String
     val media: LyrebirdMediaPort
     val detection: LyrebirdDetectionPort
+    val flight: LyrebirdFlightPort
 
     /** Full settings snapshot (app prefs + DJI flight limits) as JSON, for GET /config/settings. */
     fun readSettingsJson(): String
@@ -93,23 +94,27 @@ internal class LyrebirdHttpCommandHandler(
 ) {
         private val postRoutes: Map<String, (String) -> String> = mapOf(
             "/send/takeoff" to {
-                DroneController.startTakeOff()
+                host.flight.takeoff()
                 "Takeoff command sent."
             },
             "/send/land" to {
-                DroneController.startLanding()
+                host.flight.land()
                 "Landing command sent."
             },
             "/send/RTH" to {
-                DroneController.startReturnToHome()
+                host.flight.returnToHome()
                 "Return to home command sent."
             },
             "/send/stick" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("stick")) {
+                if (host.flight.stick(
+                        LyrebirdHttpCommandParser.parseStick(postData).let {
+                            StickCommand(it.leftX, it.leftY, it.rightX, it.rightY)
+                        },
+                    ).outcome == MavlinkCommandOutcome.DENIED
+                ) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
                     val command = LyrebirdHttpCommandParser.parseStick(postData)
-                    DroneController.setStick(command.leftX, command.leftY, command.rightX, command.rightY)
                     "Received: leftX: ${command.leftX}, leftY: ${command.leftY}, " +
                         "rightX: ${command.rightX}, rightY: ${command.rightY}"
                 }
@@ -256,20 +261,22 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/gotoYaw" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoYaw")) {
+                val yaw = postData.split(",")[0].toDouble()
+                val result = host.flight.gotoYaw(yaw)
+                if (result.outcome == MavlinkCommandOutcome.DENIED) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
-                    val yaw = postData.split(",")[0].toDouble()
-                    val seq = DroneController.gotoYaw(yaw)
+                    val seq = result.pending?.seq ?: 0L
                     "YAW_ACCEPTED seq=$seq Yaw=$yaw"
                 }
             },
             "/send/gotoAltitude" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoAltitude")) {
+                val targetAltitude = postData.split(",")[0].toDouble()
+                val result = host.flight.gotoAltitude(targetAltitude)
+                if (result.outcome == MavlinkCommandOutcome.DENIED) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
-                    val targetAltitude = postData.split(",")[0].toDouble()
-                    val seq = DroneController.gotoAltitude(targetAltitude)
+                    val seq = result.pending?.seq ?: 0L
                     "ALTITUDE_ACCEPTED seq=$seq Altitude: $targetAltitude"
                 }
             },
@@ -281,19 +288,17 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/abortMission" to {
-                DroneController.setStick(0.0f, 0.0f, 0.0f, 0.0f)
-                DroneController.disableVirtualStick()
+                host.flight.abortMission()
                 "Received: abortMission"
             },
             "/send/abortAll" to {
-                DroneController.abortAllMissions()
+                host.flight.abortAll()
                 "Received: abortAll"
             },
             "/send/enableVirtualStick" to {
-                if (DroneController.shouldRejectAutonomousCommand("enableVirtualStick")) {
+                if (host.flight.enableVirtualStick().outcome == MavlinkCommandOutcome.DENIED) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
-                    DroneController.enableVirtualStick()
                     "Received: enableVirtualStick"
                 }
             },

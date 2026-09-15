@@ -352,6 +352,74 @@ class FlightDeckActivity :
         }
     }
 
+    override val flight: LyrebirdFlightPort by lazy {
+        object : LyrebirdFlightPort {
+            override fun takeoff(): CommandResult {
+                DroneController.startTakeOff()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun land(): CommandResult {
+                DroneController.startLanding()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun returnToHome(): CommandResult {
+                DroneController.startReturnToHome()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun stick(command: StickCommand): CommandResult {
+                if (DroneController.shouldRejectAutonomousCommand("stick")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                DroneController.setStick(command.leftX, command.leftY, command.rightX, command.rightY)
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun gotoYaw(yawDeg: Double): CommandResult {
+                if (DroneController.shouldRejectAutonomousCommand("gotoYaw")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                val seq = DroneController.gotoYaw(yawDeg)
+                return CommandResult(
+                    MavlinkCommandOutcome.ACCEPTED,
+                    pending = PendingCommand(PendingKind.YAW, seq),
+                )
+            }
+
+            override fun gotoAltitude(altitudeM: Double): CommandResult {
+                if (DroneController.shouldRejectAutonomousCommand("gotoAltitude")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                val seq = DroneController.gotoAltitude(altitudeM)
+                return CommandResult(
+                    MavlinkCommandOutcome.ACCEPTED,
+                    pending = PendingCommand(PendingKind.ALTITUDE, seq),
+                )
+            }
+
+            override fun abortMission(): CommandResult {
+                DroneController.setStick(0.0f, 0.0f, 0.0f, 0.0f)
+                DroneController.disableVirtualStick()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun abortAll(): CommandResult {
+                DroneController.abortAllMissions()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+
+            override fun enableVirtualStick(): CommandResult {
+                if (DroneController.shouldRejectAutonomousCommand("enableVirtualStick")) {
+                    return CommandResult(MavlinkCommandOutcome.DENIED)
+                }
+                DroneController.enableVirtualStick()
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+            }
+        }
+    }
+
     // Servers
     private var session: LyrebirdSession? = null
 

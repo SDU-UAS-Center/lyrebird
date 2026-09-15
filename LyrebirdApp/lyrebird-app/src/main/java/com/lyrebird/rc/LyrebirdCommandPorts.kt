@@ -1,6 +1,7 @@
 package com.lyrebird.rc
 
 import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
+import com.lyrebird.rc.mavlink.CommandResult
 import com.lyrebird.rc.telemetry.GeoPoint3D
 import java.io.OutputStream
 
@@ -23,4 +24,23 @@ interface LyrebirdMediaPort {
 interface LyrebirdDetectionPort {
     val isAutoSensingActive: Boolean
     fun currentTargets(): List<DetectedTargetSnapshot>
+}
+
+data class StickCommand(
+    val leftX: Float,
+    val leftY: Float,
+    val rightX: Float,
+    val rightY: Float,
+)
+
+interface LyrebirdFlightPort {
+    fun takeoff(): CommandResult
+    fun land(): CommandResult
+    fun returnToHome(): CommandResult
+    fun stick(command: StickCommand): CommandResult
+    fun gotoYaw(yawDeg: Double): CommandResult
+    fun gotoAltitude(altitudeM: Double): CommandResult
+    fun abortMission(): CommandResult
+    fun abortAll(): CommandResult
+    fun enableVirtualStick(): CommandResult
 }
