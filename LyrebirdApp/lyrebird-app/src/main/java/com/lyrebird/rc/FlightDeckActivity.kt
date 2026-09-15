@@ -103,6 +103,7 @@ import com.lyrebird.rc.telemetry.toMavlinkSnapshot
 import com.lyrebird.rc.util.NetworkUtils
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
+import com.lyrebird.rc.webrtc.StreamingTargetPolicy
 import com.lyrebird.rc.webrtc.TelemetryProvider
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
@@ -2072,26 +2073,26 @@ class FlightDeckActivity :
         val publisherHealthy =
             webRTCStreamer?.isRunning() == true &&
                 webRTCStreamer?.isPublishing() == true
-        if (lastClientIp == clientIp && lastWhipUrl != null) {
-            if (publisherHealthy) return
-            Log.w(TAG, "Restarting stale WHIP publisher for $clientIp")
-        }
-        // Guard against stream hijacking: a healthy publisher must not be retargeted just
-        // because a different client connected to the telemetry port. Field incidents:
-        // phones probing each other's telemetry port made the app repoint WHIP at another
-        // phone (which runs no MediaMTX), killing video until an app restart. Only retarget
-        // when the current publisher is unhealthy, or when no client was ever recorded.
-        if (lastClientIp != null && lastClientIp != clientIp && publisherHealthy) {
-            Log.w(
-                TAG,
-                "Ignoring telemetry client $clientIp while healthy publisher targets $lastClientIp",
+        val decision =
+            StreamingTargetPolicy.decide(
+                previousClientIp = lastClientIp,
+                previousWhipUrl = lastWhipUrl,
+                publisherHealthy = publisherHealthy,
+                clientIp = clientIp,
             )
+        if (!decision.shouldStart) {
+            if (lastClientIp != clientIp) {
+                Log.w(TAG, "Ignoring telemetry client $clientIp while healthy publisher targets $lastClientIp")
+            }
             return
         }
+        if (lastClientIp == clientIp && lastWhipUrl != null) {
+            Log.w(TAG, "Restarting stale WHIP publisher for $clientIp")
+        }
         Log.i(TAG, "Starting active streaming for $clientIp")
-        lastClientIp = clientIp
+        lastClientIp = decision.targetIp
         rebuildTelemetryCache()
-        startActiveStreaming(clientIp)
+        startActiveStreaming(decision.targetIp)
     }
 
     override fun restartActiveStreaming() {
