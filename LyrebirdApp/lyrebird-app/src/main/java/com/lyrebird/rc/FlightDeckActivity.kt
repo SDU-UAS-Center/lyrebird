@@ -37,6 +37,7 @@ import com.lyrebird.rc.controller.SafetyLatchStore
 import com.lyrebird.rc.controller.V5FlightSettingsActions
 import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.controller.WaylineMissionHelper
+import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.EdgeDetectionConfig
 import com.lyrebird.rc.edge.EdgeDetectionController
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
@@ -2193,29 +2194,24 @@ class FlightDeckActivity :
     }
 
     private fun updateDetectionTelemetryState() {
-        val source = settings.activeDetectionSource()
         val selectedSource = settings.getDetectionSource()
+        val projected =
+            DetectionTelemetryProjection.project(
+                selectedSource = selectedSource.prefValue,
+                enabled = settings.isDetectionsEnabled(),
+                onboardActive = isAutoSensingActive,
+                localActive = edgeDetectionController != null,
+                modelName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null),
+                threshold = settings.getEdgeConfidenceThreshold(),
+            )
 
-        TelemetryProvider.currentDetectionSource = source.prefValue
-        TelemetryProvider.currentDetectionActive =
-            when (source) {
-                DetectionSource.NONE -> false
-                DetectionSource.DJI_ONBOARD -> isAutoSensingActive
-                DetectionSource.YOLO_ON_PHONE -> edgeDetectionController != null
-            }
-        TelemetryProvider.currentDetectionModel =
-            when (source) {
-                DetectionSource.YOLO_ON_PHONE -> sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null)
-                else -> null
-            }
-        TelemetryProvider.currentDetectionThreshold =
-            when (source) {
-                DetectionSource.YOLO_ON_PHONE -> settings.getEdgeConfidenceThreshold()
-                else -> null
-            }
+        TelemetryProvider.currentDetectionSource = projected.source
+        TelemetryProvider.currentDetectionActive = projected.active
+        TelemetryProvider.currentDetectionModel = projected.modelName
+        TelemetryProvider.currentDetectionThreshold = projected.threshold
 
         telemetryCoordinator.isDetectionsEnabled = settings.isDetectionsEnabled()
-        telemetryCoordinator.detectionSource = source.prefValue
+        telemetryCoordinator.detectionSource = projected.source
         telemetryCoordinator.selectedDetectionSource = selectedSource.prefValue
         telemetryCoordinator.detectionMenuLabel = selectedSource.menuLabel
         telemetryCoordinator.isAutoSensingActive = isAutoSensingActive
