@@ -79,6 +79,8 @@ import com.lyrebird.rc.server.MavlinkRuntimeCallbacks
 import com.lyrebird.rc.server.NetworkRuntimeCallbacks
 import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
+import com.lyrebird.rc.server.ProcessStreamingRuntimeRegistry
+import com.lyrebird.rc.server.StreamingRuntimeCallbacks
 import com.lyrebird.rc.settings.AircraftStorage
 import com.lyrebird.rc.settings.DetectionSource
 import com.lyrebird.rc.settings.DroneSettingsProfiles
@@ -102,11 +104,10 @@ import com.lyrebird.rc.telemetry.toFleetBeacon
 import com.lyrebird.rc.telemetry.toMavlinkSnapshot
 import com.lyrebird.rc.util.NetworkUtils
 import com.lyrebird.rc.util.ToastUtils
-import com.lyrebird.rc.webrtc.StreamingTargetPolicy
 import com.lyrebird.rc.webrtc.TelemetryProvider
 import com.lyrebird.rc.webrtc.V5NativeStreamingCoordinator
 import com.lyrebird.rc.webrtc.V5NativeStreamingHost
-import com.lyrebird.rc.webrtc.V5WebRtcStreamerFactory
+import com.lyrebird.rc.webrtc.WebRTCMediaOptions
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
 import com.lyrebird.rc.webrtc.WebRTCStreamer
@@ -165,6 +166,7 @@ class FlightDeckActivity :
     LyrebirdCommandHost,
     NetworkRuntimeCallbacks,
     MavlinkRuntimeCallbacks,
+    StreamingRuntimeCallbacks,
     FleetRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
@@ -631,13 +633,7 @@ class FlightDeckActivity :
 
             override fun readFileBytes(name: String): ByteArray? = Payload.downloadMediaBytes(mediaVM, name)
         }
-    private var webRTCStreamer: WebRTCStreamer? = null
     private var videoSettingRestartScheduled = false
-
-    @Volatile private var lastWhipUrl: String? = null
-
-    // Reset on success; drives the override fallback below
-    @Volatile private var lastClientIp: String? = null
 
     private var droneSerialNumber: String = "UNKNOWN"
 
@@ -730,12 +726,13 @@ class FlightDeckActivity :
 
                 override fun setStreamingMode(mode: StreamingMode) = this@FlightDeckActivity.setStreamingMode(mode)
 
-                override fun shouldRestartActiveStreaming() = ProcessNetworkRuntimeRegistry.hasTelemetryClients() || lastWhipUrl != null
+                override fun shouldRestartActiveStreaming() =
+                    ProcessNetworkRuntimeRegistry.hasTelemetryClients() || ProcessStreamingRuntimeRegistry.hasTarget()
 
                 override fun restartActiveStreaming() = this@FlightDeckActivity.restartActiveStreaming()
 
                 override fun changeVideoOptions() {
-                    webRTCStreamer?.changeMediaOptions(settings.buildWebRTCOptions())
+                    ProcessStreamingRuntimeRegistry.changeMediaOptions(settings.buildWebRTCOptions())
                 }
 
                 override fun toggleDjiSurfaceH264Encoder() = this@FlightDeckActivity.toggleDjiSurfaceH264Encoder()
@@ -805,11 +802,6 @@ class FlightDeckActivity :
     private val deviceStatusSource by lazy { DeviceStatusSource(applicationContext) }
     private var wifiManager: WifiManager? = null
     private var multicastLock: WifiManager.MulticastLock? = null
-
-    // Keeps the radio in low-latency mode while WHIP is publishing: flight 1 showed silent
-    // frame stalls at the encoder with zero RTP loss, a signature of Wi-Fi power save on the
-    // publishing device. Acquired when streaming starts, released in onDestroy.
-    private var lowLatencyWifiLock: WifiManager.WifiLock? = null
 
     @Volatile private var lastWebRTCMetrics = WebRTCStreamMetrics()
 
@@ -1679,13 +1671,13 @@ class FlightDeckActivity :
 
     override fun setWebRtcResolution(value: String): Boolean {
         if (!settings.setWebRtcResolution(value)) return false
-        mainHandler.post { webRTCStreamer?.changeMediaOptions(settings.buildWebRTCOptions()) }
+        mainHandler.post { ProcessStreamingRuntimeRegistry.changeMediaOptions(settings.buildWebRTCOptions()) }
         return true
     }
 
     override fun setWebRtcFps(value: Int): Boolean {
         if (!settings.setWebRtcFps(value)) return false
-        mainHandler.post { webRTCStreamer?.changeMediaOptions(settings.buildWebRTCOptions()) }
+        mainHandler.post { ProcessStreamingRuntimeRegistry.changeMediaOptions(settings.buildWebRTCOptions()) }
         return true
     }
 
@@ -1889,7 +1881,7 @@ class FlightDeckActivity :
             when (mode) {
                 StreamingMode.WEBRTC -> lastWebRTCMetrics.compactLabel()
                 StreamingMode.RTMP -> {
-                    val serverIp = lastClientIp ?: NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
+                    val serverIp = ProcessStreamingRuntimeRegistry.currentClientIp() ?: NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
                     val rtmpUrl = getRtmpUrl(serverIp)
                     "RTMP ${if (liveStreamVM.isStreaming()) "running" else "idle"} url $rtmpUrl $lastNativeStreamStatus"
                 }
@@ -1935,79 +1927,6 @@ class FlightDeckActivity :
         )}","recoveryCount":$recoveryCount,"lastError":$lastErrorJson,"qualityLimitationReason":$qualityLimitationReasonJson,"framesEncodedNotSent":$framesEncodedNotSentJson,"sendBitrateBps":$sendBitrateBpsJson,"framesEncoded":$framesEncodedJson,"framesSent":$framesSentJson}"""
     }
 
-    /**
-     * Hold WIFI_MODE_FULL_LOW_LATENCY while publishing. Flight 1 showed dips with zero RTP loss
-     * and a clean phone-side pipeline, consistent with radio power-save stalls between the
-     * encoder and the air. Idempotent: repeated streaming restarts keep one lock held.
-     */
-    private fun acquireLowLatencyWifiLock() {
-        if (lowLatencyWifiLock?.isHeld == true) return
-        runCatching {
-            lowLatencyWifiLock =
-                wifiManager?.createWifiLock(
-                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY,
-                    "LyrebirdStreamingWifiLock",
-                )
-            lowLatencyWifiLock?.acquire()
-            Log.i(TAG, "Low-latency Wi-Fi lock acquired for streaming")
-        }.onFailure { error ->
-            Log.w(TAG, "Could not acquire low-latency Wi-Fi lock: ${error.message}")
-        }
-    }
-
-    /**
-     * Start WHIP publishing on the existing WebRTC streamer.
-     * Called automatically when the bridge connects to the telemetry server.
-     */
-    private fun startActiveStreaming(clientIp: String) {
-        if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { startActiveStreaming(clientIp) }
-            return
-        }
-        acquireLowLatencyWifiLock()
-        val mode = settings.getStreamingMode()
-        Log.i(TAG, "Starting active streaming in mode: ${mode.menuLabel}")
-
-        webRTCStreamer?.stop()
-
-        if (mode != StreamingMode.WEBRTC) {
-            nativeStreamingCoordinator.start(mode, clientIp)
-            return
-        }
-
-        val whipUrl = buildWhipUrl(clientIp)
-        lastWhipUrl = whipUrl
-        val streamer = webRTCStreamer
-        if (streamer == null) {
-            Log.w(TAG, "Cannot start WHIP - WebRTCStreamer not initialized yet")
-            lastNativeStreamStatus = "error: streamer not initialized"
-            updateStreamingFooter()
-            return
-        }
-        runCatching {
-            streamer.startWhip(whipUrl, whipUrlProvider = { buildWhipUrl(clientIp) })
-            Log.i(TAG, "WHIP publishing started: $whipUrl")
-            lastNativeStreamStatus = "running"
-            updateStreamingFooter()
-        }.onFailure { error ->
-            Log.e(TAG, "Failed to start WHIP publishing: ${error.message}", error)
-            lastNativeStreamStatus = "error: ${error.message ?: "start failed"}"
-            updateStreamingFooter()
-        }
-    }
-
-    private fun stopActiveStreaming() {
-        if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { stopActiveStreaming() }
-            return
-        }
-        Log.i(TAG, "Stopping active streaming...")
-        webRTCStreamer?.stop()
-        nativeStreamingCoordinator.stop()
-        lastNativeStreamStatus = "stopping"
-        mainHandler.post { updateStreamingFooter() }
-    }
-
     private fun showStreamToast(msg: String) {
         mainHandler.post {
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
@@ -2023,36 +1942,11 @@ class FlightDeckActivity :
      * rebuild the identical publish would drop the picture for everyone watching it.
      */
     private fun startStreamingForClient(clientIp: String) {
-        val publisherHealthy =
-            webRTCStreamer?.isRunning() == true &&
-                webRTCStreamer?.isPublishing() == true
-        val decision =
-            StreamingTargetPolicy.decide(
-                previousClientIp = lastClientIp,
-                previousWhipUrl = lastWhipUrl,
-                publisherHealthy = publisherHealthy,
-                clientIp = clientIp,
-            )
-        if (!decision.shouldStart) {
-            if (lastClientIp != clientIp) {
-                Log.w(TAG, "Ignoring telemetry client $clientIp while healthy publisher targets $lastClientIp")
-            }
-            return
-        }
-        if (lastClientIp == clientIp && lastWhipUrl != null) {
-            Log.w(TAG, "Restarting stale WHIP publisher for $clientIp")
-        }
-        Log.i(TAG, "Starting active streaming for $clientIp")
-        lastClientIp = decision.targetIp
-        rebuildTelemetryCache()
-        startActiveStreaming(decision.targetIp)
+        ProcessStreamingRuntimeRegistry.startForClient(clientIp)
     }
 
     override fun restartActiveStreaming() {
-        val lastIp =
-            lastClientIp ?: lastWhipUrl?.let { runCatching { Uri.parse(it).host }.getOrNull() } ?: NetworkUtils
-                .getDeviceIpAddress() ?: "127.0.0.1"
-        startActiveStreaming(lastIp)
+        ProcessStreamingRuntimeRegistry.restartActiveStreaming()
     }
 
     // ==================== End Video Mode Toggle ====================
@@ -2271,7 +2165,8 @@ class FlightDeckActivity :
     private fun startEdgeDetection() {
         if (localDetectionProvider.isActive) return
 
-        val startCheck = edgeDetectionStartCheck(getEdgeModelUri(), webRTCStreamer)
+        val streamer = ProcessStreamingRuntimeRegistry.streamer()
+        val startCheck = edgeDetectionStartCheck(getEdgeModelUri(), streamer)
         if (startCheck !is EdgeDetectionStartCheck.Ready) {
             handleEdgeDetectionStartFailure(startCheck)
             return
@@ -2284,7 +2179,7 @@ class FlightDeckActivity :
             modelUri = startCheck.modelUri,
             labels = getEdgeLabels(),
             confidenceThreshold = settings.getEdgeConfidenceThreshold(),
-            streamer = webRTCStreamer ?: return,
+            streamer = streamer ?: return,
         )
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
@@ -2352,7 +2247,7 @@ class FlightDeckActivity :
 
     private fun stopEdgeDetection() {
         if (!localDetectionProvider.isActive) return
-        localDetectionProvider.stop(webRTCStreamer)
+        localDetectionProvider.stop(ProcessStreamingRuntimeRegistry.streamer())
         clearAutoSensingState()
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
@@ -2947,8 +2842,50 @@ class FlightDeckActivity :
     override fun gapTelemetryJson(): String = getGapTelemetryJson()
 
     override fun onTelemetryClient(clientIp: String) {
-        mainHandler.post { startStreamingForClient(clientIp) }
+        ProcessStreamingRuntimeRegistry.startForClient(clientIp)
     }
+
+    override val runtimeStreamingDroneName: String
+        get() = droneName
+
+    override fun runtimeStreamingMode(): StreamingMode = settings.getStreamingMode()
+
+    override fun runtimeWebRtcOptions(): WebRTCMediaOptions = settings.buildWebRTCOptions()
+
+    override fun runtimeBuildWhipUrl(clientIp: String): String = buildWhipUrl(clientIp)
+
+    override fun runtimeConfiguredMediaMtxServer(): String = settings.getMediamtxServer()
+
+    override fun runtimeClearConfiguredMediaMtxServer() {
+        sharedPreferences.edit().remove(LyrebirdSettings.PREF_MEDIAMTX_SERVER).apply()
+    }
+
+    override fun runtimeOnStreamingMetrics(metrics: WebRTCStreamMetrics) {
+        lastWebRTCMetrics = metrics
+        rebuildTelemetryCache()
+        mainHandler.post {
+            updateWebRTCMetricsView(metrics)
+            updateStreamingFooter()
+        }
+    }
+
+    override fun runtimeOnStreamingState(state: String) {
+        lastNativeStreamStatus = state
+        mainHandler.post { updateStreamingFooter() }
+    }
+
+    override fun runtimeStartNativeStreaming(
+        mode: StreamingMode,
+        clientIp: String,
+    ) {
+        nativeStreamingCoordinator.start(mode, clientIp)
+    }
+
+    override fun runtimeRebuildTelemetryCache() {
+        rebuildTelemetryCache()
+    }
+
+    override fun runtimeDefaultStreamingClientIp(): String = NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
 
     override fun runtimeMavlinkConfig(): MavlinkEndpointConfig = readMavlinkConfig()
 
@@ -2998,6 +2935,7 @@ class FlightDeckActivity :
     override fun buildFleetBeaconForRuntime(): FleetBeacon? = buildFleetBeacon()
 
     private fun startServers() {
+        ProcessStreamingRuntimeRegistry.attach(applicationContext, this)
         ProcessNetworkRuntimeRegistry.attach(applicationContext, this, mavlinkCommandSink, this)
         val sessionStatus = ProcessNetworkRuntimeRegistry.start()
         Log.i(TAG, "Network session: ${sessionStatus.summary()}")
@@ -3006,9 +2944,12 @@ class FlightDeckActivity :
         }
         if (sessionStatus?.leaseHeld != true || !sessionStatus.isServing) {
             Log.w(TAG, "Runtime startup skipped because this app does not own a serving session")
+            ProcessStreamingRuntimeRegistry.detach(this)
             updateMavlinkHttpStatusView()
             return
         }
+
+        ProcessStreamingRuntimeRegistry.prepare()
 
         // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
         // same question asked between aircraft, which nothing on the device could answer before.
@@ -3031,37 +2972,10 @@ class FlightDeckActivity :
         // the status line reflects what actually came up.
         updateMavlinkHttpStatusView()
 
-        // WebRTC video via WHIP — create the shared frame source/publisher.
-        // WHIP publishing starts automatically when bridge connects to telemetry.
-        runCatching {
-            webRTCStreamer =
-                V5WebRtcStreamerFactory(
-                    context = applicationContext,
-                    cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
-                    droneName = droneName,
-                    options = settings.buildWebRTCOptions(),
-                    configuredServer = { settings.getMediamtxServer() },
-                    clearConfiguredServer = {
-                        sharedPreferences.edit().remove(LyrebirdSettings.PREF_MEDIAMTX_SERVER).apply()
-                    },
-                    onMetrics = { metrics ->
-                        lastWebRTCMetrics = metrics
-                        rebuildTelemetryCache()
-                        mainHandler.post { updateWebRTCMetricsView(metrics) }
-                    },
-                    onState = { state -> lastNativeStreamStatus = state },
-                ).create()
-            Log.i(TAG, "WebRTC streamer ready (starts on first telemetry client)")
-
-            // If the telemetry callback already fired before streamer was ready, start now
-            val pendingUrl = lastWhipUrl
-            if (pendingUrl != null) {
-                val pendingIp = runCatching { Uri.parse(pendingUrl).host }.getOrNull() ?: "127.0.0.1"
-                Log.i(TAG, "Deferred streaming start: $pendingIp")
-                mainHandler.post { startActiveStreaming(pendingIp) }
-            }
-        }.onFailure { error ->
-            Log.e(TAG, "Error creating WebRTC streamer: ${error.message}", error)
+        // A process-scoped publisher may already be active after recreation. The target policy
+        // leaves a healthy publisher alone and restarts a stale one against the new callbacks.
+        if (ProcessStreamingRuntimeRegistry.hasTarget()) {
+            ProcessStreamingRuntimeRegistry.restartActiveStreaming()
         }
     }
 
@@ -3105,14 +3019,10 @@ class FlightDeckActivity :
             settingsBackupListener?.let { sharedPreferences.unregisterOnSharedPreferenceChangeListener(it) }
             settingsBackupListener = null
             settingsBackupExecutor.shutdownNow()
-            webRTCStreamer?.listener = null
-            stopActiveStreaming()
-            WebRTCPeerFactory.reset()
             // The fleet link holds a repeating main-thread callback that must not outlive the
             // activity. Its sockets are its own; the session's discovery sockets are already down.
             stopObstacleGuard()
             stopFleetMesh()
-            webRTCStreamer = null
 
             // Detach this screen from the process-scoped network runtime. Its sockets and lease
             // remain alive for the next activity instance; the weak bridge prevents this screen
@@ -3125,15 +3035,11 @@ class FlightDeckActivity :
                 mavlinkMotionSink,
                 mavlinkMissionSink,
             )
+            ProcessStreamingRuntimeRegistry.detach(this)
 
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {
                 multicastLock?.release()
-            }
-
-            // Release the low-latency Wi-Fi lock held while WHIP publishing was active.
-            if (lowLatencyWifiLock?.isHeld == true) {
-                lowLatencyWifiLock?.release()
             }
 
             // Cancel key listeners
@@ -3490,7 +3396,7 @@ class FlightDeckActivity :
         telemetryCoordinator.streamRequiresAuth = activeMode == StreamingMode.RTSP &&
             settings.getRtspUsername().isNotEmpty() &&
             settings.getRtspPassword().isNotEmpty()
-        val serverIp = lastClientIp ?: "127.0.0.1"
+        val serverIp = ProcessStreamingRuntimeRegistry.currentClientIp() ?: "127.0.0.1"
         telemetryCoordinator.rtmpUrl = getRtmpUrl(serverIp)
 
         // Compute exact consumption path dynamically for backend and telemetry exposure.
@@ -3892,7 +3798,8 @@ class FlightDeckActivity :
      * stream is up is deliberate — advertising a dead RTSP URL makes a ground station sit in a
      * connect-retry loop, which is worse than reporting no stream.
      */
-    private fun currentMavlinkVideoStream(): MavlinkVideoStream? = MavlinkVideoStream.fromWhipUrl(lastWhipUrl, droneName)
+    private fun currentMavlinkVideoStream(): MavlinkVideoStream? =
+        MavlinkVideoStream.fromWhipUrl(ProcessStreamingRuntimeRegistry.currentWhipUrl(), droneName)
 
     /**
      * Apply one parameter write from a ground station.
