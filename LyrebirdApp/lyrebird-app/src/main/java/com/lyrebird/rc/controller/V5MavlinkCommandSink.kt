@@ -8,7 +8,6 @@ import com.lyrebird.rc.mavlink.GimbalRotation
 import com.lyrebird.rc.mavlink.GimbalRotationMode
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
-import com.lyrebird.rc.mavlink.MavlinkTelemetryEndpoint
 import com.lyrebird.rc.models.MediaVM
 import com.lyrebird.rc.models.PayloadWidgetVM
 import com.lyrebird.rc.settings.LyrebirdSettings
@@ -32,7 +31,16 @@ internal interface V5MavlinkCommandHost {
     val stopRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg>
     var lrfDistanceMeters: Double?
     var lrfTargetLocation: dji.sdk.keyvalue.value.common.LocationCoordinate3D?
-    val mavlinkEndpoint: MavlinkTelemetryEndpoint?
+
+    fun isMavlinkOriginTrusted(): Boolean
+
+    fun reportCaptureStarted()
+
+    fun reportImageCaptured(
+        success: Boolean,
+        fileName: String,
+    )
+
     val captureExecutor: ExecutorService
     val settings: LyrebirdSettings
 
@@ -378,8 +386,7 @@ internal class V5MavlinkCommandSink(
              * instead of reported — the shutter still fires.
              */
             override fun captureImage(): CommandResult {
-                val endpoint = host.mavlinkEndpoint
-                endpoint?.reportCaptureStarted()
+                host.reportCaptureStarted()
                 host.captureExecutor.execute {
                     val file =
                         runCatching { Payload.capturePhoto(host.mediaVM) }
@@ -388,7 +395,7 @@ internal class V5MavlinkCommandSink(
                     if (file == null) {
                         Log.w(TAG, "Capture produced no file")
                     }
-                    endpoint?.reportImageCaptured(file != null, file?.fileName.orEmpty())
+                    host.reportImageCaptured(file != null, file?.fileName.orEmpty())
                 }
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }

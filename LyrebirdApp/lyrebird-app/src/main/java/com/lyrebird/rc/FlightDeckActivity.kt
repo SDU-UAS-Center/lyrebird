@@ -59,12 +59,10 @@ import com.lyrebird.rc.mavlink.Mav
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
 import com.lyrebird.rc.mavlink.MavlinkEndpointConfig
-import com.lyrebird.rc.mavlink.MavlinkFtpServer
 import com.lyrebird.rc.mavlink.MavlinkMissionSink
 import com.lyrebird.rc.mavlink.MavlinkMotionSink
 import com.lyrebird.rc.mavlink.MavlinkSnapshot
 import com.lyrebird.rc.mavlink.MavlinkSystemId
-import com.lyrebird.rc.mavlink.MavlinkTelemetryEndpoint
 import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.mavlink.PendingCommand
@@ -76,7 +74,10 @@ import com.lyrebird.rc.models.PayloadWidgetVM
 import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.server.MavlinkMediaSource
+import com.lyrebird.rc.server.MavlinkRuntimeCallbacks
 import com.lyrebird.rc.server.NetworkRuntimeCallbacks
+import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
 import com.lyrebird.rc.settings.AircraftStorage
 import com.lyrebird.rc.settings.DetectionSource
@@ -163,6 +164,7 @@ class FlightDeckActivity :
     DefaultLayoutActivity(),
     LyrebirdCommandHost,
     NetworkRuntimeCallbacks,
+    MavlinkRuntimeCallbacks,
     FleetRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
@@ -511,7 +513,16 @@ class FlightDeckActivity :
                     set(value) {
                         this@FlightDeckActivity.lrfTargetLocation = value
                     }
-                override val mavlinkEndpoint get() = this@FlightDeckActivity.mavlinkEndpoint
+
+                override fun isMavlinkOriginTrusted() = ProcessMavlinkRuntimeRegistry.isTrustedOrigin()
+
+                override fun reportCaptureStarted() = ProcessMavlinkRuntimeRegistry.reportCaptureStarted()
+
+                override fun reportImageCaptured(
+                    success: Boolean,
+                    fileName: String,
+                ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(success, fileName)
+
                 override val captureExecutor get() = this@FlightDeckActivity.captureExecutor
                 override val settings get() = this@FlightDeckActivity.settings
 
@@ -565,7 +576,8 @@ class FlightDeckActivity :
                     set(value) {
                         this@FlightDeckActivity.armedCommanded = value
                     }
-                override val mavlinkEndpoint get() = this@FlightDeckActivity.mavlinkEndpoint
+
+                override fun isMavlinkOriginTrusted() = ProcessMavlinkRuntimeRegistry.isTrustedOrigin()
 
                 override fun climbAfterTakeoff(altitudeMeters: Double) = this@FlightDeckActivity.climbAfterTakeoff(altitudeMeters)
 
@@ -605,14 +617,6 @@ class FlightDeckActivity :
     // Servers
 
     /**
-     * MAVLink 2 telemetry endpoint. On by default (`lb_mav_0_enabled`), following PX4's pattern
-     * of switching MAVLink instances on by parameter rather than by build; flight motion is
-     * gated separately by `lb_mav_0_allow_flight`.
-     */
-    private var mavlinkEndpoint: MavlinkTelemetryEndpoint? = null
-    private var mavlinkFtpServer: MavlinkFtpServer? = null
-
-    /**
      * Single worker for shutter operations. One thread, so two rapid capture commands queue rather
      * than tripping the shutter concurrently — the DJI media pipeline resolves new files by index
      * and overlapping captures would confuse which file belongs to which command.
@@ -621,13 +625,12 @@ class FlightDeckActivity :
         java.util.concurrent.Executors
             .newSingleThreadExecutor()
 
-    /**
-     * MAVLink FTP worker. Two threads so a slow file download does not block a directory listing:
-     * both pull the same DJI media pipeline, but the SDK serialises the pulls themselves.
-     */
-    private val ftpExecutor =
-        java.util.concurrent.Executors
-            .newFixedThreadPool(2)
+    private val mavlinkMediaSource =
+        object : MavlinkMediaSource {
+            override fun listFiles(): List<Pair<String, Long>> = Payload.listMediaFiles(mediaVM)
+
+            override fun readFileBytes(name: String): ByteArray? = Payload.downloadMediaBytes(mediaVM, name)
+        }
     private var webRTCStreamer: WebRTCStreamer? = null
     private var videoSettingRestartScheduled = false
 
@@ -2503,7 +2506,7 @@ class FlightDeckActivity :
      */
     private fun updateMavlinkHttpStatusView() {
         val statusTv = findViewById<TextView>(R.id.text_mavlink_http_status) ?: return
-        val mavlinkUp = mavlinkEndpoint != null
+        val mavlinkUp = ProcessMavlinkRuntimeRegistry.isUp()
         val httpUp = ProcessNetworkRuntimeRegistry.status().httpPort != null
         val mavlinkColor = if (mavlinkUp) 0xFF2196F3.toInt() else 0xFFFF1744.toInt()
         val httpColor = if (httpUp) 0xFF4CAF50.toInt() else 0xFFFF1744.toInt()
@@ -2947,6 +2950,45 @@ class FlightDeckActivity :
         mainHandler.post { startStreamingForClient(clientIp) }
     }
 
+    override fun runtimeMavlinkConfig(): MavlinkEndpointConfig = readMavlinkConfig()
+
+    override fun runtimeMavlinkSnapshot(): MavlinkSnapshot = buildMavlinkSnapshot()
+
+    override fun runtimeMavlinkVideoStream(): MavlinkVideoStream? = currentMavlinkVideoStream()
+
+    override fun runtimeMavlinkParameters(): List<Pair<String, Float>> = mavlinkParameters()
+
+    override fun runtimeLogMavlinkCommand(
+        command: com.lyrebird.rc.mavlink.MavlinkCommand,
+        result: CommandResult,
+        signed: Boolean,
+    ) {
+        LyrebirdFlightLogger.logMavlinkCommand(
+            command = command.command,
+            params =
+                listOf(
+                    command.param1,
+                    command.param2,
+                    command.param3,
+                    command.param4,
+                    command.param5,
+                    command.param6,
+                    command.param7,
+                ),
+            result = result.mavResult,
+            signed = signed,
+            senderSystem = command.senderSystem,
+        )
+    }
+
+    override fun runtimeMavlinkPeerDiscovered(peer: String) {
+        Log.i(TAG, "MAVLink ground station at $peer")
+        val peerIp = peer.substringBefore(':')
+        if (peerIp.isNotBlank()) {
+            mainHandler.post { startStreamingForClient(peerIp) }
+        }
+    }
+
     override val fleetDeviceIdForRuntime: String
         get() = fleetDeviceId()
 
@@ -2975,8 +3017,15 @@ class FlightDeckActivity :
         // Obstacle guard. Opt-in, and silent unless it fires.
         startObstacleGuard()
 
-        // Start the MAVLink 2 telemetry endpoint (no-op unless enabled by preference).
-        startMavlinkEndpoint()
+        // Start the process-scoped MAVLink endpoint (no-op unless enabled by preference).
+        ProcessMavlinkRuntimeRegistry.attach(
+            this,
+            mavlinkMediaSource,
+            mavlinkCommandSink,
+            mavlinkMotionSink,
+            mavlinkMissionSink,
+        )
+        ProcessMavlinkRuntimeRegistry.start()
 
         // The endpoint has now either bound or logged why not, so this is the first point where
         // the status line reflects what actually came up.
@@ -3049,12 +3098,7 @@ class FlightDeckActivity :
 
             stopEdgeDetection()
 
-            mavlinkEndpoint?.stop()
-            mavlinkEndpoint = null
             captureExecutor.shutdownNow()
-            ftpExecutor.shutdownNow()
-            mavlinkFtpServer?.shutdown()
-            mavlinkFtpServer = null
             // Unregister the settings backup listener and stop its writer: the SharedPreferences
             // singleton otherwise keeps the listener (and the activity through it) alive, and the
             // executor would keep writing after destroy.
@@ -3074,6 +3118,13 @@ class FlightDeckActivity :
             // remain alive for the next activity instance; the weak bridge prevents this screen
             // from being retained by server worker threads.
             ProcessNetworkRuntimeRegistry.detach(this)
+            ProcessMavlinkRuntimeRegistry.detach(
+                this,
+                mavlinkMediaSource,
+                mavlinkCommandSink,
+                mavlinkMotionSink,
+                mavlinkMissionSink,
+            )
 
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {
@@ -4061,7 +4112,7 @@ class FlightDeckActivity :
         val result =
             MavlinkFlightPolicy().check(
                 flightAllowed = sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true),
-                trustedOrigin = mavlinkEndpoint?.isTrustedOrigin == true,
+                trustedOrigin = ProcessMavlinkRuntimeRegistry.isTrustedOrigin(),
             )
         if (result != null) {
             // Silent otherwise: the sender gets MAV_RESULT_DENIED over the wire and it lands in
@@ -4131,83 +4182,19 @@ class FlightDeckActivity :
         }
     }
 
-    private fun startMavlinkEndpoint() {
-        val config = readMavlinkConfig()
-        if (!config.enabled) {
-            Log.i(TAG, "MAVLink endpoint disabled (${MavlinkEndpointConfig.PREF_ENABLED}=false)")
-            return
-        }
-        runCatching {
-            val ftpServer =
-                MavlinkFtpServer(
-                    object : MavlinkFtpServer.FtpFileSource {
-                        override fun listFiles(): List<Pair<String, Long>> = Payload.listMediaFiles(mediaVM)
-
-                        override fun readFileBytes(name: String): ByteArray? = Payload.downloadMediaBytes(mediaVM, name)
-                    },
-                    ftpExecutor,
-                )
-            val endpoint =
-                MavlinkTelemetryEndpoint(
-                    config,
-                    ::buildMavlinkSnapshot,
-                    ::currentMavlinkVideoStream,
-                    ::mavlinkParameters,
-                    mavlinkCommandSink,
-                    mavlinkMotionSink,
-                    mavlinkMissionSink,
-                    ftpServer,
-                    commandLog = { command, result ->
-                        LyrebirdFlightLogger.logMavlinkCommand(
-                            command = command.command,
-                            params =
-                                listOf(
-                                    command.param1,
-                                    command.param2,
-                                    command.param3,
-                                    command.param4,
-                                    command.param5,
-                                    command.param6,
-                                    command.param7,
-                                ),
-                            result = result.mavResult,
-                            signed = mavlinkEndpoint?.isTrustedOrigin == true,
-                            senderSystem = command.senderSystem,
-                        )
-                    },
-                )
-            endpoint.onPeerDiscovered = { peer ->
-                Log.i(TAG, "MAVLink ground station at $peer")
-                // A MAVLink ground station appearing is the same event as the first TCP
-                // telemetry client connecting, and it has to start the video the same way.
-                // Without this the WHIP publish only ever begins when something connects to the
-                // telemetry port, so a purely MAVLink ground station gets full telemetry and no
-                // picture — which is what a field test found.
-                val peerIp = peer.substringBefore(':')
-                if (peerIp.isNotBlank()) {
-                    mainHandler.post { startStreamingForClient(peerIp) }
-                }
-            }
-            // Only claim the endpoint once it actually holds its socket: the status line and the
-            // command log both read this field, and a taken UDP port must not read as MAVLink up.
-            if (endpoint.start()) {
-                mavlinkEndpoint = endpoint
-                mavlinkFtpServer = ftpServer
-            } else {
-                Log.w(TAG, "MAVLink endpoint did not start; UDP ${config.listenPort} is not ours")
-            }
-        }.onFailure { error ->
-            Log.e(TAG, "Error starting MAVLink endpoint: ${error.message}", error)
-        }
-    }
-
     private fun restartMavlinkEndpoint() {
         mainHandler.post {
-            mavlinkEndpoint?.stop()
-            mavlinkEndpoint = null
-            mavlinkFtpServer?.shutdown()
-            mavlinkFtpServer = null
-            if (!isDestroyed && !isFinishing) startMavlinkEndpoint()
+            if (isDestroyed || isFinishing) return@post
+            ProcessMavlinkRuntimeRegistry.stop()
+            ProcessMavlinkRuntimeRegistry.attach(
+                this,
+                mavlinkMediaSource,
+                mavlinkCommandSink,
+                mavlinkMotionSink,
+                mavlinkMissionSink,
+            )
+            ProcessMavlinkRuntimeRegistry.start()
+            updateMavlinkHttpStatusView()
         }
     }
 

@@ -6,7 +6,6 @@ import com.lyrebird.rc.mavlink.CommandProgress
 import com.lyrebird.rc.mavlink.CommandResult
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkMotionSink
-import com.lyrebird.rc.mavlink.MavlinkTelemetryEndpoint
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
@@ -15,7 +14,8 @@ import kotlin.math.abs
 internal interface V5MavlinkMotionHost {
     val aircraftTelemetry: V5AircraftTelemetrySource
     var armedCommanded: Boolean
-    val mavlinkEndpoint: MavlinkTelemetryEndpoint?
+
+    fun isMavlinkOriginTrusted(): Boolean
 
     fun climbAfterTakeoff(altitudeMeters: Double)
 
@@ -329,7 +329,7 @@ internal class V5MavlinkMotionSink(
                 // the Pilot, and the Pilot cannot release safety. HTTP's /releaseSafetyControl has
                 // the same rule, enforced with its X-Safety-Token header instead.
                 val source =
-                    if (host.mavlinkEndpoint?.isTrustedOrigin == true) {
+                    if (host.isMavlinkOriginTrusted()) {
                         ControlAuthority.Source.SAFETY
                     } else {
                         ControlAuthority.Source.PILOT

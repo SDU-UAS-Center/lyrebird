@@ -18,7 +18,7 @@ line numbers. Progress is tracked by responsibility and validation, not by lines
 | 5 | HTTP command boundary exposes neutral media, detection, LRF, and flight ports; `LyrebirdHttpServer.kt` has no direct DJI, ViewModel, UXSDK, or `DroneController` dependency. V5 media, payload/camera, motion, and mission sinks now live in dedicated adapters; MAVLink flight policy is pure and tested. | Shared mission/controller policy and adapter contract tests can be broadened later; native V4 mission implementation remains future work. |
 | 6 | Target selection, WHIP endpoint construction, V5 WebRTC streamer construction, and V5 native RTMP/RTSP/Agora/GB28181 lifecycle are extracted behind streaming helpers. The activity retains WHIP trigger policy and Wi-Fi-lock ownership. | Move publisher trigger state and Wi-Fi-lock ownership into a runtime coordinator. |
 | 7 | Detection port and neutral source/active/model/threshold telemetry projection are extracted and tested; V5 AutoSensing and local TFLite provider lifecycles now live in dedicated providers. The activity retains eligibility checks, settings/file-pickers, and overlay rendering. | Move eligibility/overlay/frame coordination behind a runtime-aware detection coordinator. |
-| 8 | Runtime startup now stops after a blocked/non-serving session, activity teardown releases the lease last, `ProcessNetworkRuntime` owns HTTP/telemetry/discovery sockets with weak, replaceable activity bindings, and `FleetMeshSessionRegistry` owns multicast link/roster state while the activity keeps only UI rendering. SDK bootstrap is lease-gated. | Move MAVLink/WebRTC ownership into the same process runtime and verify activity recreation, SDK initialization, and lease ordering on-device. |
+| 8 | Runtime startup now stops after a blocked/non-serving session, activity teardown releases the lease last, `ProcessNetworkRuntime` owns HTTP/telemetry/discovery sockets with weak, replaceable activity bindings, `FleetMeshSessionRegistry` owns multicast link/roster state, and `ProcessMavlinkRuntimeRegistry` owns the MAVLink UDP endpoint plus FTP server across activity recreation. MAVLink command, motion, mission, snapshot, video, parameter, logging, peer, and media bindings are weak and replaceable. SDK bootstrap is lease-gated. | Move WebRTC, capture/FTP executor policy, and obstacle ownership into the same process runtime; verify activity recreation, SDK initialization, and lease ordering on-device. |
 | 9 | Not started: final activity shell and flavor seams. | Explicit lifecycle review and device qualification. |
 
 Automated checks at this checkpoint include both Android unit-test suites, both Spotless checks,
@@ -28,7 +28,7 @@ session authority/progress across projections. No connected Android device was a
 SDK, flight, or streaming qualification. A green build is not a completed bench gate.
 
 Latest results: 241 app tests, 81 core tests, and 138 Python tests passed, with no failures or
-skips. The activity is 5,401 lines, down from 7,665. The documentation build passed.
+skips. The activity is 4,246 lines, down from 7,665. The documentation build passed.
 `qualityLyrebird` generated reports with non-blocking findings; Android Lint reported no errors
 in the new extracted files. Style/localization findings remain, including those carried with
 the existing UI code. These are not being represented as clean static-analysis reports.
