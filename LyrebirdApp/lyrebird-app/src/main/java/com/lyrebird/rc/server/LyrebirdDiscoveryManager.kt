@@ -3,6 +3,7 @@ package com.lyrebird.rc.server
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.util.Log
 import com.lyrebird.rc.util.NetworkUtils
 import java.io.IOException
@@ -37,6 +38,7 @@ class LyrebirdDiscoveryManager(
     private var multicastSocket: MulticastSocket? = null
     private var discoveryThread: Thread? = null
     private var multicastThread: Thread? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     @Volatile
     var isDiscoveryRunning: Boolean = false
@@ -64,6 +66,7 @@ class LyrebirdDiscoveryManager(
     fun startDiscoveryServer() {
         if (isDiscoveryRunning) return
         isDiscoveryRunning = true
+        acquireMulticastLock()
 
         // Thread 1: Handle broadcast/unicast UDP on port 30000
         discoveryThread =
@@ -185,7 +188,28 @@ class LyrebirdDiscoveryManager(
             Thread.currentThread().interrupt()
             Log.w(TAG, "Interrupted while waiting for discovery threads to stop", e)
         }
+        releaseMulticastLock()
         Log.i(TAG, "All discovery servers stopped")
+    }
+
+    private fun acquireMulticastLock() {
+        if (multicastLock?.isHeld == true) return
+        runCatching {
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock =
+                wifi?.createMulticastLock("lyrebird-discovery")?.apply {
+                    setReferenceCounted(true)
+                    acquire()
+                }
+        }.onFailure { error ->
+            Log.w(TAG, "Could not acquire discovery multicast lock: ${error.message}")
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        runCatching { multicastLock?.takeIf { it.isHeld }?.release() }
+            .onFailure { error -> Log.w(TAG, "Could not release discovery multicast lock: ${error.message}") }
+        multicastLock = null
     }
 
     // ==================== mDNS (Zeroconf) ====================

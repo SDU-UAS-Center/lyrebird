@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -84,7 +83,9 @@ import com.lyrebird.rc.server.ProcessCaptureExecutorRegistry
 import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessObstacleRuntimeRegistry
+import com.lyrebird.rc.server.ProcessSettingsBackupRuntimeRegistry
 import com.lyrebird.rc.server.ProcessStreamingRuntimeRegistry
+import com.lyrebird.rc.server.SettingsBackupRuntimeCallbacks
 import com.lyrebird.rc.server.StreamingRuntimeCallbacks
 import com.lyrebird.rc.settings.AircraftStorage
 import com.lyrebird.rc.settings.DetectionSource
@@ -93,7 +94,6 @@ import com.lyrebird.rc.settings.DroneStorageStatus
 import com.lyrebird.rc.settings.FlightDeckSettingsPages
 import com.lyrebird.rc.settings.LyrebirdOnboarding
 import com.lyrebird.rc.settings.LyrebirdSettings
-import com.lyrebird.rc.settings.LyrebirdSettingsBackup
 import com.lyrebird.rc.settings.REQUEST_EDGE_LABELS_FILE
 import com.lyrebird.rc.settings.REQUEST_EDGE_MODEL_FILE
 import com.lyrebird.rc.settings.SettingsDialogViews
@@ -154,7 +154,6 @@ import dji.v5.ux.detection.DetectionOverlayView
 import dji.v5.ux.map.MapWidget
 import dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity
 import java.io.File
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -173,6 +172,7 @@ class FlightDeckActivity :
     MavlinkRuntimeCallbacks,
     StreamingRuntimeCallbacks,
     ObstacleRuntimeCallbacks,
+    SettingsBackupRuntimeCallbacks,
     FleetRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
@@ -274,7 +274,6 @@ class FlightDeckActivity :
         private const val TAG_THERMAL = "LyrebirdThermal"
         private const val MEDIAMTX_WHIP_PORT = 8889 // mediamtx WebRTC port for WHIP publish
 
-        private const val SETTINGS_BACKUP_DEBOUNCE_MS = 1500L
         private const val FLIGHT_DECK_RESTART_DELAY_MS = 750L
 
         private const val SAFETY_TOKEN = "98"
@@ -288,19 +287,6 @@ class FlightDeckActivity :
 
     override val mainHandler = Handler(Looper.getMainLooper())
 
-    private var settingsBackupListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
-
-    // : The backup writes a file to Documents/Lyrebird; that I/O must not run on the main
-    // : thread (StrictMode flags it). Serialized so debounced writes never pile up.
-    private val settingsBackupExecutor =
-        java.util.concurrent.Executors
-            .newSingleThreadExecutor()
-    private val settingsBackupTask =
-        Runnable {
-            settingsBackupExecutor.execute {
-                LyrebirdSettingsBackup.save(sharedPreferences, droneName)
-            }
-        }
     private val telemetryCoordinator = TelemetryCoordinator()
     private val aircraftTelemetry = V5AircraftTelemetrySource()
 
@@ -797,8 +783,6 @@ class FlightDeckActivity :
     override var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
 
     private val deviceStatusSource by lazy { DeviceStatusSource(applicationContext) }
-    private var wifiManager: WifiManager? = null
-    private var multicastLock: WifiManager.MulticastLock? = null
 
     @Volatile private var lastWebRTCMetrics = WebRTCStreamMetrics()
 
@@ -1035,13 +1019,6 @@ class FlightDeckActivity :
         setupControlAuthorityBanner()
 
         startLocationUpdates()
-
-        wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-
-        // Acquire Multicast Lock to allow receiving UDP broadcasts
-        multicastLock = wifiManager?.createMulticastLock("LyrebirdMulticastLock")
-        multicastLock?.setReferenceCounted(true)
-        multicastLock?.acquire()
 
         deviceStatusSource.startSensorUpdates()
 
@@ -2351,14 +2328,8 @@ class FlightDeckActivity :
      * an uninstall. No-op without the optional storage permission.
      */
     private fun startSettingsBackup() {
-        settingsBackupListener =
-            SharedPreferences.OnSharedPreferenceChangeListener { prefs, _ ->
-                mainHandler.removeCallbacks(settingsBackupTask)
-                // Settings arrive in bursts while a dialog is being filled in; coalesce them.
-                mainHandler.postDelayed(settingsBackupTask, SETTINGS_BACKUP_DEBOUNCE_MS)
-            }
-        sharedPreferences.registerOnSharedPreferenceChangeListener(settingsBackupListener)
-        mainHandler.postDelayed(settingsBackupTask, SETTINGS_BACKUP_DEBOUNCE_MS)
+        ProcessSettingsBackupRuntimeRegistry.attach(sharedPreferences, this)
+        ProcessSettingsBackupRuntimeRegistry.scheduleInitialBackup()
     }
 
     /**
@@ -2884,6 +2855,9 @@ class FlightDeckActivity :
 
     override fun runtimeDefaultStreamingClientIp(): String = NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
 
+    override val runtimeSettingsBackupDroneName: String
+        get() = droneName
+
     override fun runtimeObstacleMotion(): ObstacleRuntimeMotion {
         val speed = aircraftTelemetry.getSpeed()
         return ObstacleRuntimeMotion(
@@ -3029,12 +3003,6 @@ class FlightDeckActivity :
 
             stopEdgeDetection()
 
-            // Unregister the settings backup listener and stop its writer: the SharedPreferences
-            // singleton otherwise keeps the listener (and the activity through it) alive, and the
-            // executor would keep writing after destroy.
-            settingsBackupListener?.let { sharedPreferences.unregisterOnSharedPreferenceChangeListener(it) }
-            settingsBackupListener = null
-            settingsBackupExecutor.shutdownNow()
             // The fleet link holds a repeating main-thread callback that must not outlive the
             // activity. Its sockets are its own; the session's discovery sockets are already down.
             stopFleetMesh()
@@ -3052,11 +3020,7 @@ class FlightDeckActivity :
             )
             ProcessStreamingRuntimeRegistry.detach(this)
             ProcessObstacleRuntimeRegistry.detach(this)
-
-            // Release Multicast Lock
-            if (multicastLock?.isHeld == true) {
-                multicastLock?.release()
-            }
+            ProcessSettingsBackupRuntimeRegistry.detach(this)
 
             // Cancel key listeners
             aircraftTelemetry.stop()
