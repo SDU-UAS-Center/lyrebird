@@ -74,11 +74,8 @@ import com.lyrebird.rc.models.PayloadWidgetVM
 import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
-import com.lyrebird.rc.server.DeviceSessionLeaseRegistry
-import com.lyrebird.rc.server.DiscoveryAdvertiser
-import com.lyrebird.rc.server.LyrebirdDiscoveryManager
-import com.lyrebird.rc.server.LyrebirdSession
-import com.lyrebird.rc.server.TelemetryServer
+import com.lyrebird.rc.server.NetworkRuntimeCallbacks
+import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
 import com.lyrebird.rc.settings.AircraftStorage
 import com.lyrebird.rc.settings.DetectionSource
 import com.lyrebird.rc.settings.DroneSettingsProfiles
@@ -162,7 +159,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class FlightDeckActivity :
     DefaultLayoutActivity(),
-    LyrebirdCommandHost {
+    LyrebirdCommandHost,
+    NetworkRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
 
@@ -292,7 +290,6 @@ class FlightDeckActivity :
         }
     private val telemetryCoordinator = TelemetryCoordinator()
     private val aircraftTelemetry = V5AircraftTelemetrySource()
-    private lateinit var discoveryManager: LyrebirdDiscoveryManager
 
     // ViewModels for drone control
     private lateinit var basicAircraftControlVM: BasicAircraftControlVM
@@ -603,7 +600,6 @@ class FlightDeckActivity :
         get() = v5MavlinkMissionAdapter.sink
 
     // Servers
-    private var session: LyrebirdSession? = null
 
     /**
      * MAVLink 2 telemetry endpoint. On by default (`lb_mav_0_enabled`), following PX4's pattern
@@ -727,7 +723,7 @@ class FlightDeckActivity :
 
                 override fun setStreamingMode(mode: StreamingMode) = this@FlightDeckActivity.setStreamingMode(mode)
 
-                override fun shouldRestartActiveStreaming() = session?.hasTelemetryClients() == true || lastWhipUrl != null
+                override fun shouldRestartActiveStreaming() = ProcessNetworkRuntimeRegistry.hasTelemetryClients() || lastWhipUrl != null
 
                 override fun restartActiveStreaming() = this@FlightDeckActivity.restartActiveStreaming()
 
@@ -992,8 +988,6 @@ class FlightDeckActivity :
         showLoadingOverlay(true, "Starting Lyrebird…", "Registering with the DJI SDK…")
         mainHandler.postDelayed(hideLoadingOverlayRunnable, loadingTimeoutMs)
         mainHandler.post(loadingDiagnosticRunnable)
-
-        discoveryManager = LyrebirdDiscoveryManager(this) { droneName }
 
         // Initialize SharedPreferences
         sharedPreferences = getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
@@ -2506,7 +2500,7 @@ class FlightDeckActivity :
     private fun updateMavlinkHttpStatusView() {
         val statusTv = findViewById<TextView>(R.id.text_mavlink_http_status) ?: return
         val mavlinkUp = mavlinkEndpoint != null
-        val httpUp = session?.status?.httpPort != null
+        val httpUp = ProcessNetworkRuntimeRegistry.status().httpPort != null
         val mavlinkColor = if (mavlinkUp) 0xFF2196F3.toInt() else 0xFFFF1744.toInt()
         val httpColor = if (httpUp) 0xFF4CAF50.toInt() else 0xFFFF1744.toInt()
 
@@ -2938,24 +2932,21 @@ class FlightDeckActivity :
         }
     }
 
-    private fun startServers() {
-        val deviceIp = NetworkUtils.getDeviceIpAddress()
+    override val runtimeDroneSerial: String
+        get() = droneSerialNumber
 
-        // The lease, the servers, then the announcement — the order is the point. The aircraft
-        // used to register mDNS and open its discovery sockets before finding out whether the
-        // command and telemetry ports could even be bound, so a failed bind left a standing
-        // advertisement for a service nobody was listening on.
-        session =
-            LyrebirdSession(
-                lease = DeviceSessionLeaseRegistry.current(),
-                http = SimpleHttpServer(HTTP_PORT, this, mavlinkCommandSink),
-                telemetry = buildTelemetryServer(),
-                advertiser = DiscoveryAdvertiser(discoveryManager) { droneSerialNumber },
-                httpPort = HTTP_PORT,
-                telemetryPort = TELEMETRY_PORT,
-            )
-        val sessionStatus = session?.start()
-        Log.i(TAG, "Session on $deviceIp: ${sessionStatus?.summary()}")
+    override fun telemetryJson(): String = getTelemetryJson()
+
+    override fun gapTelemetryJson(): String = getGapTelemetryJson()
+
+    override fun onTelemetryClient(clientIp: String) {
+        mainHandler.post { startStreamingForClient(clientIp) }
+    }
+
+    private fun startServers() {
+        ProcessNetworkRuntimeRegistry.attach(applicationContext, this, mavlinkCommandSink, this)
+        val sessionStatus = ProcessNetworkRuntimeRegistry.start()
+        Log.i(TAG, "Network session: ${sessionStatus.summary()}")
         sessionStatus?.takeIf { it.blockedByAnotherSession }?.let {
             ToastUtils.showLongToast(it.summary())
         }
@@ -3013,22 +3004,6 @@ class FlightDeckActivity :
         }
     }
 
-    /**
-     * The telemetry server, with the bridge-attached callback the session cannot know about.
-     *
-     * The first ground station to attach is what starts active streaming, so this wiring stays
-     * here while the server's lifecycle belongs to the session.
-     */
-    private fun buildTelemetryServer(): TelemetryServer =
-        TelemetryServer(TELEMETRY_PORT, ::getTelemetryJson, ::getGapTelemetryJson).apply {
-            onFirstClientConnected = { clientIp ->
-                Log.i(TAG, "First telemetry client from $clientIp — starting active streaming")
-                mainHandler.post {
-                    startStreamingForClient(clientIp)
-                }
-            }
-        }
-
     private fun showServerInfo() {
         val deviceIp = NetworkUtils.getDeviceIpAddress() ?: "Unknown"
         val message =
@@ -3083,10 +3058,10 @@ class FlightDeckActivity :
             stopFleetMesh()
             webRTCStreamer = null
 
-            // Stop the network session last among runtime owners. It withdraws the advertisement,
-            // stops both servers, and only then gives the device-local lease back to another APK.
-            session?.stop()
-            session = null
+            // Detach this screen from the process-scoped network runtime. Its sockets and lease
+            // remain alive for the next activity instance; the weak bridge prevents this screen
+            // from being retained by server worker threads.
+            ProcessNetworkRuntimeRegistry.detach(this)
 
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {
