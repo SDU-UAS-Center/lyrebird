@@ -13,6 +13,7 @@ import com.lyrebird.rc.R
 import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.FormationController
 import com.lyrebird.rc.controller.DroneRole
+import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.databinding.FragmentFormationControlBinding
 import com.lyrebird.rc.models.BasicAircraftControlVM
 import com.lyrebird.rc.models.VirtualStickVM
@@ -53,8 +54,8 @@ class FormationControlFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialize DroneController
-        DroneController.init(basicAircraftControlVM, virtualStickVM)
+        // Initialize DroneController with process aircraft session
+        DroneController.init(ProcessAircraftSessionRegistry.basicAircraftControlVM(), ProcessAircraftSessionRegistry.virtualStickVM())
 
         setupClickListeners()
         startTelemetryUpdates()

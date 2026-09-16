@@ -47,6 +47,7 @@ import java.util.Collections
 import dji.v5.ux.core.util.DataProcessor
 import dji.sdk.keyvalue.key.KeyTools
 import com.lyrebird.rc.controller.DroneController
+import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.logger.LyrebirdFlightLogger
 
 // Import for custom HTTP server implementation
@@ -167,8 +168,8 @@ class VirtualStickFragment : DJIFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialize DroneController with required ViewModels
-        DroneController.init(basicAircraftControlVM, virtualStickVM)
+        // Initialize DroneController with process aircraft session
+        DroneController.init(ProcessAircraftSessionRegistry.basicAircraftControlVM(), ProcessAircraftSessionRegistry.virtualStickVM())
 
         // ---- Manual Override checkbox setup ----
         setupManualOverrideCheckbox()

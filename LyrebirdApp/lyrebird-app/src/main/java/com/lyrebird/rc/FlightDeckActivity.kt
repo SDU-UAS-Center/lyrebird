@@ -31,6 +31,7 @@ import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.MavlinkFlightPolicy
 import com.lyrebird.rc.controller.Payload
+import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.controller.RoiControl
 import com.lyrebird.rc.controller.SafetyLatchStore
 import com.lyrebird.rc.controller.V5FlightSettingsActions
@@ -66,11 +67,9 @@ import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
-import com.lyrebird.rc.models.BasicAircraftControlVM
 import com.lyrebird.rc.models.LiveStreamVM
 import com.lyrebird.rc.models.MediaVM
 import com.lyrebird.rc.models.PayloadWidgetVM
-import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
 import com.lyrebird.rc.server.MavlinkMediaSource
@@ -290,9 +289,6 @@ class FlightDeckActivity :
     private val telemetryCoordinator = TelemetryCoordinator()
     private val aircraftTelemetry = V5AircraftTelemetrySource()
 
-    // ViewModels for drone control
-    private lateinit var basicAircraftControlVM: BasicAircraftControlVM
-    private lateinit var virtualStickVM: VirtualStickVM
     lateinit var mediaVM: MediaVM
     lateinit var payloadWidgetVM: PayloadWidgetVM
 
@@ -979,12 +975,7 @@ class FlightDeckActivity :
         // Setup drone name display
         setupDroneNameDisplay()
 
-        // Initialize ViewModels
-        basicAircraftControlVM = ViewModelProvider(this)[BasicAircraftControlVM::class.java]
-        virtualStickVM = ViewModelProvider(this)[VirtualStickVM::class.java]
-
-        // Initialize DroneController
-        DroneController.init(basicAircraftControlVM, virtualStickVM)
+        ProcessAircraftSessionRegistry.start()
 
         mediaVM = ViewModelProvider(this)[MediaVM::class.java]
         mediaVM.init()
@@ -993,9 +984,6 @@ class FlightDeckActivity :
 
         // PayloadWidgetVM drives the payload-release servo for the /send/drop endpoint.
         payloadWidgetVM = ViewModelProvider(this)[PayloadWidgetVM::class.java]
-
-        // Start listening for RC stick inputs (needed for manual override detection)
-        virtualStickVM.listenRCStick()
 
         // Setup Manual Override checkbox
         setupManualOverrideCheckbox()
@@ -3037,11 +3025,11 @@ class FlightDeckActivity :
                 mediaVM.destroy()
             }
 
-            // Clean up DroneController listeners and resources
+            // UI listeners are activity-bound; the process aircraft session remains available to
+            // the network runtimes and the next activity instance.
             DroneController.manualOverrideListener = null
             DroneController.droneStatusListener = null
             ControlAuthority.listener = null
-            DroneController.destroy()
 
             // Close the active flight log if the app is killed mid-flight
             LyrebirdFlightLogger.endSession("app_stopped")
