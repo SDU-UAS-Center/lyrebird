@@ -87,6 +87,11 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
         KeyManager.getInstance().cancelListen(this)
     }
 
+    internal fun detachObservers() {
+        observer = null
+        flightStateObserver = null
+    }
+
     private fun registerGenerationListeners() {
         cancelGenerationListeners()
         val generation = connectionGeneration

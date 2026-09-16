@@ -8,7 +8,6 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import androidx.core.os.bundleOf
 import androidx.core.view.ViewCompat
-import androidx.fragment.app.activityViewModels
 import androidx.navigation.Navigation
 import androidx.navigation.fragment.FragmentNavigatorExtras
 import androidx.recyclerview.widget.GridLayoutManager
@@ -16,6 +15,7 @@ import com.lyrebird.rc.R
 import com.lyrebird.rc.data.MEDIA_FILE_DETAILS_STR
 import com.lyrebird.rc.databinding.FragMediaPageBinding
 import com.lyrebird.rc.models.MediaVM
+import com.lyrebird.rc.server.ProcessMediaRuntimeRegistry
 import com.lyrebird.rc.util.ToastUtils
 import dji.sdk.keyvalue.value.camera.CameraStorageLocation
 import dji.sdk.keyvalue.value.common.ComponentIndexType
@@ -31,7 +31,7 @@ import dji.v5.manager.datacenter.media.MediaFileListState
  * @description:  回放下载操作界面
  */
 class MediaFragment : DJIFragment() {
-    private val mediaVM: MediaVM by activityViewModels()
+    private val mediaVM: MediaVM get() = ProcessMediaRuntimeRegistry.mediaVM()
     var adapter: MediaListAdapter? = null
     private var binding: FragMediaPageBinding? = null
 
@@ -257,7 +257,6 @@ class MediaFragment : DJIFragment() {
         if (mediaVM.isPlayBack.value == true) {
             mediaVM.disable()
         }
-        mediaVM.destroy()
         adapter = null
     }
 }

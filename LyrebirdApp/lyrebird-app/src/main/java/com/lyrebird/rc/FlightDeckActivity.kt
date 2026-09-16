@@ -80,6 +80,7 @@ import com.lyrebird.rc.server.ObstacleRuntimeCallbacks
 import com.lyrebird.rc.server.ObstacleRuntimeMotion
 import com.lyrebird.rc.server.ProcessCaptureExecutorRegistry
 import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
+import com.lyrebird.rc.server.ProcessMediaRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessObstacleRuntimeRegistry
 import com.lyrebird.rc.server.ProcessSettingsBackupRuntimeRegistry
@@ -99,8 +100,8 @@ import com.lyrebird.rc.settings.SettingsDialogViews
 import com.lyrebird.rc.settings.SettingsDisplay
 import com.lyrebird.rc.settings.SettingsPageActions
 import com.lyrebird.rc.settings.SettingsSnapshot
-import com.lyrebird.rc.telemetry.DeviceStatusSource
 import com.lyrebird.rc.telemetry.GeoPoint3D
+import com.lyrebird.rc.telemetry.ProcessTelemetryRuntimeRegistry
 import com.lyrebird.rc.telemetry.TelemetryCoordinator
 import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
 import com.lyrebird.rc.telemetry.applyTo
@@ -287,9 +288,9 @@ class FlightDeckActivity :
     override val mainHandler = Handler(Looper.getMainLooper())
 
     private val telemetryCoordinator = TelemetryCoordinator()
-    private val aircraftTelemetry = V5AircraftTelemetrySource()
+    private val aircraftTelemetry get() = ProcessTelemetryRuntimeRegistry.aircraftTelemetry()
 
-    lateinit var mediaVM: MediaVM
+    private val mediaVM: MediaVM get() = ProcessMediaRuntimeRegistry.mediaVM()
     lateinit var payloadWidgetVM: PayloadWidgetVM
 
     override val media: LyrebirdMediaPort by lazy { V5MediaPort { mediaVM } }
@@ -778,7 +779,7 @@ class FlightDeckActivity :
     }
     override var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
 
-    private val deviceStatusSource by lazy { DeviceStatusSource(applicationContext) }
+    private val deviceStatusSource get() = ProcessTelemetryRuntimeRegistry.deviceStatusSource()
 
     @Volatile private var lastWebRTCMetrics = WebRTCStreamMetrics()
 
@@ -967,6 +968,7 @@ class FlightDeckActivity :
 
         // Initialize SharedPreferences
         sharedPreferences = getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
+        ProcessTelemetryRuntimeRegistry.attach(applicationContext)
         migrateMavlinkFlightDefault()
 
         // Load or prompt for drone name
@@ -977,10 +979,7 @@ class FlightDeckActivity :
 
         ProcessAircraftSessionRegistry.start()
 
-        mediaVM = ViewModelProvider(this)[MediaVM::class.java]
-        mediaVM.init()
-        mediaVM.setStorage(CameraStorageLocation.SDCARD)
-        mediaVM.setComponentIndex(ComponentIndexType.LEFT_OR_MAIN)
+        ProcessMediaRuntimeRegistry.start()
 
         // PayloadWidgetVM drives the payload-release servo for the /send/drop endpoint.
         payloadWidgetVM = ViewModelProvider(this)[PayloadWidgetVM::class.java]
@@ -1774,7 +1773,7 @@ class FlightDeckActivity :
             } else {
                 showLoadingOverlay(false)
             }
-            if (::mediaVM.isInitialized) Payload.warmUpMedia(mediaVM)
+            Payload.warmUpMedia(mediaVM)
             // NOTE: the PORT_3 frame detector is armed from applyDetectedDroneProfile (once the
             // product resolves to M400 and PORT_3 is actually streaming), NOT here — at the connect
             // edge the product is still UNRECOGNIZED and PORT_3 has no stream yet.
@@ -3011,19 +3010,11 @@ class FlightDeckActivity :
             ProcessSettingsBackupRuntimeRegistry.detach(this)
 
             // Cancel key listeners
-            aircraftTelemetry.stop()
+            ProcessTelemetryRuntimeRegistry.detachUiObservers()
             KeyManager.getInstance().cancelListen(this)
 
             // Detach the M400 main-camera first-frame detector if still registered
             unregisterMainCamFrameDetector()
-
-            // Cancel H20T payload (LRF + thermal) key listeners
-            Payload.destroy()
-
-            // Release MediaVM (thermal capture) listeners and media manager
-            if (::mediaVM.isInitialized) {
-                mediaVM.destroy()
-            }
 
             // UI listeners are activity-bound; the process aircraft session remains available to
             // the network runtimes and the next activity instance.
