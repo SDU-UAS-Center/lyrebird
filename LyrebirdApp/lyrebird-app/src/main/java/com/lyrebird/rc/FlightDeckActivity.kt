@@ -43,9 +43,8 @@ import com.lyrebird.rc.controller.V5MavlinkMotionHost
 import com.lyrebird.rc.controller.V5MavlinkMotionSink
 import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
-import com.lyrebird.rc.edge.EdgeDetectionConfig
-import com.lyrebird.rc.edge.EdgeDetectionController
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
+import com.lyrebird.rc.edge.LocalDetectionProvider
 import com.lyrebird.rc.edge.V5AutoSensingProvider
 import com.lyrebird.rc.edge.V5DetectionPort
 import com.lyrebird.rc.fleet.FleetBeacon
@@ -822,7 +821,20 @@ class FlightDeckActivity :
 
     // ==================== AutoSensing (AI Detection) ====================
     var isAutoSensingActive = false
-    private var edgeDetectionController: EdgeDetectionController? = null
+    private val localDetectionProvider by lazy {
+        LocalDetectionProvider(
+            context = applicationContext,
+            onTargets = { targets ->
+                if (settings.activeDetectionSource() == DetectionSource.YOLO_ON_PHONE) {
+                    applyDetectedTargets(targets)
+                }
+            },
+            onMetrics = { metrics ->
+                lastEdgeMetrics = metrics
+                mainHandler.post { updateEdgeMetricsView(metrics) }
+            },
+        )
+    }
     private val autoSensingProvider by lazy {
         V5AutoSensingProvider()
     }
@@ -2059,7 +2071,7 @@ class FlightDeckActivity :
         when (settings.activeDetectionSource()) {
             DetectionSource.NONE -> false
             DetectionSource.DJI_ONBOARD -> isAutoSensingActive
-            DetectionSource.YOLO_ON_PHONE -> edgeDetectionController != null
+            DetectionSource.YOLO_ON_PHONE -> localDetectionProvider.isActive
         }
 
     private fun detectionMenuLabel(): String =
@@ -2145,7 +2157,7 @@ class FlightDeckActivity :
                 selectedSource = selectedSource.prefValue,
                 enabled = settings.isDetectionsEnabled(),
                 onboardActive = isAutoSensingActive,
-                localActive = edgeDetectionController != null,
+                localActive = localDetectionProvider.isActive,
                 modelName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null),
                 threshold = settings.getEdgeConfidenceThreshold(),
             )
@@ -2160,7 +2172,7 @@ class FlightDeckActivity :
         telemetryCoordinator.selectedDetectionSource = selectedSource.prefValue
         telemetryCoordinator.detectionMenuLabel = selectedSource.menuLabel
         telemetryCoordinator.isAutoSensingActive = isAutoSensingActive
-        telemetryCoordinator.edgeDetectionActive = edgeDetectionController != null
+        telemetryCoordinator.edgeDetectionActive = localDetectionProvider.isActive
         telemetryCoordinator.edgeModelName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null)
         telemetryCoordinator.edgeLabelsName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_LABELS_NAME, null)
         telemetryCoordinator.edgeConfidenceThreshold = settings.getEdgeConfidenceThreshold()
@@ -2256,7 +2268,7 @@ class FlightDeckActivity :
     }
 
     private fun startEdgeDetection() {
-        if (edgeDetectionController != null) return
+        if (localDetectionProvider.isActive) return
 
         val startCheck = edgeDetectionStartCheck(getEdgeModelUri(), webRTCStreamer)
         if (startCheck !is EdgeDetectionStartCheck.Ready) {
@@ -2266,15 +2278,16 @@ class FlightDeckActivity :
 
         clearAutoSensingState()
 
-        val controller = createEdgeDetectionController(startCheck)
-        edgeDetectionController = controller
-
         configureDetectionOverlay()
-        controller.start()
+        localDetectionProvider.start(
+            modelUri = startCheck.modelUri,
+            labels = getEdgeLabels(),
+            confidenceThreshold = settings.getEdgeConfidenceThreshold(),
+            streamer = webRTCStreamer ?: return,
+        )
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
 
-        attachEdgeDetectionSource(controller)
         showEdgeDetectionEnabledMessage()
     }
 
@@ -2323,27 +2336,6 @@ class FlightDeckActivity :
         }
     }
 
-    private fun createEdgeDetectionController(startCheck: EdgeDetectionStartCheck.Ready): EdgeDetectionController =
-        EdgeDetectionController(
-            context = applicationContext,
-            config =
-                EdgeDetectionConfig(
-                    modelUri = startCheck.modelUri,
-                    labels = getEdgeLabels(),
-                    sourceLabel = VIDEO_SOURCE_LABEL,
-                    confidenceThreshold = settings.getEdgeConfidenceThreshold(),
-                ),
-            onTargets = { targets ->
-                if (settings.activeDetectionSource() == DetectionSource.YOLO_ON_PHONE) {
-                    applyDetectedTargets(targets)
-                }
-            },
-            onMetrics = { metrics ->
-                lastEdgeMetrics = metrics
-                mainHandler.post { updateEdgeMetricsView(metrics) }
-            },
-        )
-
     private fun configureDetectionOverlay() {
         detectionOverlay?.setVideoScaleMode(DetectionOverlayView.VideoScaleMode.CENTER_INSIDE)
         detectionOverlay?.setSourceFrameSize(
@@ -2352,20 +2344,14 @@ class FlightDeckActivity :
         )
     }
 
-    private fun attachEdgeDetectionSource(controller: EdgeDetectionController) {
-        webRTCStreamer?.setEdgeDetectionFrameListener(controller)
-    }
-
     private fun showEdgeDetectionEnabledMessage() {
         Toast.makeText(this, "Edge detection enabled", Toast.LENGTH_SHORT).show()
         Log.i(TAG, "Edge detection enabled")
     }
 
     private fun stopEdgeDetection() {
-        val controller = edgeDetectionController ?: return
-        webRTCStreamer?.setEdgeDetectionFrameListener(null)
-        controller.dispose()
-        edgeDetectionController = null
+        if (!localDetectionProvider.isActive) return
+        localDetectionProvider.stop(webRTCStreamer)
         clearAutoSensingState()
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
