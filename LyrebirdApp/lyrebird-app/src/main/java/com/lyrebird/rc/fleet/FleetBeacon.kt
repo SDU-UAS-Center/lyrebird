@@ -16,7 +16,7 @@ import org.json.JSONObject
  * a packet capture, and [PROTOCOL_VERSION] lets a mixed-version fleet reject what it cannot parse
  * rather than misread it.
  */
-internal data class FleetBeacon(
+data class FleetBeacon(
     /** Stable identity of the sending device: the aircraft serial where one is known. */
     val deviceId: String,
     val droneName: String,

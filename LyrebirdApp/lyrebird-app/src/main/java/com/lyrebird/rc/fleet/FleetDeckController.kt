@@ -38,10 +38,7 @@ internal class FleetDeckController(
     private val prefs: SharedPreferences,
     private val stripView: FleetStripView?,
     mapWidget: MapWidget?,
-    /** This device's stable fleet identity. Cheap: consulted on every inbound datagram. */
-    private val deviceIdProvider: () -> String,
-    /** The local aircraft's current state, or null while identity is still resolving. */
-    private val beaconProvider: () -> FleetBeacon?,
+    private val mesh: FleetMeshSession,
 ) {
     companion object {
         private const val TAG = "LyrebirdFleet"
@@ -54,9 +51,7 @@ internal class FleetDeckController(
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val roster = FleetRoster(deviceIdProvider)
     private val mapOverlay = FleetMapOverlay(mapWidget)
-    private var link: FleetLink? = null
     private var mapExpanded = false
     private var lastSharedAtMs: Long = 0L
 
@@ -76,30 +71,24 @@ internal class FleetDeckController(
             Log.i(TAG, "Fleet mesh disabled by preference")
             return
         }
-        if (link != null) return
-        val started =
-            FleetLink(
-                activity.applicationContext,
-                roster,
-                deviceIdProvider,
-                beaconProvider,
-            ).apply {
-                onSettingsOffered = { offer -> fileOffer(offer) }
-            }
-        started.start()
-        link = started
+        mesh.start()
         stripView?.onStripClicked = { showFleetDialog() }
         mainHandler.post(refreshRunnable)
     }
 
     fun stop() {
         mainHandler.removeCallbacks(refreshRunnable)
-        link?.stop()
-        link = null
         stripView?.onStripClicked = null
         stripView?.visibility = View.GONE
         mapOverlay.clear()
         FleetProfileStore.clearSessionRecords()
+    }
+
+    fun detachUi() {
+        mainHandler.removeCallbacks(refreshRunnable)
+        stripView?.onStripClicked = null
+        stripView?.visibility = View.GONE
+        mapOverlay.clear()
     }
 
     /** The expanded map covers the strip's corner, so the strip stands down while it is open. */
@@ -108,7 +97,7 @@ internal class FleetDeckController(
         if (expanded) stripView?.visibility = View.GONE
     }
 
-    fun peerCount(): Int = roster.peerCount()
+    fun peerCount(): Int = mesh.peerCount()
 
     /**
      * Publish this device's shareable settings to the fleet as a profile.
@@ -116,23 +105,9 @@ internal class FleetDeckController(
      * Peers file it; none of them change anything. Returns false when the mesh is not running.
      */
     fun shareProfileWithFleet(): Boolean {
-        val active = link ?: return false
-        val own = beaconProvider() ?: return false
-        val payload = FleetSettingsShare.buildOffer(prefs, deviceIdProvider(), own.droneName)
-        val sent = active.offerSettings(payload)
+        val sent = mesh.shareProfile()
         if (sent) lastSharedAtMs = System.currentTimeMillis()
         return sent
-    }
-
-    /**
-     * A peer published its profile. File it and say nothing.
-     *
-     * Runs on the mesh receive thread; the store does its own synchronisation and touches no view,
-     * so there is nothing to hop to the main thread for. The operator finds this on the fleet page
-     * when they go looking, which is the point.
-     */
-    private fun fileOffer(offer: FleetSettingsOffer) {
-        FleetProfileStore.store(offer)
     }
 
     /**
@@ -142,10 +117,7 @@ internal class FleetDeckController(
      * one beacon period old, it is exactly the state the peers were told about, and reusing it
      * keeps a dozen synchronous DJI key reads off the main thread twice a second.
      */
-    private fun currentView(): FleetView {
-        val own = link?.lastSentBeacon ?: beaconProvider() ?: return FleetView.EMPTY
-        return roster.view(own, System.currentTimeMillis())
-    }
+    private fun currentView(): FleetView = mesh.currentView()
 
     private fun refresh() {
         val view = currentView()
@@ -244,7 +216,7 @@ internal class FleetDeckController(
     }
 
     private fun confirmShareProfile() {
-        val peers = roster.peerCount()
+        val peers = mesh.peerCount()
         val keys = FleetSettingsShare.SHAREABLE_KEYS.size
         AlertDialog
             .Builder(activity)

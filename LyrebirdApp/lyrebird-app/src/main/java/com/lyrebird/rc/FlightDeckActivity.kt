@@ -49,6 +49,8 @@ import com.lyrebird.rc.edge.V5AutoSensingProvider
 import com.lyrebird.rc.edge.V5DetectionPort
 import com.lyrebird.rc.fleet.FleetBeacon
 import com.lyrebird.rc.fleet.FleetDeckController
+import com.lyrebird.rc.fleet.FleetMeshSessionRegistry
+import com.lyrebird.rc.fleet.FleetRuntimeCallbacks
 import com.lyrebird.rc.fleet.FleetStripView
 import com.lyrebird.rc.logger.LyrebirdFlightLogger
 import com.lyrebird.rc.mavlink.CommandResult
@@ -160,7 +162,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class FlightDeckActivity :
     DefaultLayoutActivity(),
     LyrebirdCommandHost,
-    NetworkRuntimeCallbacks {
+    NetworkRuntimeCallbacks,
+    FleetRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
 
@@ -643,6 +646,7 @@ class FlightDeckActivity :
      * state beacon, draws peers, and warns. No inbound message on its socket can command anything.
      */
     private var fleetController: FleetDeckController? = null
+    private var fleetMeshSession: com.lyrebird.rc.fleet.FleetMeshSession? = null
 
     // Drone Configuration
     private lateinit var sharedPreferences: SharedPreferences
@@ -2943,6 +2947,14 @@ class FlightDeckActivity :
         mainHandler.post { startStreamingForClient(clientIp) }
     }
 
+    override val fleetDeviceIdForRuntime: String
+        get() = fleetDeviceId()
+
+    override val fleetDroneNameForRuntime: String
+        get() = droneName
+
+    override fun buildFleetBeaconForRuntime(): FleetBeacon? = buildFleetBeacon()
+
     private fun startServers() {
         ProcessNetworkRuntimeRegistry.attach(applicationContext, this, mavlinkCommandSink, this)
         val sessionStatus = ProcessNetworkRuntimeRegistry.start()
@@ -3667,23 +3679,26 @@ class FlightDeckActivity :
 
     private fun startFleetMesh() {
         if (fleetController != null) return
+        val mesh = FleetMeshSessionRegistry.attach(applicationContext, sharedPreferences, this)
         val controller =
             FleetDeckController(
                 activity = this,
                 prefs = sharedPreferences,
                 stripView = attachFleetStrip(),
                 mapWidget = mapWidget,
-                deviceIdProvider = ::fleetDeviceId,
-                beaconProvider = ::buildFleetBeacon,
+                mesh = mesh,
             )
         controller.start()
         controller.setMapExpanded(sharedPreferences.getBoolean(LyrebirdSettings.PREF_MAP_EXPANDED, false))
+        fleetMeshSession = mesh
         fleetController = controller
     }
 
     private fun stopFleetMesh() {
-        fleetController?.stop()
+        fleetController?.detachUi()
         fleetController = null
+        FleetMeshSessionRegistry.detach(this)
+        fleetMeshSession = null
     }
 
     /**
