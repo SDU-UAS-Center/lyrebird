@@ -6,7 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.lyrebird.rc.StreamingMode
+import com.lyrebird.rc.models.LiveStreamVM
 import com.lyrebird.rc.webrtc.StreamingTargetPolicy
+import com.lyrebird.rc.webrtc.V5NativeStreamingCoordinator
+import com.lyrebird.rc.webrtc.V5NativeStreamingHost
 import com.lyrebird.rc.webrtc.V5WebRtcStreamerFactory
 import com.lyrebird.rc.webrtc.WebRTCMediaOptions
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
@@ -31,11 +34,6 @@ internal interface StreamingRuntimeCallbacks {
 
     fun runtimeOnStreamingState(state: String)
 
-    fun runtimeStartNativeStreaming(
-        mode: StreamingMode,
-        clientIp: String,
-    )
-
     fun runtimeRebuildTelemetryCache()
 
     fun runtimeDefaultStreamingClientIp(): String
@@ -47,7 +45,8 @@ internal object ProcessStreamingRuntimeRegistry {
     fun attach(
         context: Context,
         callbacks: StreamingRuntimeCallbacks,
-    ) = runtime.attach(context, callbacks)
+        nativeHost: V5NativeStreamingHost,
+    ) = runtime.attach(context, callbacks, nativeHost)
 
     fun prepare() = runtime.prepare()
 
@@ -66,6 +65,62 @@ internal object ProcessStreamingRuntimeRegistry {
     fun currentClientIp(): String? = runtime.currentClientIp()
 
     fun hasTarget(): Boolean = runtime.hasTarget()
+
+    fun isNativeStreaming(): Boolean = runtime.isNativeStreaming()
+}
+
+private class WeakNativeStreamingHost(
+    private val hostRef: () -> V5NativeStreamingHost?,
+) : V5NativeStreamingHost {
+    override fun rtmpUrl(clientIp: String) = hostRef()?.rtmpUrl(clientIp) ?: "rtmp://$clientIp/live/lb_unavailable"
+
+    override fun setRtmpUrl(url: String) {
+        hostRef()?.setRtmpUrl(url)
+    }
+
+    override fun rtspPort() = hostRef()?.rtspPort() ?: 8554
+
+    override fun setRtspPort(port: Int) {
+        hostRef()?.setRtspPort(port)
+    }
+
+    override fun resolveRtspPort() = hostRef()?.resolveRtspPort() ?: rtspPort()
+
+    override fun rtspUsername() = hostRef()?.rtspUsername().orEmpty()
+
+    override fun rtspPassword() = hostRef()?.rtspPassword().orEmpty()
+
+    override fun agoraChannel() = hostRef()?.agoraChannel().orEmpty()
+
+    override fun agoraToken() = hostRef()?.agoraToken().orEmpty()
+
+    override fun agoraUid() = hostRef()?.agoraUid().orEmpty()
+
+    override fun gbServerIp() = hostRef()?.gbServerIp().orEmpty()
+
+    override fun gbServerPort() = hostRef()?.gbServerPort() ?: 0
+
+    override fun gbServerId() = hostRef()?.gbServerId().orEmpty()
+
+    override fun gbAgentId() = hostRef()?.gbAgentId().orEmpty()
+
+    override fun gbChannel() = hostRef()?.gbChannel().orEmpty()
+
+    override fun gbLocalPort() = hostRef()?.gbLocalPort() ?: 0
+
+    override fun gbPassword() = hostRef()?.gbPassword().orEmpty()
+
+    override fun onStatus(status: String) {
+        hostRef()?.onStatus(status)
+    }
+
+    override fun onMessage(message: String) {
+        hostRef()?.onMessage(message)
+    }
+
+    override fun onConfigChanged() {
+        hostRef()?.onConfigChanged()
+    }
 }
 
 private class ProcessStreamingRuntime {
@@ -79,6 +134,9 @@ private class ProcessStreamingRuntime {
     private var callbacksRef: WeakReference<StreamingRuntimeCallbacks> = WeakReference(null)
     private var context: Context? = null
     private var streamerInstance: WebRTCStreamer? = null
+    private var nativeHostRef: WeakReference<V5NativeStreamingHost> = WeakReference(null)
+    private var nativeStreamingVM: LiveStreamVM? = null
+    private var nativeStreamingCoordinator: V5NativeStreamingCoordinator? = null
 
     @Volatile private var lastClientIp: String? = null
 
@@ -90,9 +148,11 @@ private class ProcessStreamingRuntime {
     fun attach(
         context: Context,
         callbacks: StreamingRuntimeCallbacks,
+        nativeHost: V5NativeStreamingHost,
     ) {
         callbacksRef = WeakReference(callbacks)
         this.context = context.applicationContext
+        nativeHostRef = WeakReference(nativeHost)
     }
 
     @Synchronized
@@ -120,6 +180,14 @@ private class ProcessStreamingRuntime {
                     callbacksRef.get()?.runtimeOnStreamingState(state)
                 },
             ).create()
+        if (nativeStreamingCoordinator == null) {
+            nativeStreamingVM = LiveStreamVM()
+            nativeStreamingCoordinator =
+                V5NativeStreamingCoordinator(
+                    liveStreamVM = nativeStreamingVM ?: return,
+                    host = WeakNativeStreamingHost { nativeHostRef.get() },
+                )
+        }
         Log.i(TAG, "Process-scoped WebRTC streamer ready")
     }
 
@@ -159,10 +227,11 @@ private class ProcessStreamingRuntime {
         Log.i(TAG, "Starting active streaming in mode: ${mode.menuLabel}")
         streamer?.stop()
         if (mode != StreamingMode.WEBRTC) {
-            callbacks.runtimeStartNativeStreaming(mode, decision.targetIp)
+            nativeStreamingCoordinator?.start(mode, decision.targetIp)
             return
         }
 
+        nativeStreamingCoordinator?.stop()
         val whipUrl = callbacks.runtimeBuildWhipUrl(decision.targetIp)
         lastWhipUrl = whipUrl
         if (streamer == null) {
@@ -206,6 +275,8 @@ private class ProcessStreamingRuntime {
     fun currentClientIp(): String? = lastClientIp
 
     fun hasTarget(): Boolean = lastClientIp != null || lastWhipUrl != null
+
+    fun isNativeStreaming(): Boolean = nativeStreamingVM?.isStreaming() == true
 
     private fun acquireLowLatencyWifiLock() {
         if (wifiLock?.isHeld == true) return
