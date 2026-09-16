@@ -46,6 +46,7 @@ import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.EdgeDetectionConfig
 import com.lyrebird.rc.edge.EdgeDetectionController
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
+import com.lyrebird.rc.edge.V5AutoSensingProvider
 import com.lyrebird.rc.edge.V5DetectionPort
 import com.lyrebird.rc.fleet.FleetBeacon
 import com.lyrebird.rc.fleet.FleetDeckController
@@ -142,11 +143,6 @@ import dji.v5.et.get
 import dji.v5.et.set
 import dji.v5.manager.KeyManager
 import dji.v5.manager.datacenter.MediaDataCenter
-import dji.v5.manager.intelligent.AutoSensingInfo
-import dji.v5.manager.intelligent.AutoSensingInfoListener
-import dji.v5.manager.intelligent.AutoSensingTarget
-import dji.v5.manager.intelligent.IntelligentFlightManager
-import dji.v5.manager.intelligent.IntelligentModel
 import dji.v5.manager.interfaces.ICameraStreamManager
 import dji.v5.ux.detection.DetectedTarget
 import dji.v5.ux.detection.DetectionOverlayView
@@ -826,8 +822,10 @@ class FlightDeckActivity :
 
     // ==================== AutoSensing (AI Detection) ====================
     var isAutoSensingActive = false
-    private var isAutoSensingListenerRegistered = false
     private var edgeDetectionController: EdgeDetectionController? = null
+    private val autoSensingProvider by lazy {
+        V5AutoSensingProvider()
+    }
 
     @Volatile private var lastEdgeMetrics = EdgeDetectionMetrics()
 
@@ -852,36 +850,6 @@ class FlightDeckActivity :
             }
         }
 
-    private val autoSensingInfoListener =
-        object : AutoSensingInfoListener {
-            override fun onAutoSensingInfoUpdate(info: AutoSensingInfo) {
-                if (settings.getDetectionSource() != DetectionSource.DJI_ONBOARD) return
-                val targets =
-                    info.targets?.mapIndexed { idx, t ->
-                        val rect = t.rect
-                        // DoubleRect is center-based: (x,y) = center, (width,height) = dimensions
-                        val cx = rect?.x ?: 0.0
-                        val cy = rect?.y ?: 0.0
-                        val hw = (rect?.width ?: 0.0) / 2.0
-                        val hh = (rect?.height ?: 0.0) / 2.0
-                        DetectedTarget(
-                            index = t.targetIndex,
-                            type = t.targetType?.name ?: "UNKNOWN",
-                            left = cx - hw,
-                            top = cy - hh,
-                            right = cx + hw,
-                            bottom = cy + hh,
-                        )
-                    } ?: emptyList()
-                applyDetectedTargets(targets)
-            }
-
-            override fun onTrackingTargetUpdate(target: AutoSensingTarget) = Unit
-
-            override fun onIntelligentModelUpdate(models: MutableList<IntelligentModel>) = Unit
-
-            override fun onRunningIntelligentModelUpdate(modelId: Int) = Unit
-        }
     // ==================== End AutoSensing Fields ====================
 
     // var, not val: on the M400 these are rebound to LEFT_OR_MAIN once the main-camera video is up
@@ -2210,76 +2178,47 @@ class FlightDeckActivity :
 
     override fun startAutoSensing() {
         if (isAutoSensingActive) return
-        runCatching {
-            val manager = IntelligentFlightManager.getInstance()
-            if (!isAutoSensingListenerRegistered) {
-                manager.addAutoSensingInfoListener(autoSensingInfoListener)
-                isAutoSensingListenerRegistered = true
-            }
-            manager.startAutoSensing(
-                object : CommonCallbacks.CompletionCallback {
-                    override fun onSuccess() {
-                        isAutoSensingActive = true
-                        updateDetectionTelemetryState()
-                        rebuildTelemetryCache()
-                        Log.i(TAG, "AutoSensing started")
-                    }
+        autoSensingProvider.start(
+            object : V5AutoSensingProvider.Observer {
+                override fun onActiveChanged(active: Boolean) {
+                    isAutoSensingActive = active
+                    updateDetectionTelemetryState()
+                    rebuildTelemetryCache()
+                }
 
-                    override fun onFailure(error: IDJIError) {
-                        isAutoSensingActive = false
-                        removeAutoSensingListener()
-                        updateDetectionTelemetryState()
-                        rebuildTelemetryCache()
-                        Log.e(TAG, "AutoSensing start failed: ${error.description()}")
-                    }
-                },
-            )
-        }.onFailure { error ->
-            updateDetectionTelemetryState()
-            rebuildTelemetryCache()
-            Log.e(TAG, "AutoSensing start exception: ${error.message}", error)
-        }
+                override fun onTargets(targets: List<DetectedTargetSnapshot>) {
+                    applyDetectedTargets(
+                        targets.mapIndexed { index, target ->
+                            DetectedTarget(
+                                index = index,
+                                type = target.type,
+                                left = target.left,
+                                top = target.top,
+                                right = target.right,
+                                bottom = target.bottom,
+                            )
+                        },
+                    )
+                }
+            },
+        )
     }
 
     @Suppress("TooGenericExceptionCaught")
     override fun stopAutoSensing() {
-        clearAutoSensingState()
-        if (!isAutoSensingActive) {
-            removeAutoSensingListener()
-            return
-        }
-        try {
-            IntelligentFlightManager.getInstance().stopAutoSensing(
-                object : CommonCallbacks.CompletionCallback {
-                    override fun onSuccess() {
-                        Log.i(TAG, "AutoSensing stopped")
-                    }
+        autoSensingProvider.stop(
+            object : V5AutoSensingProvider.Observer {
+                override fun onActiveChanged(active: Boolean) {
+                    isAutoSensingActive = active
+                    updateDetectionTelemetryState()
+                    rebuildTelemetryCache()
+                }
 
-                    override fun onFailure(error: IDJIError) {
-                        Log.e(TAG, "AutoSensing stop failed: ${error.description()}")
-                    }
-                },
-            )
-        } catch (error: Throwable) {
-            Log.e(TAG, "AutoSensing stop exception: ${error.message}", error)
-        } finally {
-            isAutoSensingActive = false
-            removeAutoSensingListener()
-            updateDetectionTelemetryState()
-            rebuildTelemetryCache()
-        }
-    }
-
-    @Suppress("TooGenericExceptionCaught")
-    private fun removeAutoSensingListener() {
-        if (!isAutoSensingListenerRegistered) return
-        try {
-            IntelligentFlightManager.getInstance().removeAutoSensingInfoListener(autoSensingInfoListener)
-        } catch (error: Throwable) {
-            Log.e(TAG, "AutoSensing listener removal exception: ${error.message}", error)
-        } finally {
-            isAutoSensingListenerRegistered = false
-        }
+                override fun onTargets(targets: List<DetectedTargetSnapshot>) {
+                    clearAutoSensingState()
+                }
+            },
+        )
     }
 
     private fun clearAutoSensingState() {
@@ -3133,6 +3072,7 @@ class FlightDeckActivity :
         try {
             // Stop AutoSensing
             stopAutoSensing()
+            autoSensingProvider.dispose()
 
             stopEdgeDetection()
 
