@@ -77,8 +77,13 @@ import com.lyrebird.rc.perception.ObstacleGuard
 import com.lyrebird.rc.server.MavlinkMediaSource
 import com.lyrebird.rc.server.MavlinkRuntimeCallbacks
 import com.lyrebird.rc.server.NetworkRuntimeCallbacks
+import com.lyrebird.rc.server.ObstacleRuntimeBrake
+import com.lyrebird.rc.server.ObstacleRuntimeCallbacks
+import com.lyrebird.rc.server.ObstacleRuntimeMotion
+import com.lyrebird.rc.server.ProcessCaptureExecutorRegistry
 import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
+import com.lyrebird.rc.server.ProcessObstacleRuntimeRegistry
 import com.lyrebird.rc.server.ProcessStreamingRuntimeRegistry
 import com.lyrebird.rc.server.StreamingRuntimeCallbacks
 import com.lyrebird.rc.settings.AircraftStorage
@@ -167,6 +172,7 @@ class FlightDeckActivity :
     NetworkRuntimeCallbacks,
     MavlinkRuntimeCallbacks,
     StreamingRuntimeCallbacks,
+    ObstacleRuntimeCallbacks,
     FleetRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
@@ -525,7 +531,7 @@ class FlightDeckActivity :
                     fileName: String,
                 ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(success, fileName)
 
-                override val captureExecutor get() = this@FlightDeckActivity.captureExecutor
+                override val captureExecutor get() = ProcessCaptureExecutorRegistry.executor()
                 override val settings get() = this@FlightDeckActivity.settings
 
                 override fun applyMavlinkParameter(
@@ -617,15 +623,6 @@ class FlightDeckActivity :
         get() = v5MavlinkMissionAdapter.sink
 
     // Servers
-
-    /**
-     * Single worker for shutter operations. One thread, so two rapid capture commands queue rather
-     * than tripping the shutter concurrently — the DJI media pipeline resolves new files by index
-     * and overlapping captures would confuse which file belongs to which command.
-     */
-    private val captureExecutor =
-        java.util.concurrent.Executors
-            .newSingleThreadExecutor()
 
     private val mavlinkMediaSource =
         object : MavlinkMediaSource {
@@ -2317,7 +2314,7 @@ class FlightDeckActivity :
         // The obstacle guard outranks the operational status while it is latched. It is the one
         // state where the aircraft stopped itself, so it is what the pilot needs to read first —
         // shown here in the indicator they already watch rather than as anything that pops up.
-        if (ObstacleGuard.isLatched) {
+        if (ProcessObstacleRuntimeRegistry.isLatched()) {
             statusTv.text = "OBSTACLE"
             statusTv.setTextColor(0xFFFF1744.toInt())
             statusTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, DRONE_STATUS_ALERT_TEXT_SIZE_SP)
@@ -2887,6 +2884,25 @@ class FlightDeckActivity :
 
     override fun runtimeDefaultStreamingClientIp(): String = NetworkUtils.getDeviceIpAddress() ?: "127.0.0.1"
 
+    override fun runtimeObstacleMotion(): ObstacleRuntimeMotion {
+        val speed = aircraftTelemetry.getSpeed()
+        return ObstacleRuntimeMotion(
+            velocityNorthMps = speed.x,
+            velocityEastMps = speed.y,
+            velocityDownMps = speed.z,
+            headingDeg = aircraftTelemetry.getHeading(),
+        )
+    }
+
+    override fun runtimeOnObstacleBrake(event: ObstacleRuntimeBrake) {
+        LyrebirdFlightLogger.logStatus(
+            "OBSTACLE_STOP ${event.reason} " +
+                "clearance=${"%.1f".format(event.clearanceM)}m " +
+                "required=${"%.1f".format(event.requiredM)}m",
+        )
+        mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
+    }
+
     override fun runtimeMavlinkConfig(): MavlinkEndpointConfig = readMavlinkConfig()
 
     override fun runtimeMavlinkSnapshot(): MavlinkSnapshot = buildMavlinkSnapshot()
@@ -2950,13 +2966,14 @@ class FlightDeckActivity :
         }
 
         ProcessStreamingRuntimeRegistry.prepare()
+        ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this)
 
         // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
         // same question asked between aircraft, which nothing on the device could answer before.
         startFleetMesh()
 
         // Obstacle guard. Opt-in, and silent unless it fires.
-        startObstacleGuard()
+        ProcessObstacleRuntimeRegistry.start()
 
         // Start the process-scoped MAVLink endpoint (no-op unless enabled by preference).
         ProcessMavlinkRuntimeRegistry.attach(
@@ -3012,7 +3029,6 @@ class FlightDeckActivity :
 
             stopEdgeDetection()
 
-            captureExecutor.shutdownNow()
             // Unregister the settings backup listener and stop its writer: the SharedPreferences
             // singleton otherwise keeps the listener (and the activity through it) alive, and the
             // executor would keep writing after destroy.
@@ -3021,7 +3037,6 @@ class FlightDeckActivity :
             settingsBackupExecutor.shutdownNow()
             // The fleet link holds a repeating main-thread callback that must not outlive the
             // activity. Its sockets are its own; the session's discovery sockets are already down.
-            stopObstacleGuard()
             stopFleetMesh()
 
             // Detach this screen from the process-scoped network runtime. Its sockets and lease
@@ -3036,6 +3051,7 @@ class FlightDeckActivity :
                 mavlinkMissionSink,
             )
             ProcessStreamingRuntimeRegistry.detach(this)
+            ProcessObstacleRuntimeRegistry.detach(this)
 
             // Release Multicast Lock
             if (multicastLock?.isHeld == true) {
@@ -3665,39 +3681,18 @@ class FlightDeckActivity :
      * should be switched on deliberately rather than inherited from an app update.
      */
     private fun startObstacleGuard() {
-        ObstacleGuard.motionProvider = {
-            val speed = aircraftTelemetry.getSpeed()
-            ObstacleGuard.Motion(
-                velocityNorthMps = speed.x,
-                velocityEastMps = speed.y,
-                velocityDownMps = speed.z,
-                headingDeg = aircraftTelemetry.getHeading(),
-            )
-        }
-        ObstacleGuard.onBrake = { event ->
-            LyrebirdFlightLogger.logStatus(
-                "OBSTACLE_STOP ${event.reason.name} " +
-                    "clearance=${"%.1f".format(event.clearanceM)}m " +
-                    "required=${"%.1f".format(event.requiredM)}m",
-            )
-            // Status only, on the readout the pilot already watches. Nothing pops up over the
-            // video: an aircraft that has just stopped itself needs the pilot looking outside,
-            // not reading a notification.
-            mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
-        }
-        ObstacleGuard.start(sharedPreferences)
+        ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this)
+        ProcessObstacleRuntimeRegistry.start()
     }
 
     private fun stopObstacleGuard() {
-        ObstacleGuard.stop()
-        ObstacleGuard.motionProvider = null
-        ObstacleGuard.onBrake = null
+        ProcessObstacleRuntimeRegistry.stop()
     }
 
     private fun obstacleGuardSummary(): String =
         when {
-            !ObstacleGuard.isEnabled(sharedPreferences) -> "Off"
-            ObstacleGuard.isRunning -> "On, ${ObstacleBrake.DEFAULT_MARGIN_M.toInt()}m standoff"
+            !ProcessObstacleRuntimeRegistry.isEnabled() -> "Off"
+            ProcessObstacleRuntimeRegistry.isRunning() -> "On, ${ObstacleBrake.DEFAULT_MARGIN_M.toInt()}m standoff"
             else -> "On, sensors unavailable"
         }
 
@@ -3710,7 +3705,7 @@ class FlightDeckActivity :
      * from one who knows they have a backstop that cannot see wires.
      */
     private fun toggleObstacleGuard() {
-        val enabling = !ObstacleGuard.isEnabled(sharedPreferences)
+        val enabling = !ProcessObstacleRuntimeRegistry.isEnabled()
         if (!enabling) {
             sharedPreferences.edit().putBoolean(ObstacleGuard.PREF_ENABLED, false).apply()
             stopObstacleGuard()
@@ -4069,7 +4064,7 @@ class FlightDeckActivity :
      * would be a surprise, not a service.
      */
     private fun climbAfterTakeoff(altitudeMeters: Double) {
-        captureExecutor.execute {
+        ProcessCaptureExecutorRegistry.executor().execute {
             val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
                 val airborne =
