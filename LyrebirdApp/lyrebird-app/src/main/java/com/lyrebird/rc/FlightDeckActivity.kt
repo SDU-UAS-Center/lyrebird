@@ -104,6 +104,8 @@ import com.lyrebird.rc.util.NetworkUtils
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.webrtc.StreamingTargetPolicy
 import com.lyrebird.rc.webrtc.TelemetryProvider
+import com.lyrebird.rc.webrtc.V5NativeStreamingCoordinator
+import com.lyrebird.rc.webrtc.V5NativeStreamingHost
 import com.lyrebird.rc.webrtc.V5WebRtcStreamerFactory
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
@@ -744,6 +746,60 @@ class FlightDeckActivity :
 
                 override fun toggleObstacleGuard() = this@FlightDeckActivity.toggleObstacleGuard()
             },
+        )
+    }
+
+    private val nativeStreamingCoordinator by lazy {
+        V5NativeStreamingCoordinator(
+            liveStreamVM = liveStreamVM,
+            host =
+                object : V5NativeStreamingHost {
+                    override fun rtmpUrl(clientIp: String) = getRtmpUrl(clientIp)
+
+                    override fun setRtmpUrl(url: String) = settings.setRtmpUrl(url)
+
+                    override fun rtspPort() = settings.getRtspPort()
+
+                    override fun setRtspPort(port: Int) = settings.setRtspPort(port)
+
+                    override fun resolveRtspPort() = resolveRtspPortForStart()
+
+                    override fun rtspUsername() = settings.getRtspUsername()
+
+                    override fun rtspPassword() = settings.getRtspPassword()
+
+                    override fun agoraChannel() = settings.getAgoraChannel()
+
+                    override fun agoraToken() = settings.getAgoraToken()
+
+                    override fun agoraUid() = settings.getAgoraUid()
+
+                    override fun gbServerIp() = settings.getGbServerIp()
+
+                    override fun gbServerPort() = settings.getGbServerPort()
+
+                    override fun gbServerId() = settings.getGbServerId()
+
+                    override fun gbAgentId() = settings.getGbAgentId()
+
+                    override fun gbChannel() = settings.getGbChannel()
+
+                    override fun gbLocalPort() = settings.getGbLocalPort()
+
+                    override fun gbPassword() = settings.getGbPassword()
+
+                    override fun onStatus(status: String) {
+                        lastNativeStreamStatus = status
+                        mainHandler.post { updateStreamingFooter() }
+                    }
+
+                    override fun onMessage(message: String) = showStreamToast(message)
+
+                    override fun onConfigChanged() {
+                        rebuildTelemetryCache()
+                        updateStreamingFooter()
+                    }
+                },
         )
     }
     override var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
@@ -1933,191 +1989,29 @@ class FlightDeckActivity :
 
         webRTCStreamer?.stop()
 
-        val startSelectedMode = {
-            lastNativeStreamStatus = "starting"
-            updateStreamingFooter()
-
-            when (mode) {
-                StreamingMode.WEBRTC -> {
-                    val whipUrl = buildWhipUrl(clientIp)
-                    lastWhipUrl = whipUrl
-                    val streamer = webRTCStreamer
-                    if (streamer == null) {
-                        Log.w(TAG, "Cannot start WHIP - WebRTCStreamer not initialized yet")
-                        lastNativeStreamStatus = "error: streamer not initialized"
-                        updateStreamingFooter()
-                    } else {
-                        runCatching {
-                            streamer.startWhip(whipUrl, whipUrlProvider = { buildWhipUrl(clientIp) })
-                            Log.i(TAG, "WHIP publishing started: $whipUrl")
-                            lastNativeStreamStatus = "running"
-                            updateStreamingFooter()
-                        }.onFailure { error ->
-                            Log.e(TAG, "Failed to start WHIP publishing: ${error.message}", error)
-                            lastNativeStreamStatus = "error: ${error.message ?: "start failed"}"
-                            updateStreamingFooter()
-                        }
-                    }
-                }
-                StreamingMode.RTMP -> {
-                    val rtmpUrl = getRtmpUrl(clientIp)
-
-                    fun fallbackRtmpUrl(url: String): String? {
-                        val match = Regex("^rtmp://([^/]+)/([^/]+)$").matchEntire(url.trim()) ?: return null
-                        val hostPort = match.groupValues[1]
-                        val stream = match.groupValues[2]
-                        return "rtmp://$hostPort/live/$stream"
-                    }
-
-                    fun startRtmp(
-                        url: String,
-                        fallbackAttempt: Boolean = false,
-                    ) {
-                        Log.i(TAG, "Starting native DJI RTMP streaming to: $url")
-                        liveStreamVM.setRTMPConfig(url)
-                        liveStreamVM.startStream(
-                            object : CommonCallbacks.CompletionCallback {
-                                override fun onSuccess() {
-                                    if (url != rtmpUrl) {
-                                        settings.setRtmpUrl(url)
-                                    }
-                                    Log.i(TAG, "Native DJI RTMP streaming started successfully")
-                                    lastNativeStreamStatus = "running"
-                                    mainHandler.post { updateStreamingFooter() }
-                                    showStreamToast("RTMP stream started")
-                                }
-
-                                override fun onFailure(error: IDJIError) {
-                                    val message = error.description()
-                                    if (!fallbackAttempt) {
-                                        val fallback = fallbackRtmpUrl(url)
-                                        if (fallback != null && fallback != url) {
-                                            Log.w(TAG, "RTMP failed for $url ($message), retrying with $fallback")
-                                            lastNativeStreamStatus = "retrying with $fallback"
-                                            mainHandler.post { updateStreamingFooter() }
-                                            startRtmp(fallback, true)
-                                            return
-                                        }
-                                    }
-                                    Log.e(TAG, "Failed to start native DJI RTMP stream: $message")
-                                    lastNativeStreamStatus = "error: $message"
-                                    mainHandler.post { updateStreamingFooter() }
-                                    showStreamToast("RTMP failed: $message")
-                                }
-                            },
-                        )
-                    }
-
-                    startRtmp(rtmpUrl)
-                }
-                StreamingMode.RTSP -> {
-                    val requestedPort = settings.getRtspPort()
-                    val port = resolveRtspPortForStart()
-                    if (port != requestedPort) {
-                        settings.setRtspPort(port)
-                        Log.w(TAG, "RTSP port $requestedPort is in use, switching to $port")
-                        rebuildTelemetryCache()
-                        updateStreamingFooter()
-                        showStreamToast("RTSP port $requestedPort busy, switched to $port")
-                    }
-                    val user = settings.getRtspUsername()
-                    val pwd = settings.getRtspPassword()
-                    Log.i(TAG, "Starting native DJI RTSP server on port $port")
-                    liveStreamVM.setRTSPConfig(user, pwd, port)
-                    liveStreamVM.startStream(
-                        object : CommonCallbacks.CompletionCallback {
-                            override fun onSuccess() {
-                                Log.i(TAG, "Native DJI RTSP server started successfully")
-                                lastNativeStreamStatus = "running"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("RTSP server started on port $port")
-                            }
-
-                            override fun onFailure(error: IDJIError) {
-                                Log.e(TAG, "Failed to start native DJI RTSP: ${error.description()}")
-                                lastNativeStreamStatus = "error: ${error.description()}"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("RTSP failed: ${error.description()}")
-                            }
-                        },
-                    )
-                }
-                StreamingMode.AGORA -> {
-                    val channel = settings.getAgoraChannel()
-                    val token = settings.getAgoraToken()
-                    val uid = settings.getAgoraUid()
-                    Log.i(TAG, "Starting Agora streaming on channel $channel")
-                    liveStreamVM.setAgoraConfig(channel, token, uid)
-                    liveStreamVM.startStream(
-                        object : CommonCallbacks.CompletionCallback {
-                            override fun onSuccess() {
-                                Log.i(TAG, "Agora streaming started successfully")
-                                lastNativeStreamStatus = "running"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("Agora stream started")
-                            }
-
-                            override fun onFailure(error: IDJIError) {
-                                Log.e(TAG, "Failed to start Agora: ${error.description()}")
-                                lastNativeStreamStatus = "error: ${error.description()}"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("Agora failed: ${error.description()}")
-                            }
-                        },
-                    )
-                }
-                StreamingMode.GB28181 -> {
-                    val ip = settings.getGbServerIp()
-                    val port = settings.getGbServerPort()
-                    val serverId = settings.getGbServerId()
-                    val agentId = settings.getGbAgentId()
-                    val channel = settings.getGbChannel()
-                    val localPort = settings.getGbLocalPort()
-                    val pwd = settings.getGbPassword()
-                    Log.i(TAG, "Starting GB28181 streaming to $ip:$port")
-                    liveStreamVM.setGB28181(ip, port, serverId, agentId, channel, localPort, pwd)
-                    liveStreamVM.startStream(
-                        object : CommonCallbacks.CompletionCallback {
-                            override fun onSuccess() {
-                                Log.i(TAG, "GB28181 streaming started successfully")
-                                lastNativeStreamStatus = "running"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("GB28181 stream started")
-                            }
-
-                            override fun onFailure(error: IDJIError) {
-                                Log.e(TAG, "Failed to start GB28181: ${error.description()}")
-                                lastNativeStreamStatus = "error: ${error.description()}"
-                                mainHandler.post { updateStreamingFooter() }
-                                showStreamToast("GB28181 failed: ${error.description()}")
-                            }
-                        },
-                    )
-                }
-            }
+        if (mode != StreamingMode.WEBRTC) {
+            nativeStreamingCoordinator.start(mode, clientIp)
+            return
         }
 
-        if (liveStreamVM.isStreaming()) {
-            Log.i(TAG, "Stopping currently active native DJI livestream before restart")
-            liveStreamVM.stopStream(
-                object : CommonCallbacks.CompletionCallback {
-                    override fun onSuccess() {
-                        Log.i(TAG, "Native DJI livestream stopped successfully")
-                        lastNativeStreamStatus = "stopped"
-                        mainHandler.post { updateStreamingFooter() }
-                        startSelectedMode()
-                    }
-
-                    override fun onFailure(error: IDJIError) {
-                        Log.w(TAG, "Failed to stop native DJI livestream before restart: ${error.description()}")
-                        lastNativeStreamStatus = "stop failed: ${error.description()}"
-                        mainHandler.post { updateStreamingFooter() }
-                        startSelectedMode()
-                    }
-                },
-            )
-        } else {
-            startSelectedMode()
+        val whipUrl = buildWhipUrl(clientIp)
+        lastWhipUrl = whipUrl
+        val streamer = webRTCStreamer
+        if (streamer == null) {
+            Log.w(TAG, "Cannot start WHIP - WebRTCStreamer not initialized yet")
+            lastNativeStreamStatus = "error: streamer not initialized"
+            updateStreamingFooter()
+            return
+        }
+        runCatching {
+            streamer.startWhip(whipUrl, whipUrlProvider = { buildWhipUrl(clientIp) })
+            Log.i(TAG, "WHIP publishing started: $whipUrl")
+            lastNativeStreamStatus = "running"
+            updateStreamingFooter()
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to start WHIP publishing: ${error.message}", error)
+            lastNativeStreamStatus = "error: ${error.message ?: "start failed"}"
+            updateStreamingFooter()
         }
     }
 
@@ -2128,28 +2022,9 @@ class FlightDeckActivity :
         }
         Log.i(TAG, "Stopping active streaming...")
         webRTCStreamer?.stop()
+        nativeStreamingCoordinator.stop()
         lastNativeStreamStatus = "stopping"
         mainHandler.post { updateStreamingFooter() }
-        if (liveStreamVM.isStreaming()) {
-            liveStreamVM.stopStream(
-                object : CommonCallbacks.CompletionCallback {
-                    override fun onSuccess() {
-                        Log.i(TAG, "Native DJI livestream stopped successfully")
-                        lastNativeStreamStatus = "stopped"
-                        mainHandler.post { updateStreamingFooter() }
-                    }
-
-                    override fun onFailure(error: IDJIError) {
-                        Log.w(TAG, "Failed to stop native DJI livestream: ${error.description()}")
-                        lastNativeStreamStatus = "stop failed: ${error.description()}"
-                        mainHandler.post { updateStreamingFooter() }
-                    }
-                },
-            )
-        } else {
-            lastNativeStreamStatus = "stopped"
-            mainHandler.post { updateStreamingFooter() }
-        }
     }
 
     private fun showStreamToast(msg: String) {
