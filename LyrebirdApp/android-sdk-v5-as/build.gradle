@@ -37,6 +37,7 @@ allprojects {
 }
 
 def sampleJavaSource = file('../lyrebird-app/src/main/java')
+def v5JavaSource = file('../lyrebird-app/src/v5/java')
 def uxsdkJavaSource = file('../android-sdk-v5-uxsdk/src/main/java')
 def detektTaskClass = buildscript.classLoader.loadClass('io.gitlab.arturbosch.detekt.Detekt')
 
@@ -58,7 +59,10 @@ def lyrebirdSourceIncludes = [
         'com/lyrebird/rc/StreamingMode.kt',
 ]
 
-def lyrebirdSpotlessSources = fileTree(dir: sampleJavaSource, includes: lyrebirdSourceIncludes)
+def lyrebirdSpotlessSources = files(
+    fileTree(dir: sampleJavaSource, includes: lyrebirdSourceIncludes),
+    fileTree(dir: v5JavaSource, includes: lyrebirdSourceIncludes),
+)
 
 project(':app') {
     apply plugin: 'com.diffplug.spotless'
@@ -108,7 +112,7 @@ tasks.register('detektLyrebird', detektTaskClass) {
     allRules = false
     ignoreFailures = true
     config.setFrom(files('config/detekt/detekt.yml'))
-    setSource(files(sampleJavaSource))
+    setSource(files(sampleJavaSource, v5JavaSource))
     include lyrebirdSourceIncludes
     reports {
         html.outputLocation.set(new File("$buildDir/reports/detekt/lyrebird.html"))

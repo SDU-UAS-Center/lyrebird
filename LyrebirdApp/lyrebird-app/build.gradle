@@ -188,6 +188,17 @@ android {
     }
 }
 
+// Keep the current DJI MSDK V5 Flight Deck shell in its own physical source root. The root is
+// included in the current app until the V4 flavor is introduced, at which point each flavor can
+// register its own platform shell without putting either implementation in shared source.
+android.sourceSets.getByName("main").java.srcDir(file("src/v5/java"))
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    if (name ==~ /compile(Current|DemoBiomass)(Debug|Release)Kotlin/) {
+        source(fileTree(dir: "src/v5/java", includes: ["**/*.kt"]))
+    }
+}
+
 dependencies {
     /**
      * <----------------- Shared SDK-free code ------------------>
