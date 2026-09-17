@@ -30,8 +30,10 @@ class FormationControlFragment : Fragment() {
     private var _binding: FragmentFormationControlBinding? = null
     private val binding get() = _binding!!
 
-    private val basicAircraftControlVM: BasicAircraftControlVM by activityViewModels()
-    private val virtualStickVM: VirtualStickVM by activityViewModels()
+    private val basicAircraftControlVM: BasicAircraftControlVM
+        get() = ProcessAircraftSessionRegistry.basicAircraftControlVM()
+    private val virtualStickVM: VirtualStickVM
+        get() = ProcessAircraftSessionRegistry.virtualStickVM()
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var telemetryUpdateRunnable: Runnable? = null

@@ -7,11 +7,13 @@ import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.GimbalKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.value.common.Attitude
+import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate2D
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.common.Velocity3D
 import dji.sdk.keyvalue.value.flightcontroller.FlightMode
 import dji.sdk.keyvalue.value.flightcontroller.LowBatteryRTHInfo
+import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
 import dji.sdk.keyvalue.value.gimbal.GimbalMode
 import dji.v5.et.create
 import dji.v5.et.get
@@ -273,6 +275,8 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
     internal var gimbalJointAttitudeKey: DJIKey<Attitude> = GimbalKey.KeyGimbalJointAttitude.create()
 
     internal var gimbalModeKey: DJIKey<GimbalMode> = GimbalKey.KeyGimbalMode.create()
+
+    internal var gimbalRotationKey: DJIKey.ActionKey<GimbalAngleRotation, EmptyMsg> = GimbalKey.KeyRotateByAngle.create()
 
     internal val compassHeadKey: DJIKey<Double> = FlightControllerKey.KeyCompassHeading.create()
 

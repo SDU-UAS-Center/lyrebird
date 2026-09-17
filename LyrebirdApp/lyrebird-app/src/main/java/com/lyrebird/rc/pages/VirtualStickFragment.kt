@@ -70,8 +70,10 @@ class VirtualStickFragment : DJIFragment() {
         private const val TAG = "VirtualStickFragment"
     }
 
-    private val basicAircraftControlVM: BasicAircraftControlVM by activityViewModels()
-    private val virtualStickVM: VirtualStickVM by activityViewModels()
+    private val basicAircraftControlVM: BasicAircraftControlVM
+        get() = ProcessAircraftSessionRegistry.basicAircraftControlVM()
+    private val virtualStickVM: VirtualStickVM
+        get() = ProcessAircraftSessionRegistry.virtualStickVM()
     private val simulatorVM: SimulatorVM by activityViewModels()
     private val liveStreamVM: LiveStreamVM by activityViewModels()
     private var binding: FragVirtualStickPageBinding? = null

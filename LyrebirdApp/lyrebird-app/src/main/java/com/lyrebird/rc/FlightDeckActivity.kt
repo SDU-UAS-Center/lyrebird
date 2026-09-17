@@ -32,7 +32,7 @@ import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.MavlinkFlightPolicy
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
-import com.lyrebird.rc.controller.RoiControl
+import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
 import com.lyrebird.rc.controller.SafetyLatchStore
 import com.lyrebird.rc.controller.V5FlightSettingsActions
 import com.lyrebird.rc.controller.V5MavlinkCommandHost
@@ -42,10 +42,10 @@ import com.lyrebird.rc.controller.V5MavlinkMissionSink
 import com.lyrebird.rc.controller.V5MavlinkMotionHost
 import com.lyrebird.rc.controller.V5MavlinkMotionSink
 import com.lyrebird.rc.controller.V5MediaPort
+import com.lyrebird.rc.edge.DetectionRuntimeCallbacks
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
-import com.lyrebird.rc.edge.LocalDetectionProvider
-import com.lyrebird.rc.edge.V5AutoSensingProvider
+import com.lyrebird.rc.edge.ProcessDetectionRuntimeRegistry
 import com.lyrebird.rc.edge.V5DetectionPort
 import com.lyrebird.rc.fleet.FleetBeacon
 import com.lyrebird.rc.fleet.FleetDeckController
@@ -135,7 +135,6 @@ import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.flightcontroller.FlightMode
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
-import dji.sdk.keyvalue.value.gimbal.GimbalMode
 import dji.sdk.keyvalue.value.product.ProductType
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
@@ -171,6 +170,7 @@ class FlightDeckActivity :
     StreamingRuntimeCallbacks,
     ObstacleRuntimeCallbacks,
     SettingsBackupRuntimeCallbacks,
+    DetectionRuntimeCallbacks,
     FleetRuntimeCallbacks {
     companion object {
         private const val TAG = "LyrebirdDefaultLayout"
@@ -201,20 +201,6 @@ class FlightDeckActivity :
          * made, since no operator repositions an aircraft to within a centimetre of the equator.
          */
         private const val REPOSITION_COORD_EPSILON = 1e-7
-
-        /**
-         * How often the gimbal is re-aimed at a tracked point.
-         *
-         * Five times a second: fast enough that the picture follows rather than catches up, and
-         * slow enough that each relative rotation has finished before the next is asked for.
-         */
-        private const val ROI_TRACK_INTERVAL_MS = 200L
-
-        /** Below this the gimbal is left alone, so measurement noise does not make it hunt. */
-        private const val ROI_DEADBAND_DEG = 0.5
-
-        /** Largest single re-aim, so a target set behind the aircraft is a pan and not a whip. */
-        private const val ROI_MAX_STEP_DEG = 15.0
 
         /**
          * Smallest orbit worth flying.
@@ -291,12 +277,8 @@ class FlightDeckActivity :
 
     override val detection: LyrebirdDetectionPort by lazy {
         V5DetectionPort(
-            activeProvider = { isAutoSensingActive },
-            targetsProvider = {
-                currentDetectedTargets.map {
-                    DetectedTargetSnapshot(it.type, it.left, it.top, it.right, it.bottom, it.confidence)
-                }
-            },
+            activeProvider = { ProcessDetectionRuntimeRegistry.isAutoSensingActive() },
+            targetsProvider = { ProcessDetectionRuntimeRegistry.currentTargets() },
         )
     }
 
@@ -584,9 +566,13 @@ class FlightDeckActivity :
                 override val mavlinkCommandSink get() = this@FlightDeckActivity.mavlinkCommandSink
                 override val mavlinkMotionSink get() = this@FlightDeckActivity.mavlinkMotionSink
                 override var roiTarget
-                    get() = this@FlightDeckActivity.roiTarget
+                    get() = ProcessRoiRuntimeRegistry.currentTarget()
                     set(value) {
-                        this@FlightDeckActivity.roiTarget = value
+                        if (value == null) {
+                            ProcessRoiRuntimeRegistry.stop()
+                        } else {
+                            ProcessRoiRuntimeRegistry.start(value.latitude, value.longitude, value.altitude)
+                        }
                     }
 
                 override fun mavlinkFlightGate() = this@FlightDeckActivity.mavlinkFlightGate()
@@ -782,24 +768,8 @@ class FlightDeckActivity :
     private var isHomePointSetLatch = false
 
     // ==================== AutoSensing (AI Detection) ====================
-    var isAutoSensingActive = false
-    private val localDetectionProvider by lazy {
-        LocalDetectionProvider(
-            context = applicationContext,
-            onTargets = { targets ->
-                if (settings.activeDetectionSource() == DetectionSource.YOLO_ON_PHONE) {
-                    applyDetectedTargets(targets)
-                }
-            },
-            onMetrics = { metrics ->
-                lastEdgeMetrics = metrics
-                mainHandler.post { updateEdgeMetricsView(metrics) }
-            },
-        )
-    }
-    private val autoSensingProvider by lazy {
-        V5AutoSensingProvider()
-    }
+    private val isAutoSensingActive: Boolean
+        get() = ProcessDetectionRuntimeRegistry.isAutoSensingActive()
 
     @Volatile private var lastEdgeMetrics = EdgeDetectionMetrics()
 
@@ -1495,6 +1465,7 @@ class FlightDeckActivity :
     // physical dial/sticks drive it. Called 10s after the first PORT_3 frame.
     private fun initialiseM400Gimbal() {
         gimbalKey = GimbalKey.KeyRotateByAngle.create(ComponentIndexType.PORT_3)
+        aircraftTelemetry.gimbalRotationKey = gimbalKey
         aircraftTelemetry.gimbalAttitudeKey = GimbalKey.KeyGimbalAttitude.create(ComponentIndexType.PORT_3)
         aircraftTelemetry.gimbalJointAttitudeKey = GimbalKey.KeyGimbalJointAttitude.create(ComponentIndexType.PORT_3)
         aircraftTelemetry.gimbalModeKey = GimbalKey.KeyGimbalMode.create(ComponentIndexType.PORT_3)
@@ -1916,7 +1887,7 @@ class FlightDeckActivity :
         when (settings.activeDetectionSource()) {
             DetectionSource.NONE -> false
             DetectionSource.DJI_ONBOARD -> isAutoSensingActive
-            DetectionSource.YOLO_ON_PHONE -> localDetectionProvider.isActive
+            DetectionSource.YOLO_ON_PHONE -> ProcessDetectionRuntimeRegistry.isLocalActive()
         }
 
     private fun detectionMenuLabel(): String =
@@ -2002,7 +1973,7 @@ class FlightDeckActivity :
                 selectedSource = selectedSource.prefValue,
                 enabled = settings.isDetectionsEnabled(),
                 onboardActive = isAutoSensingActive,
-                localActive = localDetectionProvider.isActive,
+                localActive = ProcessDetectionRuntimeRegistry.isLocalActive(),
                 modelName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null),
                 threshold = settings.getEdgeConfidenceThreshold(),
             )
@@ -2017,7 +1988,7 @@ class FlightDeckActivity :
         telemetryCoordinator.selectedDetectionSource = selectedSource.prefValue
         telemetryCoordinator.detectionMenuLabel = selectedSource.menuLabel
         telemetryCoordinator.isAutoSensingActive = isAutoSensingActive
-        telemetryCoordinator.edgeDetectionActive = localDetectionProvider.isActive
+        telemetryCoordinator.edgeDetectionActive = ProcessDetectionRuntimeRegistry.isLocalActive()
         telemetryCoordinator.edgeModelName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null)
         telemetryCoordinator.edgeLabelsName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_LABELS_NAME, null)
         telemetryCoordinator.edgeConfidenceThreshold = settings.getEdgeConfidenceThreshold()
@@ -2034,48 +2005,12 @@ class FlightDeckActivity :
     }
 
     override fun startAutoSensing() {
-        if (isAutoSensingActive) return
-        autoSensingProvider.start(
-            object : V5AutoSensingProvider.Observer {
-                override fun onActiveChanged(active: Boolean) {
-                    isAutoSensingActive = active
-                    updateDetectionTelemetryState()
-                    rebuildTelemetryCache()
-                }
-
-                override fun onTargets(targets: List<DetectedTargetSnapshot>) {
-                    applyDetectedTargets(
-                        targets.mapIndexed { index, target ->
-                            DetectedTarget(
-                                index = index,
-                                type = target.type,
-                                left = target.left,
-                                top = target.top,
-                                right = target.right,
-                                bottom = target.bottom,
-                            )
-                        },
-                    )
-                }
-            },
-        )
+        ProcessDetectionRuntimeRegistry.startSelected()
     }
 
     @Suppress("TooGenericExceptionCaught")
     override fun stopAutoSensing() {
-        autoSensingProvider.stop(
-            object : V5AutoSensingProvider.Observer {
-                override fun onActiveChanged(active: Boolean) {
-                    isAutoSensingActive = active
-                    updateDetectionTelemetryState()
-                    rebuildTelemetryCache()
-                }
-
-                override fun onTargets(targets: List<DetectedTargetSnapshot>) {
-                    clearAutoSensingState()
-                }
-            },
-        )
+        ProcessDetectionRuntimeRegistry.stopSelected()
     }
 
     private fun clearAutoSensingState() {
@@ -2113,8 +2048,6 @@ class FlightDeckActivity :
     }
 
     private fun startEdgeDetection() {
-        if (localDetectionProvider.isActive) return
-
         val streamer = ProcessStreamingRuntimeRegistry.streamer()
         val startCheck = edgeDetectionStartCheck(getEdgeModelUri(), streamer)
         if (startCheck !is EdgeDetectionStartCheck.Ready) {
@@ -2125,12 +2058,7 @@ class FlightDeckActivity :
         clearAutoSensingState()
 
         configureDetectionOverlay()
-        localDetectionProvider.start(
-            modelUri = startCheck.modelUri,
-            labels = getEdgeLabels(),
-            confidenceThreshold = settings.getEdgeConfidenceThreshold(),
-            streamer = streamer ?: return,
-        )
+        ProcessDetectionRuntimeRegistry.startSelected()
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
 
@@ -2196,8 +2124,8 @@ class FlightDeckActivity :
     }
 
     private fun stopEdgeDetection() {
-        if (!localDetectionProvider.isActive) return
-        localDetectionProvider.stop(ProcessStreamingRuntimeRegistry.streamer())
+        if (!ProcessDetectionRuntimeRegistry.isLocalActive()) return
+        ProcessDetectionRuntimeRegistry.stopSelected()
         clearAutoSensingState()
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
@@ -2827,6 +2755,57 @@ class FlightDeckActivity :
     override val runtimeSettingsBackupDroneName: String
         get() = droneName
 
+    override fun runtimeDetectionSource(): String = settings.activeDetectionSource().prefValue
+
+    override fun runtimeDetectionStreamingMode(): StreamingMode = settings.getStreamingMode()
+
+    override fun runtimeDetectionsEnabled(): Boolean = settings.isDetectionsEnabled()
+
+    override fun runtimeEdgeModelUri(): Uri? = getEdgeModelUri()
+
+    override fun runtimeEdgeLabels(): List<String> = getEdgeLabels()
+
+    override fun runtimeEdgeConfidenceThreshold(): Float = settings.getEdgeConfidenceThreshold()
+
+    override fun runtimeDetectionTargetsChanged(targets: List<DetectedTargetSnapshot>) {
+        applyDetectedTargets(
+            targets.mapIndexed { index, target ->
+                DetectedTarget(
+                    index = index,
+                    type = target.type,
+                    left = target.left,
+                    top = target.top,
+                    right = target.right,
+                    bottom = target.bottom,
+                )
+            },
+        )
+    }
+
+    override fun runtimeDetectionMetricsChanged(metrics: EdgeDetectionMetrics) {
+        lastEdgeMetrics = metrics
+        mainHandler.post { updateEdgeMetricsView(metrics) }
+    }
+
+    override fun runtimeDetectionActiveChanged(active: Boolean) {
+        mainHandler.post {
+            updateDetectionTelemetryState()
+            rebuildTelemetryCache()
+        }
+    }
+
+    override fun runtimeDetectionUnsupported(mode: StreamingMode) {
+        mainHandler.post {
+            handleEdgeDetectionStartFailure(EdgeDetectionStartCheck.UnsupportedStreamingMode(mode))
+        }
+    }
+
+    override fun runtimeDetectionNeedsModel() {
+        mainHandler.post {
+            handleEdgeDetectionStartFailure(EdgeDetectionStartCheck.MissingModel)
+        }
+    }
+
     override fun runtimeObstacleMotion(): ObstacleRuntimeMotion {
         val speed = aircraftTelemetry.getSpeed()
         return ObstacleRuntimeMotion(
@@ -2909,6 +2888,7 @@ class FlightDeckActivity :
         }
 
         ProcessStreamingRuntimeRegistry.prepare()
+        ProcessDetectionRuntimeRegistry.attach(applicationContext, this)
         ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this)
 
         // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
@@ -2968,7 +2948,6 @@ class FlightDeckActivity :
         try {
             // Stop AutoSensing
             stopAutoSensing()
-            autoSensingProvider.dispose()
 
             stopEdgeDetection()
 
@@ -2990,6 +2969,7 @@ class FlightDeckActivity :
             ProcessStreamingRuntimeRegistry.detach(this)
             ProcessObstacleRuntimeRegistry.detach(this)
             ProcessSettingsBackupRuntimeRegistry.detach(this)
+            ProcessDetectionRuntimeRegistry.detach(this)
 
             // Cancel key listeners
             ProcessTelemetryRuntimeRegistry.detachUiObservers()
@@ -3152,13 +3132,6 @@ class FlightDeckActivity :
 
     // ==================== Telemetry Data ====================
 
-    /** The point the gimbal is tracking, or null when nothing is. */
-    @Volatile private var roiTarget: LocationCoordinate3D? = null
-    private var roiTrackingRunnable: Runnable? = null
-
-    /** The gimbal mode before ROI tracking freed the yaw axis, restored when tracking stops. */
-    @Volatile private var roiPreviousGimbalMode: GimbalMode? = null
-
     /**
      * Set when a ground station's ARM command was accepted. DJI has no arming state — motors
      * spin only when a takeoff actually runs — so the heartbeat otherwise never reports armed and
@@ -3168,130 +3141,13 @@ class FlightDeckActivity :
      */
     @Volatile private var armedCommanded = false
 
-    /**
-     * Keep the camera on one position on the ground until told to stop.
-     *
-     * A repeating correction rather than a single aim, because the target is fixed and the
-     * aircraft is not: flying past a point changes both the bearing to it and the angle down to
-     * it continuously, so an ROI set once and left alone would only be correct at the instant it
-     * was set.
-     *
-     * Closed-loop on the gimbal's own reported joint angles, and commanded as a *relative*
-     * rotation rather than an absolute one. That is the deliberate part. Whether DJI's absolute
-     * gimbal yaw is referenced to north or to the aircraft heading is exactly the sort of
-     * question this project has twice had to settle by flying rather than by reading, and a
-     * relative rotation does not raise it: the desired and the measured angle are both joint
-     * angles, so their difference is a rotation the gimbal can simply be asked to make.
-     */
     private fun startRoiTracking(
         latitudeDeg: Double,
         longitudeDeg: Double,
         altitudeM: Double,
-    ) {
-        roiTarget = LocationCoordinate3D(latitudeDeg, longitudeDeg, altitudeM)
-        if (roiTrackingRunnable != null) return
-        // The camera owns the yaw axis while it tracks a point. In yaw-follow mode the aircraft's
-        // turns yank the lens toward the flight direction, so the follow mode and the ROI loop
-        // fight at the tracking rate — a gimbal that swings between looking ahead and looking at
-        // the target. Free yaw is what the loop expects, so the mode is switched before the loop
-        // starts and restored when it stops.
-        roiPreviousGimbalMode = KeyManager.getInstance().getValue(aircraftTelemetry.gimbalModeKey) ?: GimbalMode.YAW_FOLLOW
-        KeyManager.getInstance().setValue(
-            aircraftTelemetry.gimbalModeKey,
-            GimbalMode.FREE,
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    Log.i(TAG, "Gimbal yaw freed for ROI tracking")
-                }
+    ) = ProcessRoiRuntimeRegistry.start(latitudeDeg, longitudeDeg, altitudeM)
 
-                override fun onFailure(error: IDJIError) {
-                    Log.w(TAG, "Could not free gimbal yaw for ROI: ${error.description()}")
-                }
-            },
-        )
-        val runnable =
-            object : Runnable {
-                override fun run() {
-                    val target = roiTarget ?: return
-                    trackRoiOnce(target)
-                    mainHandler.postDelayed(this, ROI_TRACK_INTERVAL_MS)
-                }
-            }
-        roiTrackingRunnable = runnable
-        mainHandler.post(runnable)
-        Log.i(TAG, "ROI tracking $latitudeDeg, $longitudeDeg at ${altitudeM}m")
-    }
-
-    private fun stopRoiTracking() {
-        roiTarget = null
-        roiTrackingRunnable?.let { mainHandler.removeCallbacks(it) }
-        roiTrackingRunnable = null
-        // Give the yaw axis back to the aircraft: with no point to hold, the gimbal follows the
-        // nose again as it did before the ROI was set.
-        roiPreviousGimbalMode?.let { previous ->
-            roiPreviousGimbalMode = null
-            KeyManager.getInstance().setValue(
-                aircraftTelemetry.gimbalModeKey,
-                previous,
-                object : CommonCallbacks.CompletionCallback {
-                    override fun onSuccess() {
-                        Log.i(TAG, "Gimbal yaw follow restored")
-                    }
-
-                    override fun onFailure(error: IDJIError) {
-                        Log.w(TAG, "Could not restore gimbal yaw follow: ${error.description()}")
-                    }
-                },
-            )
-        }
-        Log.i(TAG, "ROI tracking cleared")
-    }
-
-    /** One correction: where the gimbal should point, less where it reports pointing. */
-    private fun trackRoiOnce(target: LocationCoordinate3D) {
-        val position = aircraftTelemetry.getLocation3D()
-        // Before a fix there is no bearing to compute, and the aircraft's own position would
-        // read as the Gulf of Guinea. Waiting is the honest answer; the next tick tries again.
-        if (position.latitude == 0.0 && position.longitude == 0.0) return
-
-        val aim =
-            RoiControl.aimAt(
-                bearingToRoiDeg =
-                    DroneController
-                        .calculateBearing(
-                            position.latitude,
-                            position.longitude,
-                            target.latitude,
-                            target.longitude,
-                        ).toDouble(),
-                groundDistanceM =
-                    DroneController.calculateDistance(
-                        target.latitude,
-                        target.longitude,
-                        position.latitude,
-                        position.longitude,
-                    ),
-                altitudeAboveRoiM = position.altitude - target.altitude,
-                headingDeg = aircraftTelemetry.getHeading(),
-                aircraftPitchDeg = aircraftTelemetry.getAttitude().pitch,
-            )
-
-        val joint = aircraftTelemetry.getGimbalJointAttitude()
-        val pitchStep =
-            RoiControl.step(
-                aim.pitchDeg - joint.pitch,
-                ROI_DEADBAND_DEG,
-                ROI_MAX_STEP_DEG,
-            )
-        val yawStep =
-            RoiControl.step(
-                RoiControl.normalizeAngle(aim.yawDeg - joint.yaw),
-                ROI_DEADBAND_DEG,
-                ROI_MAX_STEP_DEG,
-            )
-        if (pitchStep == 0.0 && yawStep == 0.0) return
-        v5MavlinkCommandAdapter.nudgeGimbal(pitchStep, yawStep)
-    }
+    private fun stopRoiTracking() = ProcessRoiRuntimeRegistry.stop()
 
     private fun isHomeSet(): Boolean {
         val shouldLatchHomePoint =
