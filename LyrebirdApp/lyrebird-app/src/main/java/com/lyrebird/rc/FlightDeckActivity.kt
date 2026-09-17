@@ -26,7 +26,6 @@ import android.widget.ToggleButton
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
-import androidx.lifecycle.ViewModelProvider
 import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.MavlinkFlightPolicy
@@ -68,7 +67,6 @@ import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.models.MediaVM
-import com.lyrebird.rc.models.PayloadWidgetVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
 import com.lyrebird.rc.server.MavlinkMediaSource
@@ -82,6 +80,7 @@ import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessMediaRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessObstacleRuntimeRegistry
+import com.lyrebird.rc.server.ProcessPayloadRuntimeRegistry
 import com.lyrebird.rc.server.ProcessSettingsBackupRuntimeRegistry
 import com.lyrebird.rc.server.ProcessStreamingRuntimeRegistry
 import com.lyrebird.rc.server.SettingsBackupRuntimeCallbacks
@@ -271,7 +270,7 @@ class FlightDeckActivity :
     private val aircraftTelemetry get() = ProcessTelemetryRuntimeRegistry.aircraftTelemetry()
 
     private val mediaVM: MediaVM get() = ProcessMediaRuntimeRegistry.mediaVM()
-    lateinit var payloadWidgetVM: PayloadWidgetVM
+    private val payloadWidgetVM get() = ProcessPayloadRuntimeRegistry.payloadWidgetVM()
 
     override val media: LyrebirdMediaPort by lazy { V5MediaPort { mediaVM } }
 
@@ -941,8 +940,6 @@ class FlightDeckActivity :
         ProcessMediaRuntimeRegistry.start()
 
         // PayloadWidgetVM drives the payload-release servo for the /send/drop endpoint.
-        payloadWidgetVM = ViewModelProvider(this)[PayloadWidgetVM::class.java]
-
         // Setup Manual Override checkbox
         setupManualOverrideCheckbox()
 
@@ -2942,8 +2939,6 @@ class FlightDeckActivity :
         detachDefaultLayoutHsiWidgets()
 
         disarmThermalMeasurement()
-
-        deviceStatusSource.stop()
 
         try {
             // Stop AutoSensing
