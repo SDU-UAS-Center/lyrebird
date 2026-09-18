@@ -204,6 +204,8 @@ android {
     }
 }
 
+android.sourceSets.getByName("main").java.srcDir(file("src/v5/java"))
+
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     if (name ==~ /compile(Current|DemoBiomass)V5(Debug|Release)Kotlin/) {
         source(fileTree(dir: "src/v5/java", includes: ["**/*.kt"]))
