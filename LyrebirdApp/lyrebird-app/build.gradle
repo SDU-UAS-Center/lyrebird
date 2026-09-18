@@ -73,7 +73,7 @@ android {
         }
     }
 
-    flavorDimensions "appVariant"
+    flavorDimensions "appVariant", "sdk"
     productFlavors {
         current {
             dimension "appVariant"
@@ -84,6 +84,14 @@ android {
             versionNameSuffix "-demo_biomass"
             manifestPlaceholders["API_KEY"] = demoBiomassAircraftApiKey
             manifestPlaceholders["APP_ICON"] = "@mipmap/ic_main"
+        }
+        v5 {
+            dimension "sdk"
+        }
+        v4 {
+            dimension "sdk"
+            applicationIdSuffix ".v4"
+            versionNameSuffix "-v4"
         }
     }
 
@@ -111,11 +119,19 @@ android {
     }
 
     androidComponents {
+        // V4 SDK coordinates and platform sources are not provisioned yet. Keep the flavor
+        // identity declared, but do not publish an unbuildable V4 APK.
+        beforeVariants(selector().all()) { variant ->
+            if (variant.productFlavors.any { it.second == "v4" }) {
+                variant.enable = false
+            }
+        }
         onVariants(selector().all()) { variant ->
+            def flavorNames = variant.productFlavors.collect { it.second }
+            def appVariant = flavorNames.find { it == "current" || it == "demoBiomass" } ?: "unknown"
+            def sdkVariant = flavorNames.find { it == "v5" || it == "v4" } ?: "unknown"
             variant.outputs.forEach { output ->
-                // Flavor already separates output directories, so the file name only needs the
-                // build type: Lyrebird-debug.apk, Lyrebird-release.apk.
-                output.outputFileName.set("Lyrebird-${variant.buildType}.apk")
+                output.outputFileName.set("Lyrebird-${appVariant}-${sdkVariant}-${variant.buildType}.apk")
             }
         }
     }
@@ -188,13 +204,8 @@ android {
     }
 }
 
-// Keep the current DJI MSDK V5 Flight Deck shell in its own physical source root. The root is
-// included in the current app until the V4 flavor is introduced, at which point each flavor can
-// register its own platform shell without putting either implementation in shared source.
-android.sourceSets.getByName("main").java.srcDir(file("src/v5/java"))
-
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-    if (name ==~ /compile(Current|DemoBiomass)(Debug|Release)Kotlin/) {
+    if (name ==~ /compile(Current|DemoBiomass)V5(Debug|Release)Kotlin/) {
         source(fileTree(dir: "src/v5/java", includes: ["**/*.kt"]))
     }
 }
@@ -208,11 +219,11 @@ dependencies {
     implementation project(':lyrebird-core')
 
     /** <----------------- MSDK dependencies ------------------> **/
-    compileOnly deps.aircraftProvided
-    implementation deps.aircraft
+    v5CompileOnly deps.aircraftProvided
+    v5Implementation deps.aircraft
 
     /** <----------------- Sample dependencies ------------------> **/
-    implementation project(':uxsdk')
+    v5Implementation project(':uxsdk')
     implementation deps.appcompat
     implementation deps.constraintLayout
     implementation deps.aacCommon

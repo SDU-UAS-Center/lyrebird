@@ -2,7 +2,8 @@
 
 Date: 2026-09-15
 
-Status: proposed implementation plan. No application changes are implemented by this document.
+Status: implementation started. V5 flavor scaffolding is in place; V4 SDK provisioning and
+adapter implementation have not started.
 
 ## 1. Outcome and Scope
 
