@@ -2,6 +2,15 @@ package com.lyrebird.rc.telemetry
 
 interface AircraftTelemetrySource {
     fun read(): AircraftReadings
+
+    /** The snapshot above plus connection generation and observation time. */
+    fun readState(): AircraftState
+
+    /**
+     * Subscribe to readings and flight-state events. Multiple listeners coexist; closing the
+     * returned handle removes only this listener and may be called more than once.
+     */
+    fun subscribe(listener: AircraftTelemetryListener): AutoCloseable
 }
 
 data class AircraftReadings(

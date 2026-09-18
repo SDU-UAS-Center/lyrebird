@@ -99,6 +99,8 @@ import com.lyrebird.rc.settings.SettingsDialogViews
 import com.lyrebird.rc.settings.SettingsDisplay
 import com.lyrebird.rc.settings.SettingsPageActions
 import com.lyrebird.rc.settings.SettingsSnapshot
+import com.lyrebird.rc.telemetry.AircraftFlightMode
+import com.lyrebird.rc.telemetry.AircraftTelemetryListener
 import com.lyrebird.rc.telemetry.GeoPoint3D
 import com.lyrebird.rc.telemetry.ProcessTelemetryRuntimeRegistry
 import com.lyrebird.rc.telemetry.TelemetryCoordinator
@@ -133,7 +135,6 @@ import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.DoubleRect
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
-import dji.sdk.keyvalue.value.flightcontroller.FlightMode
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
 import dji.sdk.keyvalue.value.product.ProductType
 import dji.v5.common.callback.CommonCallbacks
@@ -764,6 +765,15 @@ class FlightDeckActivity :
 
     @Volatile private var latestGimbalPitchDegrees: Double = 0.0
 
+    /**
+     * This screen's own telemetry subscriptions.
+     *
+     * The process runtime subscribes at attach and keeps its handle; closing these on destroy
+     * detaches only this screen, and a second screen attaching is never disturbed by it.
+     */
+    private var telemetrySubscription: AutoCloseable? = null
+    private var flightStateSubscription: AutoCloseable? = null
+
     // Home point tracking
     private var isHomePointSetLatch = false
 
@@ -815,7 +825,7 @@ class FlightDeckActivity :
     // flight-mode blip does not flash it.
     private val idleDetectDebounceMs = 1_500L
 
-    @Volatile private var cachedFlightMode: FlightMode = FlightMode.UNKNOWN
+    @Volatile private var cachedFlightMode: AircraftFlightMode = AircraftFlightMode.UNKNOWN
 
     @Volatile private var cachedSatelliteCount = -1
 
@@ -2332,53 +2342,58 @@ class FlightDeckActivity :
     }
 
     private fun setupFlightStateListeners() {
-        aircraftTelemetry.startFlightStateUpdates(
-            object : V5AircraftTelemetrySource.FlightStateObserver {
-                override fun onFlyingChanged(flying: Boolean) {
-                    val wasFlying = DroneController.isAirborne
-                    DroneController.isAirborne = flying
-                    mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
-                    // Flight log session lifecycle: open a new file on takeoff, close it on landing.
-                    if (!wasFlying && flying) {
-                        LyrebirdFlightLogger.startSession()
-                        // Start AutoSensing on takeoff if DJI onboard detections are selected.
-                        if (settings.activeDetectionSource() == DetectionSource.DJI_ONBOARD && !isAutoSensingActive) {
-                            startAutoSensing()
-                        }
-                    } else if (wasFlying && !flying) {
-                        // 10-second grace period before closing in case of brief mid-air telemetry glitch.
-                        mainHandler.postDelayed({
-                            if (!DroneController.isAirborne) {
-                                LyrebirdFlightLogger.endSession("landed")
-                                // Sync DJI TXT records — idempotent, safe to run immediately.
-                                // Any file the SDK hasn't finalised yet will be picked up next launch.
-                                syncDjiFlightLogsInBackground()
+        flightStateSubscription?.close()
+        flightStateSubscription =
+            aircraftTelemetry.subscribe(
+                object : AircraftTelemetryListener {
+                    override fun onFlyingChanged(flying: Boolean) {
+                        val wasFlying = DroneController.isAirborne
+                        DroneController.isAirborne = flying
+                        mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
+                        // Flight log session lifecycle: open a new file on takeoff, close it on landing.
+                        if (!wasFlying && flying) {
+                            LyrebirdFlightLogger.startSession()
+                            // Start AutoSensing on takeoff if DJI onboard detections are selected.
+                            if (settings.activeDetectionSource() == DetectionSource.DJI_ONBOARD && !isAutoSensingActive) {
+                                startAutoSensing()
                             }
-                        }, 10_000L)
+                        } else if (wasFlying && !flying) {
+                            // 10-second grace period before closing in case of brief mid-air telemetry glitch.
+                            mainHandler.postDelayed(
+                                {
+                                    if (!DroneController.isAirborne) {
+                                        LyrebirdFlightLogger.endSession("landed")
+                                        // Sync DJI TXT records — idempotent, safe to run immediately.
+                                        // Any file the SDK hasn't finalised yet will be picked up next launch.
+                                        syncDjiFlightLogsInBackground()
+                                    }
+                                },
+                                10_000L,
+                            )
+                        }
                     }
-                }
 
-                override fun onFlightModeChanged(mode: FlightMode) {
-                    mainHandler.post {
-                        cachedFlightMode = mode
-                        reevaluateAircraftIdle()
+                    override fun onFlightModeChanged(mode: AircraftFlightMode) {
+                        mainHandler.post {
+                            cachedFlightMode = mode
+                            reevaluateAircraftIdle()
+                        }
+                        // Detect RTH triggered from the RC controller, not from our server HTTP request.
+                        if (mode == AircraftFlightMode.GO_HOME &&
+                            DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME
+                        ) {
+                            mainHandler.post { DroneController.activateManualOverride() }
+                        }
                     }
-                    // Detect RTH triggered from the RC controller, not from our server HTTP request.
-                    if (mode == FlightMode.GO_HOME &&
-                        DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME
-                    ) {
-                        mainHandler.post { DroneController.activateManualOverride() }
-                    }
-                }
 
-                override fun onSatelliteCountChanged(count: Int) {
-                    mainHandler.post {
-                        cachedSatelliteCount = count
-                        reevaluateAircraftIdle()
+                    override fun onSatelliteCountChanged(count: Int) {
+                        mainHandler.post {
+                            cachedSatelliteCount = count
+                            reevaluateAircraftIdle()
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
     }
 
     // ==================== Aircraft idle (low-power / eco) detection ====================
@@ -2391,7 +2406,7 @@ class FlightDeckActivity :
      */
     private fun setupAircraftIdleMonitor() {
         val readings = aircraftTelemetry.readState().readings
-        cachedFlightMode = FlightMode.entries.firstOrNull { it.name == readings.flightMode } ?: FlightMode.UNKNOWN
+        cachedFlightMode = V5AircraftTelemetrySource.neutralFlightMode(readings.flightMode)
         cachedSatelliteCount = readings.satelliteCount
         reevaluateAircraftIdle()
     }
@@ -2399,7 +2414,7 @@ class FlightDeckActivity :
     private fun isAircraftIdle(): Boolean =
         aircraftConnected &&
             !DroneController.isAirborne &&
-            cachedFlightMode == FlightMode.UNKNOWN &&
+            cachedFlightMode == AircraftFlightMode.UNKNOWN &&
             cachedSatelliteCount <= 0
 
     private fun idleStateSummary(): String =
@@ -2491,21 +2506,23 @@ class FlightDeckActivity :
     }
 
     private fun setupTelemetryListeners() {
-        aircraftTelemetry.startTelemetry(
-            object : V5AircraftTelemetrySource.Observer {
-                override fun onAltitudeChanged(altitudeAslM: Double) {
-                    latestAltitudeMetres = altitudeAslM
-                    mainHandler.post { updateAltitudeView() }
-                }
+        telemetrySubscription?.close()
+        telemetrySubscription =
+            aircraftTelemetry.subscribe(
+                object : AircraftTelemetryListener {
+                    override fun onAltitudeChanged(altitudeAslM: Double) {
+                        latestAltitudeMetres = altitudeAslM
+                        mainHandler.post { updateAltitudeView() }
+                    }
 
-                override fun onGimbalPitchChanged(pitchDeg: Double) {
-                    latestGimbalPitchDegrees = pitchDeg
-                    mainHandler.post { updateAltitudeView() }
-                }
+                    override fun onGimbalPitchChanged(pitchDeg: Double) {
+                        latestGimbalPitchDegrees = pitchDeg
+                        mainHandler.post { updateAltitudeView() }
+                    }
 
-                override fun onReadingsChanged() = rebuildTelemetryCache()
-            },
-        )
+                    override fun onReadingsChanged() = rebuildTelemetryCache()
+                },
+            )
         updateAltitudeView()
     }
 
@@ -2967,8 +2984,12 @@ class FlightDeckActivity :
             ProcessSettingsBackupRuntimeRegistry.detach(this)
             ProcessDetectionRuntimeRegistry.detach(this)
 
+            // This screen's own telemetry subscriptions; the process runtime's own subscription
+            // is not this activity's to close.
+            telemetrySubscription?.close()
+            flightStateSubscription?.close()
+
             // Cancel key listeners
-            ProcessTelemetryRuntimeRegistry.detachUiObservers()
             KeyManager.getInstance().cancelListen(this)
 
             // Detach the M400 main-camera first-frame detector if still registered

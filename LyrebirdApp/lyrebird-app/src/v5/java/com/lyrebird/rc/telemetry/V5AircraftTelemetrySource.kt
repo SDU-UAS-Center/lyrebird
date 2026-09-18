@@ -25,21 +25,32 @@ import dji.v5.ux.core.util.DataProcessor
 internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
     companion object {
         private const val MAX_PLAUSIBLE_GIMBAL_DEG = 200.0
+
+        /**
+         * Map the SDK's flight mode onto the neutral vocabulary.
+         *
+         * Names are matched rather than ordinals. The V5 names that differ from the neutral ones
+         * are listed explicitly; a mode with no neutral equivalent maps to
+         * [AircraftFlightMode.OTHER], which stays visible as itself rather than becoming
+         * [AircraftFlightMode.UNKNOWN] — the idle detector reads UNKNOWN as "aircraft asleep".
+         */
+        internal fun neutralFlightMode(mode: FlightMode): AircraftFlightMode = neutralFlightMode(mode.name)
+
+        internal fun neutralFlightMode(name: String): AircraftFlightMode =
+            when (name) {
+                "ATTI" -> AircraftFlightMode.ATTITUDE
+                "GPS_SPORT" -> AircraftFlightMode.SPORT
+                "GPS_TRIPOD" -> AircraftFlightMode.TRIPOD
+                "AUTO_TAKE_OFF" -> AircraftFlightMode.AUTO_TAKEOFF
+                else ->
+                    AircraftFlightMode.entries.firstOrNull { it.name == name }
+                        ?: AircraftFlightMode.OTHER
+            }
     }
 
-    interface Observer {
-        fun onAltitudeChanged(altitudeAslM: Double)
-
-        fun onGimbalPitchChanged(pitchDeg: Double)
-
-        fun onReadingsChanged()
-    }
-
-    @Volatile private var observer: Observer? = null
-    private var telemetryStarted = false
+    private val subscriptions = AircraftTelemetrySubscriptions()
+    private var listenersStarted = false
     private var batteryListenersStarted = false
-    private var flightStateObserver: FlightStateObserver? = null
-    private var flightStateListenersStarted = false
 
     @Volatile private var aircraftConnected = false
 
@@ -48,14 +59,6 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
     @Volatile private var lastObservedAtMillis = 0L
     private var generationListenerOwner: Any? = null
     private val connectionState = ConnectionGeneration()
-
-    interface FlightStateObserver {
-        fun onFlyingChanged(flying: Boolean)
-
-        fun onFlightModeChanged(mode: FlightMode)
-
-        fun onSatelliteCountChanged(count: Int)
-    }
 
     fun setConnectionState(connected: Boolean) {
         val state = connectionState.update(connected)
@@ -66,32 +69,28 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
         if (connected) registerGenerationListeners()
     }
 
-    fun startTelemetry(observer: Observer) {
-        this.observer = observer
-        if (telemetryStarted) return
-        telemetryStarted = true
-        if (aircraftConnected) registerGenerationListeners()
-    }
-
-    fun startFlightStateUpdates(observer: FlightStateObserver) {
-        flightStateObserver = observer
-        flightStateListenersStarted = true
-        if (aircraftConnected) registerGenerationListeners()
+    /**
+     * Register [listener] for readings and flight-state events.
+     *
+     * The first subscription starts the SDK listeners for this source; the process runtime holds
+     * one for the whole session, so later screens attach and detach without changing whether
+     * telemetry runs. Closing the handle detaches only that listener.
+     */
+    override fun subscribe(listener: AircraftTelemetryListener): AutoCloseable {
+        val handle = subscriptions.add(listener)
+        if (!listenersStarted) {
+            listenersStarted = true
+            if (aircraftConnected) registerGenerationListeners()
+        }
+        return handle
     }
 
     fun stop() {
-        observer = null
-        flightStateObserver = null
-        telemetryStarted = false
+        listenersStarted = false
         batteryListenersStarted = false
-        flightStateListenersStarted = false
+        subscriptions.clear()
         cancelGenerationListeners()
         KeyManager.getInstance().cancelListen(this)
-    }
-
-    internal fun detachObservers() {
-        observer = null
-        flightStateObserver = null
     }
 
     private fun registerGenerationListeners() {
@@ -102,18 +101,20 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
         val keys = KeyManager.getInstance()
 
         fun current(): Boolean = aircraftConnected && connectionGeneration == generation
-        if (telemetryStarted) {
+        if (listenersStarted) {
             keys.listen(location3DKey, owner) { _, value ->
                 if (!current()) return@listen
                 markObserved()
-                observer?.onAltitudeChanged(value?.altitude ?: 0.0)
-                observer?.onReadingsChanged()
+                val altitude = value?.altitude ?: 0.0
+                subscriptions.dispatch { it.onAltitudeChanged(altitude) }
+                subscriptions.dispatch { it.onReadingsChanged() }
             }
             keys.listen(gimbalAttitudeKey, owner) { _, value ->
                 if (!current()) return@listen
                 markObserved()
-                observer?.onGimbalPitchChanged(value?.pitch ?: 0.0)
-                observer?.onReadingsChanged()
+                val pitch = value?.pitch ?: 0.0
+                subscriptions.dispatch { it.onGimbalPitchChanged(pitch) }
+                subscriptions.dispatch { it.onReadingsChanged() }
             }
             keys.listen(attitudeKey, owner) { _, _ -> if (current()) readingsChanged() }
             keys.listen(compassHeadKey, owner) { _, _ -> if (current()) readingsChanged() }
@@ -152,23 +153,26 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
                 }
             }
         }
-        if (flightStateListenersStarted) {
+        if (listenersStarted) {
             keys.listen(isFlyingKey, owner) { _, value ->
                 if (current()) {
                     markObserved()
-                    flightStateObserver?.onFlyingChanged(value ?: false)
+                    val flying = value ?: false
+                    subscriptions.dispatch { it.onFlyingChanged(flying) }
                 }
             }
             keys.listen(flightModeKey, owner) { _, value ->
                 if (current()) {
                     markObserved()
-                    flightStateObserver?.onFlightModeChanged(value ?: FlightMode.UNKNOWN)
+                    val mode = neutralFlightMode(value ?: FlightMode.UNKNOWN)
+                    subscriptions.dispatch { it.onFlightModeChanged(mode) }
                 }
             }
             keys.listen(satelliteCountKey, owner) { _, value ->
                 if (current()) {
                     markObserved()
-                    flightStateObserver?.onSatelliteCountChanged(value ?: -1)
+                    val count = value ?: -1
+                    subscriptions.dispatch { it.onSatelliteCountChanged(count) }
                 }
             }
         }
@@ -181,7 +185,7 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
 
     private fun readingsChanged() {
         markObserved()
-        observer?.onReadingsChanged()
+        subscriptions.dispatch { it.onReadingsChanged() }
     }
 
     private fun markObserved() {
@@ -234,7 +238,7 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
         )
     }
 
-    fun readState(): AircraftState =
+    override fun readState(): AircraftState =
         AircraftState(
             readings = read(),
             connected = aircraftConnected,

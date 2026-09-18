@@ -30,8 +30,4 @@ internal object ProcessTelemetryRuntimeRegistry {
     fun aircraftTelemetry(): V5AircraftTelemetrySource = aircraftTelemetry
 
     fun deviceStatusSource(): DeviceStatusSource = deviceStatusSource ?: error("Process telemetry runtime is not attached")
-
-    fun detachUiObservers() {
-        aircraftTelemetry.detachObservers()
-    }
 }
