@@ -7,6 +7,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.lyrebird.rc.DroneControlProfiles
+import com.lyrebird.rc.mavlink.WaypointArrival
 import com.lyrebird.rc.mavlink.WaypointRefusal
 import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.models.BasicAircraftControlVM
@@ -371,24 +372,6 @@ object DroneController {
             .AtomicLong(0)
 
     @Volatile private var _isIntermediaryWaypointReached = false
-
-    /**
-     * What "arrived" means for one waypoint, as the plan defined it.
-     *
-     * MAVLink puts these on the mission item because only the plan knows which leg is the last
-     * one: param2 is the acceptance radius, param1 the hold time, and param3 zero means fly
-     * through. A single goto carries none of them and takes [DEFAULT], because a lone reposition
-     * is a destination rather than a leg.
-     */
-    data class WaypointArrival(
-        val acceptanceRadiusM: Double? = null,
-        val holdSeconds: Double = 0.0,
-        val passThrough: Boolean = false,
-    ) {
-        companion object {
-            val DEFAULT = WaypointArrival()
-        }
-    }
 
     data class WaypointTarget(
         val latitude: Double,

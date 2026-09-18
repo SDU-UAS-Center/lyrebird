@@ -30,6 +30,8 @@ import com.lyrebird.rc.DJIAircraftMainActivity
 import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.MavlinkFlightPolicy
+import com.lyrebird.rc.controller.MavlinkMissionHost
+import com.lyrebird.rc.controller.MavlinkMissionPolicy
 import com.lyrebird.rc.controller.MavlinkMotionHost
 import com.lyrebird.rc.controller.MavlinkMotionPolicy
 import com.lyrebird.rc.controller.Payload
@@ -38,10 +40,9 @@ import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
 import com.lyrebird.rc.controller.V5FlightSettingsActions
 import com.lyrebird.rc.controller.V5MavlinkCommandHost
 import com.lyrebird.rc.controller.V5MavlinkCommandSink
-import com.lyrebird.rc.controller.V5MavlinkMissionHost
-import com.lyrebird.rc.controller.V5MavlinkMissionSink
 import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.controller.V5MotionCommandPort
+import com.lyrebird.rc.controller.V5NativeMissionAdapter
 import com.lyrebird.rc.edge.DetectionRuntimeCallbacks
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
@@ -65,6 +66,7 @@ import com.lyrebird.rc.mavlink.MavlinkSnapshot
 import com.lyrebird.rc.mavlink.MavlinkSystemId
 import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MissionExecutor
+import com.lyrebird.rc.mavlink.MissionItem
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.mavlink.WaypointRejection
@@ -565,32 +567,36 @@ class FlightDeckActivity :
     private val mavlinkMotionSink: MavlinkMotionSink
         get() = mavlinkMotionPolicy.sink
 
-    private val v5MavlinkMissionAdapter by lazy {
-        V5MavlinkMissionSink(
-            object : V5MavlinkMissionHost {
-                override val aircraftTelemetry get() = this@FlightDeckActivity.aircraftTelemetry
-                override val mainHandler get() = this@FlightDeckActivity.mainHandler
-                override val mavlinkCommandSink get() = this@FlightDeckActivity.mavlinkCommandSink
-                override val mavlinkMotionSink get() = this@FlightDeckActivity.mavlinkMotionSink
-                override var roiTarget
-                    get() = ProcessRoiRuntimeRegistry.currentTarget()
-                    set(value) {
-                        if (value == null) {
-                            ProcessRoiRuntimeRegistry.stop()
-                        } else {
-                            ProcessRoiRuntimeRegistry.start(value.latitude, value.longitude, value.altitude)
-                        }
-                    }
-
+    private val mavlinkMissionPolicy by lazy {
+        MavlinkMissionPolicy(
+            object : MavlinkMissionHost {
                 override fun mavlinkFlightGate() = this@FlightDeckActivity.mavlinkFlightGate()
 
                 override fun setCameraMode(mode: Int) = this@FlightDeckActivity.setCameraMode(mode)
+
+                override fun defaultCruiseSpeedMps() = DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
+
+                override fun postToMain(block: () -> Unit) {
+                    mainHandler.post(block)
+                }
+
+                override fun isTakeoffStillClimbing() = DroneController.droneStatus == DroneController.DroneStatus.TAKING_OFF
+
+                override fun startNativeMission(
+                    items: List<MissionItem>,
+                    onProgress: (Int) -> Unit,
+                    onFinished: (Boolean) -> Unit,
+                ) = V5NativeMissionAdapter.start(items, onProgress, onFinished)
             },
+            V5MotionCommandPort,
+            mavlinkMotionSink,
+            mavlinkCommandSink,
+            aircraftTelemetry,
         )
     }
 
     private val mavlinkMissionSink: MavlinkMissionSink
-        get() = v5MavlinkMissionAdapter.sink
+        get() = mavlinkMissionPolicy.sink
 
     // Servers
 

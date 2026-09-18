@@ -28,7 +28,8 @@ interface MotionCommandPort {
 
     /**
      * Fly to the waypoint; returns the seq the reach latch and any refusal are published under.
-     * [noseForward] selects the nose-follows-path controller over the hold-heading one.
+     * [noseForward] selects the nose-follows-path controller over the hold-heading one, and
+     * [arrival] carries the plan's arrival criteria — a lone goto passes [WaypointArrival.DEFAULT].
      */
     fun waypoint(
         latitudeDeg: Double,
@@ -37,6 +38,7 @@ interface MotionCommandPort {
         yawDeg: Double,
         speedMps: Double,
         noseForward: Boolean,
+        arrival: WaypointArrival = WaypointArrival.DEFAULT,
     ): Long
 
     @Suppress("LongParameterList")

@@ -3,6 +3,7 @@ package com.lyrebird.rc.controller
 import com.lyrebird.rc.mavlink.MotionCommandPort
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.mavlink.ReachLatch
+import com.lyrebird.rc.mavlink.WaypointArrival
 import com.lyrebird.rc.mavlink.WaypointRefusal
 import com.lyrebird.rc.platform.ManualStick
 
@@ -33,11 +34,12 @@ internal object V5MotionCommandPort : MotionCommandPort {
         yawDeg: Double,
         speedMps: Double,
         noseForward: Boolean,
+        arrival: WaypointArrival,
     ): Long =
         if (noseForward) {
-            DroneController.flyToWaypointNoseForward(latitudeDeg, longitudeDeg, altitudeMeters, yawDeg, speedMps)
+            DroneController.flyToWaypointNoseForward(latitudeDeg, longitudeDeg, altitudeMeters, yawDeg, speedMps, arrival)
         } else {
-            DroneController.flyToWaypointHoldHeading(latitudeDeg, longitudeDeg, altitudeMeters, yawDeg, speedMps)
+            DroneController.flyToWaypointHoldHeading(latitudeDeg, longitudeDeg, altitudeMeters, yawDeg, speedMps, arrival)
         }
 
     @Suppress("LongParameterList")

@@ -1,5 +1,10 @@
 package com.lyrebird.rc.telemetry
 
+import kotlin.math.PI
+import kotlin.math.acos
+import kotlin.math.cos
+import kotlin.math.sin
+
 /*
  * The aircraft-state contract, in plain units and with no DJI types.
  *
@@ -55,6 +60,23 @@ data class GeoPosition(
             latitudeDeg in -90.0..90.0 &&
                 longitudeDeg in -180.0..180.0 &&
                 !(latitudeDeg == 0.0 && longitudeDeg == 0.0)
+
+    /**
+     * Horizontal great-circle distance to [other] in metres, altitude ignored.
+     *
+     * The same spherical law of cosines the waypoint controller uses, so a distance measured here
+     * can never disagree with one measured there about the same two fixes — which is the whole
+     * point of the distance-triggered capture loop measuring with it. The cosine is clamped before
+     * the arc cosine because floating-point overshoot makes it NaN for two near-identical points.
+     */
+    fun distanceTo(other: GeoPosition): Double {
+        val earthRadiusM = 6_371_000.0
+        val cosAngle =
+            sin(latitudeDeg * PI / 180) * sin(other.latitudeDeg * PI / 180) +
+                cos(latitudeDeg * PI / 180) * cos(other.latitudeDeg * PI / 180) *
+                cos((longitudeDeg - other.longitudeDeg) * PI / 180)
+        return acos(cosAngle.coerceIn(-1.0, 1.0)) * earthRadiusM
+    }
 }
 
 /** Attitude in degrees: roll and pitch are absolute, yaw is a heading. */

@@ -7,6 +7,7 @@ import com.lyrebird.rc.mavlink.MotionCommandPort
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.mavlink.ReachLatch
+import com.lyrebird.rc.mavlink.WaypointArrival
 import com.lyrebird.rc.mavlink.WaypointRefusal
 import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.platform.ManualStick
@@ -237,6 +238,7 @@ class MavlinkMotionPolicyTest {
             yawDeg: Double,
             speedMps: Double,
             noseForward: Boolean,
+            arrival: WaypointArrival,
         ): Long {
             calls += "waypoint:lat=$latitudeDeg,lon=$longitudeDeg,alt=$altitudeMeters,yaw=$yawDeg,speed=$speedMps,nose=$noseForward"
             return nextSeq
