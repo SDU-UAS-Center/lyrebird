@@ -2,8 +2,8 @@
 
 Date: 2026-09-15
 
-Status: implementation started. V5 flavor scaffolding is in place; V4 SDK provisioning and
-adapter implementation have not started.
+Status: implementation started. V5 flavor scaffolding and V5 application/bootstrap source
+separation are in place; V4 SDK provisioning and adapter implementation have not started.
 
 ## 1. Outcome and Scope
 
