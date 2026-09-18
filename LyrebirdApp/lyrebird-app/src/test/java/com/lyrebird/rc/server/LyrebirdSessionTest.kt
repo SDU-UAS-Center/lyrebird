@@ -233,4 +233,21 @@ class LyrebirdSessionTest {
         other.release()
         session.stop()
     }
+
+    @Test
+    fun `stopping without a session is safe and repeatable`() {
+        val events = mutableListOf<String>()
+        val port = freePort()
+        val lease = SessionLease(port)
+        val (session, _) = session(events, lease)
+
+        // A teardown path must not need to know whether the start ever ran: stopping a session
+        // that never bound, twice, must leave the lease cleanly free for the next process.
+        session.stop()
+        session.stop()
+
+        assertFalse(lease.isHeld)
+        assertFalse(session.status.isServing)
+        assertTrue("the lease port is free again", SessionLease(port).acquire())
+    }
 }
