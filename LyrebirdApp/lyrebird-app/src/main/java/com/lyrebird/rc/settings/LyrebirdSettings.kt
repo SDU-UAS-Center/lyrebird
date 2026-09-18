@@ -88,6 +88,9 @@ internal class LyrebirdSettings(
          */
         internal const val PREF_FLEET_INSTALL_ID = "lb_fleet_install_id"
 
+        /** Fleet-mesh gate; read by the mesh runtime and the flavor's fleet controller alike. */
+        internal const val PREF_FLEET_ENABLED = "lb_fleet_enabled"
+
 /** Enough UUID to make an accidental collision across a field team implausible. */
         internal const val FLEET_INSTALL_ID_LENGTH = 8
 

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      V5-only launcher row: the USB accessory broadcast opens the DJI V5 startup path. It lives
+      in the flavor manifest because the activity it launches is itself a flavor class; another
+      SDK generation contributes its own equivalent here.
+    -->
+    <application>
+        <activity
+            android:name="com.lyrebird.rc.UsbAttachActivity"
+            android:theme="@style/translucent_theme"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+                android:resource="@xml/accessory_filter" />
+        </activity>
+    </application>
+</manifest>

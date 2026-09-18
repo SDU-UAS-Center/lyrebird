@@ -271,6 +271,14 @@ private class RuntimeMavlinkCommandSink : MavlinkCommandSink {
 internal object ProcessNetworkRuntimeRegistry {
     private val runtime = ProcessNetworkRuntime()
 
+    /**
+     * Command-log hook handed to the HTTP server this runtime builds. The flavor composition
+     * installs it before attach/start (the V5 flight logger lives outside the shared source set);
+     * null keeps command logging off.
+     */
+    @Volatile
+    var commandLogger: ((uri: String, postData: String) -> Unit)? = null
+
     fun attach(
         context: Context,
         host: LyrebirdCommandHost,
@@ -338,7 +346,10 @@ private class ProcessNetworkRuntime {
         session =
             LyrebirdSession(
                 lease = DeviceSessionLeaseRegistry.current(),
-                http = SimpleHttpServer(HTTP_PORT, hostBridge, sinkBridge),
+                http =
+                    SimpleHttpServer(HTTP_PORT, hostBridge, sinkBridge).apply {
+                        commandLogger = ProcessNetworkRuntimeRegistry.commandLogger
+                    },
                 telemetry = telemetry,
                 advertiser =
                     DiscoveryAdvertiser(discovery ?: error("runtime not attached")) {

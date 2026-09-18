@@ -4,7 +4,6 @@ import android.os.Handler
 import android.util.Log
 import android.widget.Switch
 import com.lyrebird.rc.controller.ControlAuthority
-import com.lyrebird.rc.logger.LyrebirdFlightLogger
 import com.lyrebird.rc.mavlink.GimbalRotation
 import com.lyrebird.rc.mavlink.GimbalRotationMode
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
@@ -562,6 +561,15 @@ internal class SimpleHttpServer(
         private var serverSocket: ServerSocket? = null
         private val executor = Executors.newFixedThreadPool(10)
         private val commandHandler = LyrebirdHttpCommandHandler(host, commandSink)
+
+        /**
+         * Flight-log hook for accepted commands: receives the request uri and body. Installed by
+         * the flavor composition (the V5 flight logger lives outside the shared source set);
+         * null keeps command logging off.
+         */
+        @Volatile
+        internal var commandLogger: ((uri: String, postData: String) -> Unit)? = null
+
         @Volatile
         private var isRunning = false
 
@@ -678,7 +686,7 @@ internal class SimpleHttpServer(
             if (request.method != "POST") return null
             if (request.uri !in jsonEndpoints) return null
 
-            LyrebirdFlightLogger.logCommand(request.uri, request.postData)
+            commandLogger?.invoke(request.uri, request.postData)
             // Authorise BEFORE acting: these endpoints trip a shutter or drive the payload, so a
             // rejected request must not reach the camera.
             if (!ControlAuthority.authorizeControlCommand(request.source)) {
@@ -721,7 +729,7 @@ internal class SimpleHttpServer(
                 // the live media list (the card's own index). Returns binary image/jpeg written
                 // straight to the socket, bypassing the text-response path below.
                 if (request.method == "POST" && request.uri == "/send/downloadMediaByName") {
-                    LyrebirdFlightLogger.logCommand(request.uri, request.postData)
+                    commandLogger?.invoke(request.uri, request.postData)
                     val outputStream = clientSocket.getOutputStream()
                     val fileName = request.postData.trim()
                     when {

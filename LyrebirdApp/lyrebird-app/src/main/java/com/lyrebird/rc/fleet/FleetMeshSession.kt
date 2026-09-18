@@ -3,6 +3,7 @@ package com.lyrebird.rc.fleet
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.lyrebird.rc.settings.LyrebirdSettings
 import java.lang.ref.WeakReference
 
 internal interface FleetRuntimeCallbacks {
@@ -35,7 +36,7 @@ internal class FleetMeshSession(
     }
 
     fun start() {
-        if (!prefs.getBoolean(FleetDeckController.PREF_FLEET_ENABLED, true) || link != null) return
+        if (!prefs.getBoolean(LyrebirdSettings.PREF_FLEET_ENABLED, true) || link != null) return
         val callbacks = callbacksRef.get() ?: return
         link =
             FleetLink(

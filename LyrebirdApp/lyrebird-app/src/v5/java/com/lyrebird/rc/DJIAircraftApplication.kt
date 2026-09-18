@@ -3,6 +3,7 @@ package com.lyrebird.rc
 import android.content.Context
 import android.os.StrictMode
 import android.util.Log
+import com.lyrebird.rc.util.AppContextHolder
 
 /**
  * Class Description
@@ -31,6 +32,7 @@ class DJIAircraftApplication : DJIApplication() {
         Log.d("DJIAircraftApp", "DJIAircraftApplication onCreate() called")
         try {
             super.onCreate()
+            AppContextHolder.install(this)
             installStrictModeInDebugBuilds()
             Log.d("DJIAircraftApp", "DJIAircraftApplication onCreate() completed successfully")
         } catch (e: Exception) {

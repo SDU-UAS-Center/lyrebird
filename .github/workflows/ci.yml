@@ -186,6 +186,9 @@ jobs:
             echo "MAPLIBRE_TOKEN=dummy"
           } > local.properties
 
+      - name: Shared sources are SDK-neutral
+        run: python3 ../../scripts/check_main_sdk_free.py
+
       - name: Spotless, compile, and unit tests
         run: ./gradlew --no-daemon :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck :lyrebird-core:compileDebugKotlin :lyrebird-core:testDebugUnitTest :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest
 

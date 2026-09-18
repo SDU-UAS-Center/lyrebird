@@ -13,7 +13,9 @@ import org.webrtc.VideoCapturer
 class SharedVideoCapturerHandle(
     private val clientId: String,
     private val source: SharedDJIFrameSource,
-) : VideoCapturer {
+) : VideoCapturer,
+    SharedFrameSourceControl,
+    FrameAvailabilityWaiter {
     var metadataListener: DJIV5VideoCapturer.FrameMetadataListener? = null
         set(value) {
             field = value
@@ -40,29 +42,29 @@ class SharedVideoCapturerHandle(
         source.stopClient(clientId)
     }
 
-    fun changeResolution(
+    override fun changeResolution(
         width: Int,
         height: Int,
     ) {
         source.changeResolution(width, height)
     }
 
-    fun changeFrameRate(fps: Int) {
+    override fun changeFrameRate(fps: Int) {
         source.changeFrameRate(fps)
     }
 
-    fun totalOutputFrames(): Long = source.totalOutputFrames()
+    override fun totalOutputFrames(): Long = source.totalOutputFrames()
 
-    fun waitForOutputFrameAfter(
+    override fun waitForOutputFrameAfter(
         frameCount: Long,
         timeoutMs: Long,
     ): Boolean = source.waitForOutputFrameAfter(frameCount, timeoutMs)
 
-    fun recoverCapture(reason: String) {
+    override fun recoverCapture(reason: String) {
         source.recoverCapture(reason)
     }
 
-    fun awaitInFlightFramesIdle(timeoutMs: Long): Boolean = source.awaitInFlightFramesIdle(timeoutMs)
+    override fun awaitInFlightFramesIdle(timeoutMs: Long): Boolean = source.awaitInFlightFramesIdle(timeoutMs)
 
     override fun changeCaptureFormat(
         width: Int,

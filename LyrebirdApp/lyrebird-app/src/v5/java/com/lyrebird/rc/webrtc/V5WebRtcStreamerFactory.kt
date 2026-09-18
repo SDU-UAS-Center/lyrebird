@@ -22,8 +22,11 @@ internal class V5WebRtcStreamerFactory(
     private val appContext = context.applicationContext
     private var consecutiveFailures = 0
 
-    fun create(): WebRTCStreamer =
-        WebRTCStreamer(
+    fun create(): WebRTCStreamer {
+        // The experimental surface-H264 encoder is built by this flavor: install its provider
+        // with the shared peer factory before any publish can ask for it.
+        installSurfaceEncoderProvider()
+        return WebRTCStreamer(
             context = appContext,
             cameraIndex = cameraIndex,
             droneName = droneName,
@@ -61,4 +64,5 @@ internal class V5WebRtcStreamerFactory(
                     }
                 }
         }
+    }
 }

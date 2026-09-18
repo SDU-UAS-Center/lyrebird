@@ -29,7 +29,8 @@ class DJIV5VideoCapturer(
     @Volatile var targetHeight: Int = FULL_HD_HEIGHT,
     @Volatile private var scaleToTarget: Boolean = true,
     private val droneName: String = "drone_1",
-) : VideoCapturer {
+) : VideoCapturer,
+    SharedFrameSourceControl {
     companion object {
         private const val TAG = "DJIV5VideoCapturer"
 
@@ -221,7 +222,7 @@ class DJIV5VideoCapturer(
     /**
      * Change the target resolution on-the-fly. Takes effect on the next frame.
      */
-    fun changeResolution(
+    override fun changeResolution(
         width: Int,
         height: Int,
     ) {
@@ -243,6 +244,15 @@ class DJIV5VideoCapturer(
                 "${previousWidth}x$previousHeight (scale=$previousScale) -> " +
                 "${targetWidth}x$targetHeight (scale=$scaleToTarget)",
         )
+    }
+
+    /**
+     * Frame-rate change from the streaming layer ([SharedFrameSourceControl]): keeps the current
+     * target resolution, where the capturer's own changeCaptureFormat would also reset it.
+     */
+    override fun changeFrameRate(fps: Int) {
+        targetFps = fps.coerceAtLeast(1)
+        frameIntervalNs = 1_000_000_000L / targetFps.toLong()
     }
 
     override fun changeCaptureFormat(
@@ -268,7 +278,7 @@ class DJIV5VideoCapturer(
      * the timeout elapses. Call before disposing the observer, which is otherwise a use-after-free
      * on the frame thread.
      */
-    fun awaitInFlightFramesIdle(timeoutMs: Long): Boolean {
+    override fun awaitInFlightFramesIdle(timeoutMs: Long): Boolean {
         val deadlineMs = System.currentTimeMillis() + timeoutMs
         synchronized(frameIdleLock) {
             while (inFlightFrames.get() > 0) {

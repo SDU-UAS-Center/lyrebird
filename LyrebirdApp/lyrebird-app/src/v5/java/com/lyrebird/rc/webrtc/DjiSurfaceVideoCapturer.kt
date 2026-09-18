@@ -23,7 +23,9 @@ import java.util.concurrent.atomic.AtomicLong
 internal class DjiSurfaceVideoCapturer : VideoCapturer {
     companion object {
         private const val TAG = "DjiSurfaceVideoCapturer"
-        const val DRIVER_FPS = 30
+
+        /** Same cadence as the shared surface-encoder path in [WebRTCPeerFactory]. */
+        const val DRIVER_FPS = WebRTCPeerFactory.SURFACE_ENCODER_DRIVER_FPS
         private const val DEFAULT_WIDTH = 1920
         private const val DEFAULT_HEIGHT = 1080
     }

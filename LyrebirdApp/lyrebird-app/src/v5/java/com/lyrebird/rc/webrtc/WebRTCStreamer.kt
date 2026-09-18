@@ -143,7 +143,7 @@ class WebRTCStreamer(
         whipPublisher =
             WhipPublisher(
                 context = appContext,
-                cameraIndex = cameraIndex,
+                cameraHandle = cameraIndex,
                 videoCapturer = capturer,
                 options = currentOptions,
                 whipUrl = whipUrl,

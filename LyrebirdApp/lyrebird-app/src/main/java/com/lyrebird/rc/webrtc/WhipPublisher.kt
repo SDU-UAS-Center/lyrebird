@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import dji.sdk.keyvalue.value.common.ComponentIndexType
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
@@ -45,7 +44,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 @Suppress("TooManyFunctions")
 class WhipPublisher(
     context: Context,
-    private val cameraIndex: ComponentIndexType,
+    // Opaque flavor camera handle (its camera index); shared code only forwards it to
+    // WebRTCPeerFactory and never inspects it.
+    private val cameraHandle: Any? = null,
     private val videoCapturer: VideoCapturer,
     private val options: WebRTCMediaOptions = WebRTCMediaOptions(),
     private val whipUrl: String,
@@ -169,24 +170,13 @@ class WhipPublisher(
         width: Int,
         height: Int,
     ) {
-        when (videoCapturer) {
-            is DJIV5VideoCapturer -> videoCapturer.changeResolution(width, height)
-            is SharedVideoCapturerHandle -> videoCapturer.changeResolution(width, height)
-        }
+        (videoCapturer as? SharedFrameSourceControl)?.changeResolution(width, height)
     }
 
     fun changeFrameRate(fps: Int) {
         val boundedFps = fps.coerceIn(1, 60)
         currentFps = boundedFps
-        when (videoCapturer) {
-            is DJIV5VideoCapturer ->
-                videoCapturer.changeCaptureFormat(
-                    options.videoResolutionWidth,
-                    options.videoResolutionHeight,
-                    boundedFps,
-                )
-            is SharedVideoCapturerHandle -> videoCapturer.changeFrameRate(boundedFps)
-        }
+        (videoCapturer as? SharedFrameSourceControl)?.changeFrameRate(boundedFps)
         peerConnection?.senders?.firstOrNull()?.let { configureVideoSenderForStability(it) }
         Log.d(TAG, "WHIP frame rate changed to $boundedFps fps")
     }
@@ -240,7 +230,7 @@ class WhipPublisher(
 
         startConsumerWatcher(targetWhipUrl)
 
-        val factory = WebRTCPeerFactory.getFactory(appContext, cameraIndex, options)
+        val factory = WebRTCPeerFactory.getFactory(appContext, cameraHandle, options)
 
         // 1. Create video source & track
         videoSource = factory.createVideoSource(false)
@@ -493,11 +483,8 @@ class WhipPublisher(
 
     private fun drainInFlightFrames() {
         val drained =
-            when (videoCapturer) {
-                is SharedVideoCapturerHandle -> videoCapturer.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS)
-                is DJIV5VideoCapturer -> videoCapturer.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS)
-                else -> true
-            }
+            (videoCapturer as? SharedFrameSourceControl)
+                ?.awaitInFlightFramesIdle(FRAME_DRAIN_TIMEOUT_MS) ?: true
         if (!drained) Log.w(TAG, "Timed out draining in-flight video frames before dispose")
     }
 
@@ -528,7 +515,7 @@ class WhipPublisher(
             val bitrateCap = options.senderBitrateBps()
             val senderFps =
                 if (isSurfaceEncoderEnabled()) {
-                    DjiSurfaceVideoCapturer.DRIVER_FPS
+                    WebRTCPeerFactory.SURFACE_ENCODER_DRIVER_FPS
                 } else {
                     currentFps
                 }
@@ -779,23 +766,21 @@ private class WhipRemoteDescriptionObserver(
 }
 
 private fun createFirstFrameGate(capturer: VideoCapturer): WhipFirstFrameGate? =
-    when (capturer) {
-        is SharedVideoCapturerHandle ->
-            WhipFirstFrameGate(
-                waiter =
-                    object : WhipFirstFrameWaiter {
-                        override fun totalOutputFrames(): Long = capturer.totalOutputFrames()
+    (capturer as? FrameAvailabilityWaiter)?.let { source ->
+        WhipFirstFrameGate(
+            waiter =
+                object : WhipFirstFrameWaiter {
+                    override fun totalOutputFrames(): Long = source.totalOutputFrames()
 
-                        override fun waitForOutputFrameAfter(
-                            frameCount: Long,
-                            timeoutMs: Long,
-                        ): Boolean = capturer.waitForOutputFrameAfter(frameCount, timeoutMs)
-                    },
-                unavailableMessage = "No DJI video frames available for WHIP publishing",
-                recoverBeforeRetry = { capturer.recoverCapture("no frames before WHIP offer") },
-                recoveryLogMessage = "No DJI video frames before WHIP offer; recovering capture",
-            )
-        else -> null
+                    override fun waitForOutputFrameAfter(
+                        frameCount: Long,
+                        timeoutMs: Long,
+                    ): Boolean = source.waitForOutputFrameAfter(frameCount, timeoutMs)
+                },
+            unavailableMessage = "No DJI video frames available for WHIP publishing",
+            recoverBeforeRetry = { source.recoverCapture("no frames before WHIP offer") },
+            recoveryLogMessage = "No DJI video frames before WHIP offer; recovering capture",
+        )
     }
 
 internal interface WhipFirstFrameWaiter {

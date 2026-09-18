@@ -76,3 +76,10 @@ repos:
         pass_filenames: false
         stages: [manual]
         files: ^LyrebirdApp/(lyrebird-app|lyrebird-core)/.*\.kt$
+
+      - id: main-sdk-free
+        name: main sdk-free - shared sources carry no DJI / flavor-only references
+        entry: python scripts/check_main_sdk_free.py
+        language: python
+        pass_filenames: false
+        files: ^LyrebirdApp/lyrebird-app/src/(main|v5|v4)/.*\.(kt|java)$

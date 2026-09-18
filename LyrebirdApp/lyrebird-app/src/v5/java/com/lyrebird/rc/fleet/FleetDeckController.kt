@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AlertDialog
+import com.lyrebird.rc.settings.LyrebirdSettings
 import dji.v5.ux.map.MapWidget
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,9 +44,6 @@ internal class FleetDeckController(
     companion object {
         private const val TAG = "LyrebirdFleet"
 
-        /** Preference gate, so the mesh can be turned off without uninstalling anything. */
-        const val PREF_FLEET_ENABLED = "lb_fleet_enabled"
-
         /** Matches the beacon period: the strip never shows state older than one beacon. */
         private const val REFRESH_INTERVAL_MS = 500L
     }
@@ -64,7 +62,7 @@ internal class FleetDeckController(
         }
 
     val isEnabled: Boolean
-        get() = prefs.getBoolean(PREF_FLEET_ENABLED, true)
+        get() = prefs.getBoolean(LyrebirdSettings.PREF_FLEET_ENABLED, true)
 
     fun start() {
         if (!isEnabled) {

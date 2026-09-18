@@ -2855,6 +2855,9 @@ class FlightDeckActivity :
 
     private fun startServers() {
         ProcessStreamingRuntimeRegistry.attach(applicationContext, this)
+        ProcessNetworkRuntimeRegistry.commandLogger = { uri, postData ->
+            LyrebirdFlightLogger.logCommand(uri, postData)
+        }
         ProcessNetworkRuntimeRegistry.attach(applicationContext, this, mavlinkCommandSink, this)
         val sessionStatus = ProcessNetworkRuntimeRegistry.start()
         Log.i(TAG, "Network session: ${sessionStatus.summary()}")

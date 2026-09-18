@@ -515,3 +515,21 @@ internal class DjiSurfaceH264EncoderFactory(
 
     override fun getEncoderSelector(): VideoEncoderFactory.VideoEncoderSelector? = null
 }
+
+/**
+ * Installs the experimental surface-H264 provider into the shared [WebRTCPeerFactory].
+ *
+ * Called by the V5 streaming composition before any publish starts: this flavor owns the encoder
+ * and the camera-index semantics, shared code only decides whether the operator asked for it.
+ */
+internal fun installSurfaceEncoderProvider() {
+    WebRTCPeerFactory.surfaceEncoderFactory = { cameraHandle, width, height, bitrateBps, fps ->
+        DjiSurfaceH264EncoderFactory(
+            cameraIndex = cameraHandle as? ComponentIndexType ?: ComponentIndexType.LEFT_OR_MAIN,
+            width = width,
+            height = height,
+            bitrateBps = bitrateBps,
+            fps = fps,
+        )
+    }
+}

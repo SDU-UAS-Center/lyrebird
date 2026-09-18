@@ -85,18 +85,6 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".UsbAttachActivity"
-            android:theme="@style/translucent_theme"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
-            </intent-filter>
-
-            <meta-data
-                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
-                android:resource="@xml/accessory_filter" />
-        </activity>
-
         <activity android:name="dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity"
             android:theme="@style/full_screen_theme"
             android:screenOrientation="landscape"
