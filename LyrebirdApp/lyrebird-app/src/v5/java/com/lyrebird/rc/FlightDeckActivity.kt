@@ -936,7 +936,7 @@ class FlightDeckActivity :
         mainHandler.post(loadingDiagnosticRunnable)
 
         // Initialize SharedPreferences
-        sharedPreferences = getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
+        sharedPreferences = getSharedPreferences(LyrebirdSettings.PREFS_FILE, Context.MODE_PRIVATE)
         ProcessTelemetryRuntimeRegistry.attach(applicationContext)
         migrateMavlinkFlightDefault()
 
@@ -2347,42 +2347,16 @@ class FlightDeckActivity :
             aircraftTelemetry.subscribe(
                 object : AircraftTelemetryListener {
                     override fun onFlyingChanged(flying: Boolean) {
-                        val wasFlying = DroneController.isAirborne
-                        DroneController.isAirborne = flying
+                        // The airborne latch, the flight-log session and takeoff-time detection
+                        // live in the process runtime's own subscription; this screen only
+                        // refreshes what it displays.
                         mainHandler.post { updateDroneStatusView(DroneController.droneStatus) }
-                        // Flight log session lifecycle: open a new file on takeoff, close it on landing.
-                        if (!wasFlying && flying) {
-                            LyrebirdFlightLogger.startSession()
-                            // Start AutoSensing on takeoff if DJI onboard detections are selected.
-                            if (settings.activeDetectionSource() == DetectionSource.DJI_ONBOARD && !isAutoSensingActive) {
-                                startAutoSensing()
-                            }
-                        } else if (wasFlying && !flying) {
-                            // 10-second grace period before closing in case of brief mid-air telemetry glitch.
-                            mainHandler.postDelayed(
-                                {
-                                    if (!DroneController.isAirborne) {
-                                        LyrebirdFlightLogger.endSession("landed")
-                                        // Sync DJI TXT records — idempotent, safe to run immediately.
-                                        // Any file the SDK hasn't finalised yet will be picked up next launch.
-                                        syncDjiFlightLogsInBackground()
-                                    }
-                                },
-                                10_000L,
-                            )
-                        }
                     }
 
                     override fun onFlightModeChanged(mode: AircraftFlightMode) {
                         mainHandler.post {
                             cachedFlightMode = mode
                             reevaluateAircraftIdle()
-                        }
-                        // Detect RTH triggered from the RC controller, not from our server HTTP request.
-                        if (mode == AircraftFlightMode.GO_HOME &&
-                            DroneController.droneStatus != DroneController.DroneStatus.RETURNING_HOME
-                        ) {
-                            mainHandler.post { DroneController.activateManualOverride() }
                         }
                     }
 

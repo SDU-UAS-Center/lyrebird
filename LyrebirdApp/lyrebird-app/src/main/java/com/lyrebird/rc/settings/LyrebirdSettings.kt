@@ -43,6 +43,9 @@ internal class LyrebirdSettings(
     private val sharedPreferences: SharedPreferences,
 ) {
     companion object {
+        /** Preferences file name; the process runtime and the screens read the same store. */
+        internal const val PREFS_FILE = "LyrebirdPrefs"
+
         internal const val PREF_DRONE_NAME = "drone_name"
 
         internal const val PREF_DRONE_NAME_USER_SET = "drone_name_user_set"
