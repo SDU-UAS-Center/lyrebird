@@ -143,7 +143,7 @@ tasks.register('detektDji', detektTaskClass) {
 tasks.register('qualityLyrebird') {
     group = 'verification'
     description = 'Run ktlint formatting checks, Detekt, and Android Lint for Lyrebird app code.'
-    dependsOn ':app:spotlessKotlinCheck', ':lyrebird-core:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentDebug'
+    dependsOn ':app:spotlessKotlinCheck', ':lyrebird-core:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentV5Debug'
 }
 
 tasks.register('qualityDji') {
