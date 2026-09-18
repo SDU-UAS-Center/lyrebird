@@ -2,12 +2,12 @@ package com.lyrebird.rc.edge
 
 import android.content.Context
 import android.net.Uri
+import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
 import com.lyrebird.rc.webrtc.WebRTCStreamer
-import dji.v5.ux.detection.DetectedTarget
 
 internal class LocalDetectionProvider(
     context: Context,
-    private val onTargets: (List<DetectedTarget>) -> Unit,
+    private val onTargets: (List<DetectedTargetSnapshot>) -> Unit,
     private val onMetrics: (EdgeDetectionController.EdgeDetectionMetrics) -> Unit,
 ) {
     private val appContext = context.applicationContext

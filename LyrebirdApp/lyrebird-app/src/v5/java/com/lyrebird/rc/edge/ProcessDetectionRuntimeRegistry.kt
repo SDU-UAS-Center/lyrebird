@@ -70,19 +70,8 @@ private class ProcessDetectionRuntime {
                 LocalDetectionProvider(
                     context = context,
                     onTargets = { targets ->
-                        val snapshots =
-                            targets.map {
-                                com.lyrebird.rc.mavlink.DetectedTargetSnapshot(
-                                    it.type,
-                                    it.left,
-                                    it.top,
-                                    it.right,
-                                    it.bottom,
-                                    it.confidence,
-                                )
-                            }
-                        currentTargets = snapshots
-                        callbacksRef.get()?.runtimeDetectionTargetsChanged(snapshots)
+                        currentTargets = targets
+                        callbacksRef.get()?.runtimeDetectionTargetsChanged(targets)
                     },
                     onMetrics = { metrics -> callbacksRef.get()?.runtimeDetectionMetricsChanged(metrics) },
                 )

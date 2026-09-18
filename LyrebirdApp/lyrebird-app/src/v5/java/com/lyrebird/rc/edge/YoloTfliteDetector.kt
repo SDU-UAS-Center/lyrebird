@@ -3,7 +3,7 @@ package com.lyrebird.rc.edge
 import android.content.Context
 import android.media.Image
 import android.net.Uri
-import dji.v5.ux.detection.DetectedTarget
+import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.io.Closeable
@@ -70,7 +70,7 @@ class YoloTfliteDetector(
         length: Int,
         frameWidth: Int,
         frameHeight: Int,
-    ): List<DetectedTarget> {
+    ): List<DetectedTargetSnapshot> {
         if (frameWidth <= 0 || frameHeight <= 0 || length < frameWidth * frameHeight) return emptyList()
 
         val transform = LetterboxTransform(inputWidth, inputHeight, frameWidth, frameHeight)
@@ -103,7 +103,7 @@ class YoloTfliteDetector(
         return collectTargets(transform)
     }
 
-    fun detectYuv420(image: Image): List<DetectedTarget> {
+    fun detectYuv420(image: Image): List<DetectedTargetSnapshot> {
         val frameWidth = image.width
         val frameHeight = image.height
         if (frameWidth <= 0 || frameHeight <= 0 || image.planes.size < 3) return emptyList()
@@ -205,10 +205,10 @@ class YoloTfliteDetector(
             else -> throw IllegalArgumentException("Unsupported tensor type: $dataType")
         }
 
-    private fun collectTargets(transform: LetterboxTransform): List<DetectedTarget> {
+    private fun collectTargets(transform: LetterboxTransform): List<DetectedTargetSnapshot> {
         if (outputValues < MIN_OUTPUT_VALUES) return emptyList()
 
-        val targets = mutableListOf<DetectedTarget>()
+        val targets = mutableListOf<DetectedTargetSnapshot>()
         for (i in 0 until outputBoxes) {
             val rowOffset = i * outputValues
             val score = getOutputValue(rowOffset + 4)
@@ -223,8 +223,7 @@ class YoloTfliteDetector(
                         y2 = getOutputValue(rowOffset + 3),
                     )?.let { box ->
                         targets.add(
-                            DetectedTarget(
-                                index = i,
+                            DetectedTargetSnapshot(
                                 type = "EDGE_$label",
                                 left = box.left.toDouble(),
                                 top = box.top.toDouble(),

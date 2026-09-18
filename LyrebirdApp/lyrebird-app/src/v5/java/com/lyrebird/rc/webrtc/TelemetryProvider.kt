@@ -2,6 +2,7 @@ package com.lyrebird.rc.webrtc
 
 import android.util.Log
 import com.lyrebird.rc.controller.DroneController
+import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
 import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.GimbalKey
@@ -12,7 +13,6 @@ import dji.v5.et.create
 import dji.v5.manager.KeyManager
 import dji.v5.manager.diagnostic.DJIDeviceStatus
 import dji.v5.manager.diagnostic.DeviceStatusManager
-import dji.v5.ux.detection.DetectedTarget
 
 /**
  * Provides synchronized telemetry data from DJI SDK KeyManager.
@@ -26,7 +26,7 @@ object TelemetryProvider {
 
     /** Current detected targets from AutoSensing – updated by the activity */
     @Volatile
-    var currentDetectedTargets: List<DetectedTarget> = emptyList()
+    var currentDetectedTargets: List<DetectedTargetSnapshot> = emptyList()
 
     @Volatile
     var currentDetectionSource: String = "none"

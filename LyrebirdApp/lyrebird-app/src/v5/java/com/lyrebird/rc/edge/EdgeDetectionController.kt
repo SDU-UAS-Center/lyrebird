@@ -4,8 +4,8 @@ import android.content.Context
 import android.media.Image
 import android.net.Uri
 import android.util.Log
+import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
 import com.lyrebird.rc.webrtc.SharedDJIFrameSource
-import dji.v5.ux.detection.DetectedTarget
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -19,7 +19,7 @@ data class EdgeDetectionConfig(
 class EdgeDetectionController(
     context: Context,
     private val config: EdgeDetectionConfig,
-    private val onTargets: (List<DetectedTarget>) -> Unit,
+    private val onTargets: (List<DetectedTargetSnapshot>) -> Unit,
     private val onMetrics: (EdgeDetectionMetrics) -> Unit = {},
 ) : SharedDJIFrameSource.EdgeDetectionFrameListener {
     companion object {

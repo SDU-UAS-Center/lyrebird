@@ -1,6 +1,7 @@
 package com.lyrebird.rc.webrtc
 
-import dji.v5.ux.detection.DetectedTarget
+import com.lyrebird.rc.edge.DetectionWire
+import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -43,7 +44,7 @@ data class FrameMetadata(
     val readyToTakeoff: Boolean = false, // Derived: aircraft ready to take off / arm
     val takeoffBlockReason: String = "UNKNOWN", // FCMotorStartFailureError name, "NONE", or "UNKNOWN"
     val isManualOverrideActive: Boolean = false, // True when pilot has taken manual RC control
-    val detectedTargets: List<DetectedTarget> = emptyList(), // AI-detected targets from selected detector
+    val detectedTargets: List<DetectedTargetSnapshot> = emptyList(), // AI-detected targets from selected detector
     val detectionSource: String = "none",
     val detectionActive: Boolean = false,
     val detectionModel: String? = null,
@@ -91,7 +92,7 @@ data class FrameMetadata(
             put("readyToTakeoff", readyToTakeoff)
             put("takeoffBlockReason", takeoffBlockReason)
             put("isManualOverrideActive", isManualOverrideActive)
-            put("detectedTargets", JSONArray(detectedTargets.map { it.toJson() }))
+            put("detectedTargets", JSONArray(DetectionWire.targetsJson(detectedTargets)))
             put(
                 "detections",
                 JSONObject().apply {
@@ -100,7 +101,7 @@ data class FrameMetadata(
                     put("count", detectedTargets.size)
                     put("model", detectionModel)
                     put("confidenceThreshold", detectionConfidenceThreshold)
-                    put("targets", JSONArray(detectedTargets.map { it.toJson() }))
+                    put("targets", JSONArray(DetectionWire.targetsJson(detectedTargets)))
                 },
             )
         }
@@ -151,12 +152,27 @@ data class FrameMetadata(
             )
         }
 
-        private fun parseDetectedTargets(obj: JSONObject): List<DetectedTarget> {
+        private fun parseDetectedTargets(obj: JSONObject): List<DetectedTargetSnapshot> {
             val targets =
                 obj.optJSONArray("detectedTargets")
                     ?: obj.detections()?.optJSONArray("targets")
                     ?: JSONArray()
-            return DetectedTarget.fromJsonArray(targets)
+            val list = mutableListOf<DetectedTargetSnapshot>()
+            for (i in 0 until targets.length()) {
+                val target = targets.getJSONObject(i)
+                val rect = target.getJSONArray("rect")
+                list.add(
+                    DetectedTargetSnapshot(
+                        type = target.getString("type"),
+                        left = rect.getDouble(0),
+                        top = rect.getDouble(1),
+                        right = rect.getDouble(2),
+                        bottom = rect.getDouble(3),
+                        confidence = target.optDouble("confidence").takeIf { target.has("confidence") },
+                    ),
+                )
+            }
+            return list
         }
 
         private fun parseDetectionSource(obj: JSONObject): String =

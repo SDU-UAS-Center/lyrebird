@@ -47,6 +47,7 @@ import com.lyrebird.rc.controller.V5PayloadCommandHost
 import com.lyrebird.rc.controller.V5PayloadCommandPort
 import com.lyrebird.rc.edge.DetectionRuntimeCallbacks
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
+import com.lyrebird.rc.edge.DetectionWire
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
 import com.lyrebird.rc.edge.ProcessDetectionRuntimeRegistry
 import com.lyrebird.rc.edge.V5DetectionPort
@@ -813,7 +814,7 @@ class FlightDeckActivity :
 
     @Volatile private var lastEdgeMetrics = EdgeDetectionMetrics()
 
-    @Volatile var currentDetectedTargets: List<DetectedTarget> = emptyList()
+    @Volatile var currentDetectedTargets: List<DetectedTargetSnapshot> = emptyList()
     private var detectionOverlay: DetectionOverlayView? = null
     private var pendingEdgePickerRequestCode: Int? = null
     private val edgeFilePickerLauncher =
@@ -2028,17 +2029,31 @@ class FlightDeckActivity :
         telemetryCoordinator.edgeModelName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_MODEL_NAME, null)
         telemetryCoordinator.edgeLabelsName = sharedPreferences.getString(LyrebirdSettings.PREF_EDGE_LABELS_NAME, null)
         telemetryCoordinator.edgeConfidenceThreshold = settings.getEdgeConfidenceThreshold()
-        telemetryCoordinator.detectedTargetsJson = DetectedTarget.listToJsonArray(currentDetectedTargets).toString()
+        telemetryCoordinator.detectedTargetsJson = DetectionWire.targetsJson(currentDetectedTargets)
         telemetryCoordinator.detectedTargetsSize = currentDetectedTargets.size
     }
 
-    private fun applyDetectedTargets(targets: List<DetectedTarget>) {
+    private fun applyDetectedTargets(targets: List<DetectedTargetSnapshot>) {
         currentDetectedTargets = targets
         TelemetryProvider.currentDetectedTargets = targets
         updateDetectionTelemetryState()
         rebuildTelemetryCache()
-        mainHandler.post { detectionOverlay?.setTargets(targets) }
+        mainHandler.post { detectionOverlay?.setTargets(targets.mapIndexed(::toOverlayTarget)) }
     }
+
+    /** The overlay draws the UXSDK view type; the pipeline above it carries the neutral snapshot. */
+    private fun toOverlayTarget(
+        index: Int,
+        target: DetectedTargetSnapshot,
+    ) = DetectedTarget(
+        index = index,
+        type = target.type,
+        left = target.left,
+        top = target.top,
+        right = target.right,
+        bottom = target.bottom,
+        confidence = target.confidence,
+    )
 
     override fun startAutoSensing() {
         ProcessDetectionRuntimeRegistry.startSelected()
@@ -2785,18 +2800,7 @@ class FlightDeckActivity :
     override fun runtimeEdgeConfidenceThreshold(): Float = settings.getEdgeConfidenceThreshold()
 
     override fun runtimeDetectionTargetsChanged(targets: List<DetectedTargetSnapshot>) {
-        applyDetectedTargets(
-            targets.mapIndexed { index, target ->
-                DetectedTarget(
-                    index = index,
-                    type = target.type,
-                    left = target.left,
-                    top = target.top,
-                    right = target.right,
-                    bottom = target.bottom,
-                )
-            },
-        )
+        applyDetectedTargets(targets)
     }
 
     override fun runtimeDetectionMetricsChanged(metrics: EdgeDetectionMetrics) {
@@ -3540,10 +3544,7 @@ class FlightDeckActivity :
                 autoSensingActive = isAutoSensingActive,
                 detectionSource = settings.getDetectionSource().prefValue,
                 detectionConfidenceThreshold = settings.getEdgeConfidenceThreshold(),
-                detectedTargets =
-                    currentDetectedTargets.map {
-                        DetectedTargetSnapshot(it.type, it.left, it.top, it.right, it.bottom, it.confidence)
-                    },
+                detectedTargets = currentDetectedTargets,
             ),
         )
     }
