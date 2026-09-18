@@ -2,6 +2,7 @@ package com.lyrebird.rc.server
 
 import android.content.SharedPreferences
 import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.perception.ObstacleSensorPort
 import java.lang.ref.WeakReference
 
 data class ObstacleRuntimeMotion(
@@ -42,7 +43,8 @@ internal object ProcessObstacleRuntimeRegistry {
     fun attach(
         preferences: SharedPreferences,
         callbacks: ObstacleRuntimeCallbacks,
-    ) = runtime.attach(preferences, callbacks)
+        sensor: ObstacleSensorPort,
+    ) = runtime.attach(preferences, callbacks, sensor)
 
     fun start() = runtime.start()
 
@@ -65,9 +67,11 @@ private class ProcessObstacleRuntime {
     fun attach(
         preferences: SharedPreferences,
         callbacks: ObstacleRuntimeCallbacks,
+        sensor: ObstacleSensorPort,
     ) {
         this.preferences = preferences
         callbacksRef = WeakReference(callbacks)
+        ObstacleGuard.sensorPort = sensor
         ObstacleGuard.motionProvider = {
             callbacksRef.get()?.runtimeObstacleMotion()?.let {
                 ObstacleGuard.Motion(

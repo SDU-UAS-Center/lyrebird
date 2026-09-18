@@ -75,6 +75,7 @@ import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.models.MediaVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.perception.V5ObstacleSensorPort
 import com.lyrebird.rc.server.MavlinkMediaSource
 import com.lyrebird.rc.server.MavlinkRuntimeCallbacks
 import com.lyrebird.rc.server.NetworkRuntimeCallbacks
@@ -550,6 +551,9 @@ class FlightDeckActivity :
 
     private val mavlinkCommandSink: MavlinkCommandSink
         get() = mavlinkPayloadPolicy.sink
+
+    /** One sensor registration for the guard; attaching twice must not leak a second listener. */
+    private val v5ObstacleSensorPort = V5ObstacleSensorPort()
 
     private val mavlinkMotionPolicy by lazy {
         MavlinkMotionPolicy(
@@ -2912,7 +2916,7 @@ class FlightDeckActivity :
 
         ProcessStreamingRuntimeRegistry.prepare()
         ProcessDetectionRuntimeRegistry.attach(applicationContext, this)
-        ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this)
+        ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this, v5ObstacleSensorPort)
 
         // Fleet mesh. Discovery answers a ground station asking "who is out there"; this is the
         // same question asked between aircraft, which nothing on the device could answer before.
@@ -3440,7 +3444,7 @@ class FlightDeckActivity :
      * should be switched on deliberately rather than inherited from an app update.
      */
     private fun startObstacleGuard() {
-        ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this)
+        ProcessObstacleRuntimeRegistry.attach(sharedPreferences, this, v5ObstacleSensorPort)
         ProcessObstacleRuntimeRegistry.start()
     }
 

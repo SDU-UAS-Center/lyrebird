@@ -3,9 +3,6 @@ package com.lyrebird.rc.perception
 import android.content.SharedPreferences
 import android.os.SystemClock
 import android.util.Log
-import dji.v5.manager.aircraft.perception.PerceptionManager
-import dji.v5.manager.aircraft.perception.data.ObstacleData
-import dji.v5.manager.aircraft.perception.listener.ObstacleDataListener
 
 /**
  * Stops Lyrebird's autonomous motion when the aircraft's own sensors see something in the way.
@@ -101,6 +98,22 @@ internal object ObstacleGuard {
     var stopMotion: (() -> Unit)? = null
 
     /**
+     * The aircraft's obstacle sensors, wired by the host before [start].
+     *
+     * The guard never touches the SDK for this; the port delivers converted sweeps, and the
+     * V5 implementation owns the listener registration and the millimetre payload conversion.
+     */
+    var sensorPort: ObstacleSensorPort? = null
+
+    /**
+     * The clock the latch and the blocked arc are measured against.
+     *
+     * Injectable so both lifetimes can be tested without waiting for them; production reads the
+     * elapsed-realtime clock, the same one the brake arithmetic timestamps with.
+     */
+    internal var nowMs: () -> Long = { SystemClock.elapsedRealtime() }
+
+    /**
      * Half-angle searched around the direction of travel, mirroring [ObstacleBrake]'s
      * [ObstacleBrake.TRAVEL_ARC_HALF_ANGLE_DEG] so the blocked arc is derived from the same arc
      * the brake decision used rather than from a second constant that can drift.
@@ -139,7 +152,7 @@ internal object ObstacleGuard {
      * longer because its purpose is to outrun a ground station's retry cadence.
      */
     val blockedArc: BlockedArc?
-        get() = _blockedArc?.takeIf { it.isActive(SystemClock.elapsedRealtime()) }
+        get() = _blockedArc?.takeIf { it.isActive(nowMs()) }
 
     @Volatile
     private var _blockedArc: BlockedArc? = null
@@ -152,9 +165,7 @@ internal object ObstacleGuard {
 
     /** True while the aircraft is stopped by this guard rather than by anything else. */
     val isLatched: Boolean
-        get() = SystemClock.elapsedRealtime() < latchedUntilElapsedMs
-
-    private val listener = ObstacleDataListener { data -> onObstacleData(data) }
+        get() = nowMs() < latchedUntilElapsedMs
 
     fun isEnabled(prefs: SharedPreferences): Boolean = prefs.getBoolean(PREF_ENABLED, false)
 
@@ -171,8 +182,14 @@ internal object ObstacleGuard {
             return
         }
         marginM = prefs.getFloat(PREF_MARGIN_M, ObstacleBrake.DEFAULT_MARGIN_M.toFloat()).toDouble()
+        val sensor =
+            sensorPort
+                ?: run {
+                    Log.w(TAG, "No obstacle sensor port is wired; guard cannot arm")
+                    return
+                }
         runCatching {
-            PerceptionManager.getInstance().addObstacleDataListener(listener)
+            sensor.start { reading -> onReading(reading) }
             isRunning = true
             Log.i(TAG, "Obstacle guard armed with a ${marginM}m standoff")
         }.onFailure { error ->
@@ -182,7 +199,7 @@ internal object ObstacleGuard {
 
     fun stop() {
         if (!isRunning) return
-        runCatching { PerceptionManager.getInstance().removeObstacleDataListener(listener) }
+        runCatching { sensorPort?.stop() }
         isRunning = false
         latchedUntilElapsedMs = 0L
         lastReading = ObstacleReading.EMPTY
@@ -202,23 +219,11 @@ internal object ObstacleGuard {
     }
 
     /**
-     * One sweep from the SDK. Runs on DJI's callback thread.
-     *
-     * Kept short and allocation-light: this fires several times a second on a device that is also
-     * encoding and publishing video.
+     * One converted sweep from the sensor port. May run on any thread; kept short and
+     * allocation-light, because it fires several times a second on a device that is also encoding
+     * and publishing video.
      */
-    private fun onObstacleData(data: ObstacleData?) {
-        if (data == null) return
-        val reading =
-            runCatching {
-                ObstacleReading.fromMillimetres(
-                    horizontalMm = data.horizontalObstacleDistance.orEmpty(),
-                    angleIntervalDeg = data.horizontalAngleInterval.toDouble(),
-                    upwardMm = data.upwardObstacleDistance,
-                    downwardMm = data.downwardObstacleDistance,
-                    timestampMs = SystemClock.elapsedRealtime(),
-                )
-            }.getOrNull() ?: return
+    internal fun onReading(reading: ObstacleReading) {
         lastReading = reading
 
         if (isLatched) return
@@ -257,14 +262,14 @@ internal object ObstacleGuard {
                 Log.w(TAG, "Obstacle brake due, but no motion stopper is wired; not braking")
                 return
             }
-        latchedUntilElapsedMs = SystemClock.elapsedRealtime() + BRAKE_LATCH_MS
+        latchedUntilElapsedMs = nowMs() + BRAKE_LATCH_MS
         val event =
             BrakeEvent(
                 reason = decision.reason,
                 clearanceM = decision.clearanceM,
                 requiredM = decision.requiredM,
                 bearingFromNoseDeg = decision.bearingFromNoseDeg,
-                atElapsedMs = SystemClock.elapsedRealtime(),
+                atElapsedMs = nowMs(),
             )
         lastBrake = event
         Log.w(
@@ -282,9 +287,9 @@ internal object ObstacleGuard {
             ?.let { closest ->
                 BlockedArc.fromBrake(
                     decision.copy(bearingFromNoseDeg = closest),
-                    SystemClock.elapsedRealtime(),
+                    nowMs(),
                 )
-            } ?: BlockedArc.fromBrake(decision, SystemClock.elapsedRealtime())
+            } ?: BlockedArc.fromBrake(decision, nowMs())
         // Cancels the PID loop and zeroes the sticks, so the aircraft holds position. Virtual
         // stick is deliberately left enabled: dropping it would hand control back mid-air, and the
         // next command should be able to fly without re-arming anything.

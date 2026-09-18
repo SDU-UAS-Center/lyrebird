@@ -60,6 +60,29 @@ internal object RoiControl {
     ): Double = hypot(northM, eastM)
 
     /**
+     * Compass bearing from one position to another, degrees clockwise from north.
+     *
+     * The great-circle initial bearing — the same calculation the waypoint controllers use — so a
+     * bearing computed for the gimbal and a bearing computed for navigation cannot disagree about
+     * the same two fixes.
+     */
+    fun bearingDeg(
+        latitudeDeg: Double,
+        longitudeDeg: Double,
+        targetLatitudeDeg: Double,
+        targetLongitudeDeg: Double,
+    ): Double {
+        val lat1Rad = Math.toRadians(latitudeDeg)
+        val lat2Rad = Math.toRadians(targetLatitudeDeg)
+        val deltaLonRad = Math.toRadians(targetLongitudeDeg - longitudeDeg)
+        val y = kotlin.math.sin(deltaLonRad) * kotlin.math.cos(lat2Rad)
+        val x =
+            kotlin.math.cos(lat1Rad) * kotlin.math.sin(lat2Rad) -
+                kotlin.math.sin(lat1Rad) * kotlin.math.cos(lat2Rad) * kotlin.math.cos(deltaLonRad)
+        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
+    }
+
+    /**
      * The rotation to ask of the gimbal this tick: the error, limited.
      *
      * Rate-limited because a relative rotation is executed as fast as the gimbal can move it, and
