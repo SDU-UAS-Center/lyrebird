@@ -40,7 +40,6 @@ import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
 import com.lyrebird.rc.controller.V5FlightSettingsActions
-import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.controller.V5MotionCommandPort
 import com.lyrebird.rc.controller.V5NativeMissionAdapter
 import com.lyrebird.rc.controller.V5PayloadCommandHost
@@ -50,7 +49,6 @@ import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.DetectionWire
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
 import com.lyrebird.rc.edge.ProcessDetectionRuntimeRegistry
-import com.lyrebird.rc.edge.V5DetectionPort
 import com.lyrebird.rc.fleet.FleetBeacon
 import com.lyrebird.rc.fleet.FleetDeckController
 import com.lyrebird.rc.fleet.FleetMeshSessionRegistry
@@ -77,6 +75,7 @@ import com.lyrebird.rc.models.MediaVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
 import com.lyrebird.rc.perception.V5ObstacleSensorPort
+import com.lyrebird.rc.server.CommandSurfaceUi
 import com.lyrebird.rc.server.MavlinkMediaSource
 import com.lyrebird.rc.server.MavlinkRuntimeCallbacks
 import com.lyrebird.rc.server.NetworkRuntimeCallbacks
@@ -84,6 +83,7 @@ import com.lyrebird.rc.server.ObstacleRuntimeBrake
 import com.lyrebird.rc.server.ObstacleRuntimeCallbacks
 import com.lyrebird.rc.server.ObstacleRuntimeMotion
 import com.lyrebird.rc.server.ProcessCaptureExecutorRegistry
+import com.lyrebird.rc.server.ProcessCommandSurface
 import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessMediaRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
@@ -105,7 +105,6 @@ import com.lyrebird.rc.settings.REQUEST_EDGE_MODEL_FILE
 import com.lyrebird.rc.settings.SettingsDialogViews
 import com.lyrebird.rc.settings.SettingsDisplay
 import com.lyrebird.rc.settings.SettingsPageActions
-import com.lyrebird.rc.settings.SettingsSnapshot
 import com.lyrebird.rc.telemetry.AircraftFlightMode
 import com.lyrebird.rc.telemetry.AircraftTelemetryListener
 import com.lyrebird.rc.telemetry.GeoPoint3D
@@ -171,7 +170,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class FlightDeckActivity :
     DefaultLayoutActivity(),
-    LyrebirdCommandHost,
+    CommandSurfaceUi,
     NetworkRuntimeCallbacks,
     MavlinkRuntimeCallbacks,
     StreamingRuntimeCallbacks,
@@ -272,7 +271,7 @@ class FlightDeckActivity :
         private const val DJI_RTSP_STREAM_PATH = "/streaming/live/1"
     }
 
-    override val mainHandler = Handler(Looper.getMainLooper())
+    val mainHandler = Handler(Looper.getMainLooper())
 
     private val telemetryCoordinator get() = ProcessTelemetryRuntimeRegistry.telemetryCoordinator()
     private val aircraftTelemetry get() = ProcessTelemetryRuntimeRegistry.aircraftTelemetry()
@@ -280,16 +279,7 @@ class FlightDeckActivity :
     private val mediaVM: MediaVM get() = ProcessMediaRuntimeRegistry.mediaVM()
     private val payloadWidgetVM get() = ProcessPayloadRuntimeRegistry.payloadWidgetVM()
 
-    override val media: LyrebirdMediaPort by lazy { V5MediaPort { mediaVM } }
-
-    override val detection: LyrebirdDetectionPort by lazy {
-        V5DetectionPort(
-            activeProvider = { ProcessDetectionRuntimeRegistry.isAutoSensingActive() },
-            targetsProvider = { ProcessDetectionRuntimeRegistry.currentTargets() },
-        )
-    }
-
-    override val flight: LyrebirdFlightPort by lazy {
+    val flight: LyrebirdFlightPort by lazy {
         object : LyrebirdFlightPort {
             override fun takeoff(): CommandResult {
                 DroneController.startTakeOff()
@@ -491,19 +481,19 @@ class FlightDeckActivity :
 
                 override fun setDetectionSource(value: String) = this@FlightDeckActivity.setDetectionSource(value)
 
-                override fun setDroneName(value: String) = this@FlightDeckActivity.setDroneName(value)
+                override fun setDroneName(value: String) = ProcessCommandSurface.setDroneName(value)
 
-                override fun setMediamtxServer(value: String) = this@FlightDeckActivity.setMediamtxServer(value)
+                override fun setMediamtxServer(value: String) = ProcessCommandSurface.setMediamtxServer(value)
 
                 override fun setStreamingMode(mode: StreamingMode) = this@FlightDeckActivity.setStreamingMode(mode)
 
-                override fun setVideoSource(value: String) = this@FlightDeckActivity.setVideoSource(value)
+                override fun setVideoSource(value: String) = ProcessCommandSurface.setVideoSource(value)
 
-                override fun setWebRtcResolution(value: String) = this@FlightDeckActivity.setWebRtcResolution(value)
+                override fun setWebRtcResolution(value: String) = ProcessCommandSurface.setWebRtcResolution(value)
 
-                override fun startAutoSensing() = this@FlightDeckActivity.startAutoSensing()
+                override fun startAutoSensing() = ProcessCommandSurface.startAutoSensing()
 
-                override fun stopAutoSensing() = this@FlightDeckActivity.stopAutoSensing()
+                override fun stopAutoSensing() = ProcessCommandSurface.stopAutoSensing()
 
                 override fun startRoiTracking(
                     latitudeDeg: Double,
@@ -661,7 +651,7 @@ class FlightDeckActivity :
                     return true
                 }
 
-                override fun settingsSnapshot() = this@FlightDeckActivity.settingsSnapshot()
+                override fun settingsSnapshot() = ProcessCommandSurface.settingsSnapshotForUi()
 
                 override fun currentMavlinkSystemId() = this@FlightDeckActivity.currentMavlinkSystemId()
 
@@ -672,7 +662,7 @@ class FlightDeckActivity :
 
                 override fun setAutomaticDroneName() = this@FlightDeckActivity.setAutomaticDroneName()
 
-                override fun setDroneName(name: String) = this@FlightDeckActivity.setDroneName(name)
+                override fun setDroneName(name: String) = ProcessCommandSurface.setDroneName(name)
 
                 override fun setMavlinkSystemId(value: Int) = this@FlightDeckActivity.setMavlinkSystemId(value)
 
@@ -721,7 +711,7 @@ class FlightDeckActivity :
                 override fun shouldRestartActiveStreaming() =
                     ProcessNetworkRuntimeRegistry.hasTelemetryClients() || ProcessStreamingRuntimeRegistry.hasTarget()
 
-                override fun restartActiveStreaming() = this@FlightDeckActivity.restartActiveStreaming()
+                override fun restartActiveStreaming() = ProcessCommandSurface.restartActiveStreaming()
 
                 override fun changeVideoOptions() {
                     ProcessStreamingRuntimeRegistry.changeMediaOptions(settings.buildWebRTCOptions())
@@ -736,7 +726,7 @@ class FlightDeckActivity :
         )
     }
 
-    override var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
+    var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
 
     private val deviceStatusSource get() = ProcessTelemetryRuntimeRegistry.deviceStatusSource()
 
@@ -1009,7 +999,7 @@ class FlightDeckActivity :
             }
     }
 
-    override fun updateManualOverrideUI() {
+    fun updateManualOverrideUI() {
         val isManual = DroneController.isManualOverrideActive
         // Blue = autonomous, Red = manual
         val color = if (isManual) 0xFFF44336.toInt() else 0xFF2196F3.toInt()
@@ -1041,12 +1031,6 @@ class FlightDeckActivity :
      * A request is [ControlAuthority.Source.SAFETY] only when a safety token is configured AND
      * the request presents exactly that token; otherwise it is the Pilot Computer.
      */
-    override fun classifyCommandSource(presentedToken: String?): ControlAuthority.Source =
-        if (presentedToken == SAFETY_TOKEN) {
-            ControlAuthority.Source.SAFETY
-        } else {
-            ControlAuthority.Source.PILOT
-        }
 
     private fun setupControlAuthorityBanner() {
         // The latch outlives the process and is restored by the telemetry runtime as soon as the
@@ -1094,7 +1078,7 @@ class FlightDeckActivity :
             .show()
     }
 
-    override fun setDjiSurfaceH264Encoder(enabled: Boolean) {
+    fun setDjiSurfaceH264Encoder(enabled: Boolean) {
         if (settings.isDjiSurfaceH264EncoderEnabled() == enabled) return
         sharedPreferences
             .edit()
@@ -1119,7 +1103,7 @@ class FlightDeckActivity :
         finish()
     }
 
-    override fun setStreamingMode(mode: StreamingMode) {
+    fun setStreamingMode(mode: StreamingMode) {
         sharedPreferences.edit().putString(LyrebirdSettings.PREF_STREAMING_MODE, mode.prefValue).apply()
         if (mode != StreamingMode.WEBRTC &&
             settings.isDetectionsEnabled() &&
@@ -1493,47 +1477,8 @@ class FlightDeckActivity :
         thermalArmed = false
     }
 
-    override fun setAutoSensingSwitchChecked(checked: Boolean) {
+    fun setAutoSensingSwitchChecked(checked: Boolean) {
         findViewById<Switch>(R.id.sw_auto_sensing)?.isChecked = checked
-    }
-
-    override fun readSettingsJson(): String = settingsSnapshot().toJson()
-
-    private fun settingsSnapshot(): SettingsSnapshot {
-        val product = productTypeKey.get(ProductType.UNKNOWN)
-        return SettingsSnapshot(
-            droneName = droneName,
-            aircraftSerialNumber = droneSerialNumber,
-            mavlinkSystemId = currentMavlinkSystemId(),
-            streamingMode = settings.getStreamingMode().prefValue,
-            webrtcResolution = settings.getWebRTCResolutionPreset().prefValue,
-            webrtcFps = settings.getWebRTCFps(),
-            detectionSource = settings.getDetectionSource().prefValue,
-            detectionsEnabled = isDetectionActiveForUi(),
-            edgeConfidenceThreshold = settings.getEdgeConfidenceThreshold(),
-            mediamtxServer = settings.getMediamtxServer(),
-            rthAltitude = DroneController.getRTHAltitude(),
-            rthAltitudeEffective = DroneController.getEffectiveRTHAltitude(),
-            rthAltitudeStatus = DroneController.getRTHAltitudeStatus(),
-            maxFlightHeight = DroneController.getMaxFlightHeight(),
-            maxFlightDistance = DroneController.getMaxFlightDistance(),
-            distanceLimitEnabled = DroneController.getDistanceLimitEnabled(),
-            rcControlMode = DroneController.getRcControlMode(),
-            rcPairingStatus = DroneController.getRcPairingStatus(),
-            hdFrequencyBand = DroneController.getHdFrequencyBand(),
-            detectedAircraft = product.name,
-            controlProfile = DroneControlProfiles.fromProductType(product).displayName,
-        )
-    }
-
-    override fun setDroneName(name: String): Boolean {
-        if (!settings.setDroneName(name)) return false
-        val trimmed = name.trim()
-        droneName = trimmed
-        LyrebirdFlightLogger.setDroneName(trimmed)
-        mainHandler.post { updateDroneNameDisplay() }
-        Log.i(TAG, "Drone name set to: $trimmed")
-        return true
     }
 
     private fun setAutomaticDroneName() {
@@ -1541,7 +1486,7 @@ class FlightDeckActivity :
         applyAutomaticDroneName()
     }
 
-    override fun setMavlinkSystemId(value: Int): Boolean {
+    fun setMavlinkSystemId(value: Int): Boolean {
         if (value != MavlinkSystemId.AUTO && !MavlinkSystemId.isManual(value)) return false
         val current =
             prefIntOrDefault(
@@ -1558,46 +1503,13 @@ class FlightDeckActivity :
         return true
     }
 
-    override fun setVideoSource(value: String): Boolean {
-        // The phone-camera and mock-MP4 sources are gone, so the drone camera is all this can
-        // be. Accepting the same value a client already had keeps the existing surface working;
-        // anything else is refused rather than silently ignored.
-        if (!value.equals(VIDEO_SOURCE_LABEL, ignoreCase = true)) return false
-        return true
-    }
-
-    override fun setWebRtcResolution(value: String): Boolean {
-        if (!settings.setWebRtcResolution(value)) return false
-        mainHandler.post { ProcessStreamingRuntimeRegistry.changeMediaOptions(settings.buildWebRTCOptions()) }
-        return true
-    }
-
-    override fun setWebRtcFps(value: Int): Boolean {
-        if (!settings.setWebRtcFps(value)) return false
-        mainHandler.post { ProcessStreamingRuntimeRegistry.changeMediaOptions(settings.buildWebRTCOptions()) }
-        return true
-    }
-
-    override fun setDetectionSource(value: String): Boolean {
+    fun setDetectionSource(value: String): Boolean {
         val source = DetectionSource.entries.firstOrNull { it.prefValue.equals(value, ignoreCase = true) } ?: return false
         mainHandler.post { setDetectionSource(source) }
         return true
     }
 
-    override fun setEdgeConfidence(threshold: Float): Boolean {
-        if (!settings.setEdgeConfidence(threshold)) return false
-        telemetryCoordinator.edgeConfidenceThreshold = threshold
-        return true
-    }
-
-    override fun setMediamtxServer(value: String): Boolean {
-        if (!settings.setMediamtxServer(value)) return false
-        val trimmed = value.trim()
-        Log.i(TAG, "Mediamtx server set to: ${if (trimmed.isEmpty()) "auto (client IP)" else trimmed}")
-        return true
-    }
-
-    override fun readThermalMaxTempNow(): Double? {
+    fun readThermalMaxTempNow(): Double? {
         // Make sure the pipeline is armed even if capture is the very first thermal action.
         armThermalMeasurement()
         return runCatching {
@@ -1617,7 +1529,7 @@ class FlightDeckActivity :
         }.onFailure { Log.e(TAG_THERMAL, "[capture read] error: ${it.message}", it) }.getOrNull()
     }
 
-    override fun readLrfMeasurement(): LrfMeasurement {
+    fun readLrfMeasurement(): LrfMeasurement {
         val info = Payload.takeFreshLrfReading()
         val state = info?.laserMeasureState
         val locked = state == LaserMeasureState.NORMAL
@@ -1637,14 +1549,14 @@ class FlightDeckActivity :
         )
     }
 
-    override fun setLrfTarget(target: GeoPoint3D?) {
+    fun setLrfTarget(target: GeoPoint3D?) {
         lrfTargetLocation = target?.let { LocationCoordinate3D(it.latitudeDeg, it.longitudeDeg, it.altitudeM) }
         // The projection is what publishes the target on the telemetry frame; keep its copy in
         // step even while this screen is the one that received the command.
         ProcessTelemetryRuntimeRegistry.projection().lrfTarget = target
     }
 
-    override fun hasThermalCamera(): Boolean =
+    fun hasThermalCamera(): Boolean =
         runCatching {
             // The same key the temperature read uses: it resolves only when a thermal lens is
             // actually present, so this is the honest "would Temp/Thermal do anything" probe.
@@ -1845,7 +1757,7 @@ class FlightDeckActivity :
         ProcessStreamingRuntimeRegistry.startForClient(clientIp)
     }
 
-    override fun restartActiveStreaming() {
+    fun restartActiveStreaming() {
         ProcessStreamingRuntimeRegistry.restartActiveStreaming()
     }
 
@@ -1909,13 +1821,13 @@ class FlightDeckActivity :
         invalidateOptionsMenu()
     }
 
-    override fun setDetectionsEnabled(enabled: Boolean) {
+    fun setDetectionsEnabled(enabled: Boolean) {
         if (enabled && settings.getDetectionSource() == DetectionSource.DJI_ONBOARD && !aircraftConnected) {
             Toast.makeText(this, "DJI onboard detections need a connected drone", Toast.LENGTH_SHORT).show()
             return
         }
 
-        stopAutoSensing()
+        ProcessCommandSurface.stopAutoSensing()
         stopEdgeDetection()
 
         sharedPreferences
@@ -1997,12 +1909,12 @@ class FlightDeckActivity :
         confidence = target.confidence,
     )
 
-    override fun startAutoSensing() {
+    fun startAutoSensing() {
         ProcessDetectionRuntimeRegistry.startSelected()
     }
 
     @Suppress("TooGenericExceptionCaught")
-    override fun stopAutoSensing() {
+    fun stopAutoSensing() {
         ProcessDetectionRuntimeRegistry.stopSelected()
     }
 
@@ -2858,7 +2770,8 @@ class FlightDeckActivity :
         ProcessNetworkRuntimeRegistry.commandLogger = { uri, postData ->
             LyrebirdFlightLogger.logCommand(uri, postData)
         }
-        ProcessNetworkRuntimeRegistry.attach(applicationContext, this, mavlinkCommandSink, this)
+        ProcessCommandSurface.attachUi(this)
+        ProcessNetworkRuntimeRegistry.attach(applicationContext, ProcessCommandSurface, mavlinkCommandSink, this)
         val sessionStatus = ProcessNetworkRuntimeRegistry.start()
         Log.i(TAG, "Network session: ${sessionStatus.summary()}")
         sessionStatus?.takeIf { it.blockedByAnotherSession }?.let {
@@ -2937,10 +2850,10 @@ class FlightDeckActivity :
             // activity. Its sockets are its own; the session's discovery sockets are already down.
             stopFleetMesh()
 
-            // Detach this screen from the process-scoped network runtime. Its sockets and lease
-            // remain alive for the next activity instance; the weak bridge prevents this screen
-            // from being retained by server worker threads.
-            ProcessNetworkRuntimeRegistry.detach(this)
+            // Detach this screen from the process-scoped command surface. The network runtime
+            // keeps serving through the surface itself — settings and telemetry no longer need a
+            // screen — so there is no host to unplug here; only the weak UI reference goes away.
+            ProcessCommandSurface.detachUi(this)
             ProcessMavlinkRuntimeRegistry.detach(
                 this,
                 mavlinkMediaSource,
@@ -3546,7 +3459,7 @@ class FlightDeckActivity :
                 }
 
             PARAM_WEBRTC_FPS ->
-                if (setWebRtcFps(value.toInt())) {
+                if (ProcessCommandSurface.setWebRtcFps(value.toInt())) {
                     CommandResult(MavlinkCommandOutcome.ACCEPTED)
                 } else {
                     CommandResult(MavlinkCommandOutcome.DENIED, "Unsupported frame rate")
@@ -3575,7 +3488,7 @@ class FlightDeckActivity :
             }
 
             PARAM_EDGE_CONFIDENCE ->
-                if (setEdgeConfidence(value)) {
+                if (ProcessCommandSurface.setEdgeConfidence(value)) {
                     CommandResult(MavlinkCommandOutcome.ACCEPTED)
                 } else {
                     CommandResult(MavlinkCommandOutcome.DENIED, "Threshold out of range")
@@ -3822,6 +3735,46 @@ class FlightDeckActivity :
         // the same one that keeps the TCP frame moving with no screen attached. Re-applying here
         // makes a settings change visible immediately rather than at the next telemetry event.
         ProcessTelemetryRuntimeRegistry.projection().apply()
+    }
+
+    // ── Command surface UI delegate ────────────────────────────────────────────
+
+    override val commandSurfaceFlight: LyrebirdFlightPort get() = flight
+
+    override fun commandSurfaceReadThermalMaxTempNow() = readThermalMaxTempNow()
+
+    override fun commandSurfaceHasThermalCamera() = hasThermalCamera()
+
+    override fun commandSurfaceReadLrfMeasurement() = readLrfMeasurement()
+
+    override fun commandSurfaceSetLrfTarget(target: GeoPoint3D?) = setLrfTarget(target)
+
+    override fun commandSurfaceUpdateManualOverrideUi() = updateManualOverrideUI()
+
+    override fun commandSurfaceSetAutoSensingSwitch(checked: Boolean) = setAutoSensingSwitchChecked(checked)
+
+    override fun commandSurfaceSetMavlinkSystemId(value: Int) = setMavlinkSystemId(value)
+
+    override fun commandSurfaceSetDetectionsEnabled(enabled: Boolean) = setDetectionsEnabled(enabled)
+
+    override fun commandSurfaceSetDetectionSource(value: String) = setDetectionSource(value)
+
+    override fun commandSurfaceSetStreamingMode(mode: StreamingMode) = setStreamingMode(mode)
+
+    override fun commandSurfaceSetDjiSurfaceH264Encoder(enabled: Boolean) = setDjiSurfaceH264Encoder(enabled)
+
+    override fun commandSurfaceOnStateChanged() {
+        mainHandler.post {
+            // A command that arrived over HTTP (or MAVLink) changed shared state; re-derive this
+            // screen from preferences and the registries so the visible controls agree.
+            loadDroneName()
+            updateDroneNameDisplay()
+            updateManualOverrideUI()
+            updateDetectionTelemetryState()
+            rebuildTelemetryCache()
+            updateStreamingFooter()
+            invalidateOptionsMenu()
+        }
     }
 
     // ==================== HTTP Server ====================
