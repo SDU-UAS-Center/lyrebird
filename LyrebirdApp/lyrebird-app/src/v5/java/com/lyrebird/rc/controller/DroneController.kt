@@ -10,6 +10,12 @@ import com.lyrebird.rc.DroneControlProfiles
 import com.lyrebird.rc.models.BasicAircraftControlVM
 import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleGuard
+import com.lyrebird.rc.platform.FlightPrimitives
+import com.lyrebird.rc.platform.FlightSetpoint
+import com.lyrebird.rc.platform.ManualStick
+import com.lyrebird.rc.platform.V5FlightPrimitives
+import com.lyrebird.rc.platform.VerticalReference
+import com.lyrebird.rc.platform.YawReference
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
 import dji.sdk.keyvalue.key.AirLinkKey
@@ -19,11 +25,6 @@ import dji.sdk.keyvalue.key.RemoteControllerKey
 import dji.sdk.keyvalue.value.airlink.FrequencyBand
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
-import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
-import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
-import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
-import dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam
-import dji.sdk.keyvalue.value.flightcontroller.YawControlMode
 import dji.sdk.keyvalue.value.remotecontroller.ControlMode
 import dji.sdk.keyvalue.value.remotecontroller.PairingState
 import dji.sdk.wpmz.value.mission.WaylineExitOnRCLostAction
@@ -37,7 +38,6 @@ import dji.v5.et.create
 import dji.v5.et.get
 import dji.v5.et.listen
 import dji.v5.et.set
-import dji.v5.manager.aircraft.virtualstick.Stick
 import dji.v5.manager.aircraft.waypoint3.WaypointMissionManager
 import kotlin.math.PI
 import kotlin.math.abs
@@ -53,6 +53,14 @@ import kotlin.math.sqrt
 object DroneController {
     private var basicAircraftControlVM: BasicAircraftControlVM? = null
     var virtualStickVM: VirtualStickVM? = null
+
+    /**
+     * The hardware conversation for the control loops: takeoff/land/RTH, virtual-stick control
+     * and typed setpoints, built from the view models in [init]. The loops never touch the SDK
+     * directly, so the axis/unit mapping lives in one adapter (V5FlightPrimitives) instead of
+     * being re-derived at every setpoint site.
+     */
+    private var primitives: FlightPrimitives? = null
 
     // ==================== Manual Override System ====================
     // When true, the pilot has taken manual control via RC sticks.
@@ -169,13 +177,7 @@ object DroneController {
         if (!isManualOverrideActive) {
             isManualOverrideActive = true
             cancelActiveControlLoop()
-            virtualStickVM?.disableVirtualStick(
-                object : CommonCallbacks.CompletionCallback {
-                    override fun onSuccess() { /* no-op */ }
-
-                    override fun onFailure(error: IDJIError) { /* no-op */ }
-                },
-            )
+            primitives?.releaseControl { }
             setDroneStatus(DroneStatus.MANUAL_OVERRIDE)
             ToastUtils.showToast("⚠ MANUAL OVERRIDE ACTIVE — autonomous commands blocked")
             manualOverrideListener?.onManualOverrideActivated()
@@ -275,13 +277,7 @@ object DroneController {
      */
     fun onSafetyTakeover() {
         cancelActiveControlLoop()
-        virtualStickVM?.disableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) { /* no-op */ }
-            },
-        )
+        primitives?.releaseControl { }
     }
 
     /**
@@ -340,6 +336,7 @@ object DroneController {
     ) {
         basicAircraftControlVM = basicVM
         virtualStickVM = stickVM
+        primitives = V5FlightPrimitives(basicVM, stickVM)
     }
 
     fun destroy() {
@@ -348,6 +345,7 @@ object DroneController {
         droneStatusListener = null
         basicAircraftControlVM = null
         virtualStickVM = null
+        primitives = null
     }
 
     // WAYPOINT MISSION
@@ -581,25 +579,13 @@ object DroneController {
     fun enableVirtualStick() {
         // Cancel any active control loop first to prevent ghost navigation
         cancelActiveControlLoop()
-        virtualStickVM?.enableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) { /* SDK may report "already enabled" — not a real error */ }
-            },
-        )
+        primitives?.acquireControl { }
     }
 
     fun disableVirtualStick() {
         // Cancel any active control loop first
         cancelActiveControlLoop()
-        virtualStickVM?.disableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) { /* SDK may report "already disabled" — not a real error */ }
-            },
-        )
+        primitives?.releaseControl { }
     }
 
     /**
@@ -624,19 +610,9 @@ object DroneController {
         // 2. Reset sticks to neutral
         setStick(0F, 0F, 0F, 0F)
 
-        // 3. Try to disable virtual stick (may fail if we don't have control authority - that's OK)
-        virtualStickVM?.disableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    // Virtual stick disabled successfully
-                }
-
-                override fun onFailure(error: IDJIError) {
-                    // Ignore - we may not have had control authority, which is fine
-                    // The important thing is we've cancelled the control loops
-                }
-            },
-        )
+        // 3. Try to disable virtual stick; the loop cancellation above already stopped motion,
+        //    and failure here (no authority, already disabled) is not fatal.
+        primitives?.releaseControl { }
 
         // 4. Also try to stop any DJI native waypoint mission
         try {
@@ -731,14 +707,7 @@ object DroneController {
         rightX: Float = 0F,
         rightY: Float = 0F,
     ) {
-        virtualStickVM?.setLeftPosition(
-            (leftX * Stick.MAX_STICK_POSITION_ABS).toInt(),
-            (leftY * Stick.MAX_STICK_POSITION_ABS).toInt(),
-        )
-        virtualStickVM?.setRightPosition(
-            (rightX * Stick.MAX_STICK_POSITION_ABS).toInt(),
-            (rightY * Stick.MAX_STICK_POSITION_ABS).toInt(),
-        )
+        primitives?.sendManualStick(ManualStick(leftX = leftX, leftY = leftY, rightX = rightX, rightY = rightY))
     }
 
     fun startTakeOff() {
@@ -791,20 +760,9 @@ object DroneController {
         }, 120_000L)
         cancelActiveControlLoop()
 
-        virtualStickVM?.disableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    // Virtual stick disabled, now safe to start RTH
-                    executeRTH()
-                }
-
-                override fun onFailure(error: IDJIError) {
-                    // Virtual stick may already be disabled or we don't have control authority
-                    // Still try RTH - the DJI SDK may handle it
-                    executeRTH()
-                }
-            },
-        )
+        // Virtual stick must be down before RTH starts, or it fights the return; both the success
+        // and the "already disabled" callback continue into RTH, as before.
+        primitives?.releaseControl { executeRTH() }
     }
 
     private fun executeRTH() {
@@ -860,19 +818,9 @@ object DroneController {
         val maxYawRate = 30.0 // degrees per second
         val yawPID = PID(3.0, 0.0, 0.0, updateInterval / 1000, -maxYawRate to maxYawRate)
 
-        virtualStickVM?.enableVirtualStickAdvancedMode()
-        // Enable Virtual Stick and advanced mode
-        // NOTE: Use VM directly, not enableVirtualStick() which would cancel the loop we just started
-        virtualStickVM?.enableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) {
-                    // SDK may report "already enabled" — not a real error
-                }
-            },
-        )
-        virtualStickVM?.enableVirtualStickAdvancedMode()
+        // The primitives directly, not enableVirtualStick() which would cancel the loop we just
+        // started; acquireControl runs the same advanced-mode + enable sequence.
+        primitives?.acquireControl { }
 
         val runnable =
             object : Runnable {
@@ -896,19 +844,14 @@ object DroneController {
                         return
                     }
 
-                    val flightControlParam =
-                        VirtualStickFlightControlParam().apply {
-                            this.pitch = 0.0
-                            this.roll = 0.0
-                            this.yaw = angularVelocity
-                            this.verticalThrottle = currentPosition.altitude
-                            this.verticalControlMode = VerticalControlMode.POSITION
-                            this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                            this.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                            this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                        }
-
-                    virtualStickVM?.sendVirtualStickAdvancedParam(flightControlParam)
+                    primitives?.send(
+                        FlightSetpoint(
+                            vertical = currentPosition.altitude,
+                            verticalReference = VerticalReference.ALTITUDE_MSL_M,
+                            yaw = angularVelocity,
+                            yawReference = YawReference.RATE_CW_DPS,
+                        ),
+                    )
                     controlLoopYaw.postDelayed(this, updateInterval.toLong())
                 }
             }
@@ -929,16 +872,9 @@ object DroneController {
 
         val seq = _altitudeSeq.incrementAndGet()
 
-        // Enable Virtual Stick and advanced mode
-        // NOTE: Use VM directly, not enableVirtualStick() which would cancel the loop we just started
-        virtualStickVM?.enableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) { /* SDK may report "already enabled" — not a real error */ }
-            },
-        )
-        virtualStickVM?.enableVirtualStickAdvancedMode()
+        // The primitives directly, not enableVirtualStick() which would cancel the loop we just
+        // started; acquireControl runs the same advanced-mode + enable sequence.
+        primitives?.acquireControl { }
 
         _isAltitudeReached = false
         val controlLoopHandler = Handler(Looper.getMainLooper())
@@ -946,9 +882,6 @@ object DroneController {
 
         // Capture initial yaw ONCE to prevent oscillation from compass noise
         val initialYaw = getHeading()
-
-        // Enable advanced Virtual Stick mode
-        virtualStickVM?.enableVirtualStickAdvancedMode()
 
         val runnable =
             object : Runnable {
@@ -981,19 +914,14 @@ object DroneController {
                     verticalSpeed = verticalSpeed.coerceIn(-maxVerticalSpeed, maxVerticalSpeed)
 
                     // Use initial yaw captured at start to prevent oscillation from compass noise
-                    val flightControlParam =
-                        VirtualStickFlightControlParam().apply {
-                            this.pitch = 0.0
-                            this.roll = 0.0
-                            this.yaw = initialYaw
-                            this.verticalThrottle = verticalSpeed
-                            this.verticalControlMode = VerticalControlMode.VELOCITY
-                            this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                            this.yawControlMode = YawControlMode.ANGLE
-                            this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                        }
-
-                    virtualStickVM?.sendVirtualStickAdvancedParam(flightControlParam)
+                    primitives?.send(
+                        FlightSetpoint(
+                            vertical = verticalSpeed,
+                            verticalReference = VerticalReference.UP_VELOCITY_MPS,
+                            yaw = initialYaw,
+                            yawReference = YawReference.HEADING_DEG,
+                        ),
+                    )
 
                     // Schedule the next update
                     controlLoopHandler.postDelayed(this, updateInterval)
@@ -1086,18 +1014,9 @@ object DroneController {
         var lastCommandedSpeed = 0.0
         var lastTickMs = 0L // SystemClock.elapsedRealtime() of the previous tick, 0 = first tick
 
-        virtualStickVM?.enableVirtualStickAdvancedMode()
-        // NOTE: Use VM directly, not enableVirtualStick() which would cancel the loop we just started
-        virtualStickVM?.enableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) {
-                    // SDK may report "already enabled" — not a real error
-                }
-            },
-        )
-        virtualStickVM?.enableVirtualStickAdvancedMode()
+        // The primitives directly, not enableVirtualStick() which would cancel the loop we just
+        // started; acquireControl runs the same advanced-mode + enable sequence.
+        primitives?.acquireControl { }
 
         // PID gains are all selected from the connected aircraft profile at runtime.
         val distancePID =
@@ -1111,7 +1030,6 @@ object DroneController {
         val yawPID = PID(yawPidKp(), 0.0000, 0.00, updateInterval / 1000, -maxYawRate to maxYawRate)
 
         val controlLoop = Handler(Looper.getMainLooper())
-        virtualStickVM?.enableVirtualStickAdvancedMode()
 
         // Cooldown: after reaching a waypoint, keep PID loop alive for this long
         // to allow the bridge to hot-swap the next target without a cold restart.
@@ -1220,22 +1138,18 @@ object DroneController {
                         return
                     }
 
-                    // DJI SDK V5 quirk: in BODY frame, the SDK's "pitch" field actually controls
-                    // lateral (left/right) movement and "roll" controls forward/backward. This is
-                    // the inverse of what the field names suggest. Confirmed empirically.
-                    val flightControlParam =
-                        VirtualStickFlightControlParam().apply {
-                            this.pitch = body.lateralSpeed
-                            this.roll = body.forwardSpeed
-                            this.yaw = angularVelocity
-                            this.verticalThrottle = target.altitude
-                            this.verticalControlMode = VerticalControlMode.POSITION
-                            this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                            this.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                            this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                        }
-
-                    virtualStickVM?.sendVirtualStickAdvancedParam(flightControlParam)
+                    // The BODY-frame field inversion (SDK "pitch" drives lateral motion) lives in
+                    // the adapter, so the setpoint is in Lyrebird's forward/right vocabulary.
+                    primitives?.send(
+                        FlightSetpoint(
+                            forwardMps = body.forwardSpeed,
+                            rightMps = body.lateralSpeed,
+                            vertical = target.altitude,
+                            verticalReference = VerticalReference.ALTITUDE_MSL_M,
+                            yaw = angularVelocity,
+                            yawReference = YawReference.RATE_CW_DPS,
+                        ),
+                    )
                     controlLoop.postDelayed(this, updateInterval.toLong())
                 }
             }
@@ -1341,20 +1255,11 @@ object DroneController {
         val maxYawRate = maxYawRateDegS() // degrees per second, from the active drone profile
         var lastCommandedSpeed = 0.0
         var lastControlMs = 0L // elapsedRealtime() of the last PID/setpoint update, 0 = first tick
-        var lastParam: VirtualStickFlightControlParam? = null // latest computed command, resent at 10 Hz
+        var lastParam: FlightSetpoint? = null // latest computed command, resent at 10 Hz
 
-        virtualStickVM?.enableVirtualStickAdvancedMode()
-        // NOTE: Use VM directly, not enableVirtualStick() which would cancel the loop we just started
-        virtualStickVM?.enableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) {
-                    // SDK may report "already enabled" — not a real error
-                }
-            },
-        )
-        virtualStickVM?.enableVirtualStickAdvancedMode()
+        // The primitives directly, not enableVirtualStick() which would cancel the loop we just
+        // started; acquireControl runs the same advanced-mode + enable sequence.
+        primitives?.acquireControl { }
 
         // --- Cross-track lateral control state (replaces speed-scaled bearing steering) ---
         // Roll-oscillation root cause: the old law lateralSpeed = targetSpeed*sin(bearing-yaw)
@@ -1389,7 +1294,6 @@ object DroneController {
         val yawPID = PID(yawPidKp(), 0.0000, 0.00, updateInterval / 1000, -maxYawRate to maxYawRate)
 
         val controlLoop = Handler(Looper.getMainLooper())
-        virtualStickVM?.enableVirtualStickAdvancedMode()
 
         // Cooldown: after reaching a waypoint, keep PID loop alive for this long
         // to allow the bridge to hot-swap the next target without a cold restart.
@@ -1420,7 +1324,7 @@ object DroneController {
                     // once per second — the setpoint only changes at 1 Hz but the drone keeps the
                     // commanded velocity the whole time.
                     if (lastControlMs != 0L && (nowMs - lastControlMs) < updateInterval.toLong()) {
-                        lastParam?.let { virtualStickVM?.sendVirtualStickAdvancedParam(it) }
+                        lastParam?.let { primitives?.send(it) }
                         controlLoop.postDelayed(this, sendIntervalMs)
                         return
                     }
@@ -1463,17 +1367,13 @@ object DroneController {
                             yawAligned = true
                         } else {
                             lastParam =
-                                VirtualStickFlightControlParam().apply {
-                                    this.pitch = 0.0
-                                    this.roll = 0.0
-                                    this.yaw = angularVelocity
-                                    this.verticalThrottle = target.altitude
-                                    this.verticalControlMode = VerticalControlMode.POSITION
-                                    this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                                    this.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                                    this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                                }
-                            lastParam?.let { virtualStickVM?.sendVirtualStickAdvancedParam(it) }
+                                FlightSetpoint(
+                                    vertical = target.altitude,
+                                    verticalReference = VerticalReference.ALTITUDE_MSL_M,
+                                    yaw = angularVelocity,
+                                    yawReference = YawReference.RATE_CW_DPS,
+                                )
+                            lastParam?.let { primitives?.send(it) }
                             controlLoop.postDelayed(this, sendIntervalMs)
                             return
                         }
@@ -1538,17 +1438,13 @@ object DroneController {
                             return
                         }
                         lastParam =
-                            VirtualStickFlightControlParam().apply {
-                                this.pitch = 0.0
-                                this.roll = 0.0
-                                this.yaw = finalAngularVelocity
-                                this.verticalThrottle = target.altitude
-                                this.verticalControlMode = VerticalControlMode.POSITION
-                                this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                                this.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                                this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                            }
-                        lastParam?.let { virtualStickVM?.sendVirtualStickAdvancedParam(it) }
+                            FlightSetpoint(
+                                vertical = target.altitude,
+                                verticalReference = VerticalReference.ALTITUDE_MSL_M,
+                                yaw = finalAngularVelocity,
+                                yawReference = YawReference.RATE_CW_DPS,
+                            )
+                        lastParam?.let { primitives?.send(it) }
                         controlLoop.postDelayed(this, sendIntervalMs)
                         return
                     }
@@ -1609,22 +1505,19 @@ object DroneController {
                     // Arrival (position + final-yaw) is handled by the Phase 3 block above, which
                     // early-returns. Reaching here means we are still translating (Phase 2).
 
-                    // DJI SDK V5 quirk: in BODY frame the SDK's "pitch" field controls lateral
-                    // movement and "roll" controls forward/backward, the inverse of what the names
-                    // suggest. Confirmed empirically, and shared with both waypoint controllers.
+                    // The BODY-frame field inversion (SDK "pitch" drives lateral motion) lives in
+                    // the adapter, so the setpoint is in Lyrebird's forward/right vocabulary.
                     lastParam =
-                        VirtualStickFlightControlParam().apply {
-                            this.pitch = lateralSpeed
-                            this.roll = forwardSpeed
-                            this.yaw = 0.0 // no yaw command during translation; heading set once in Phase 1
-                            this.verticalThrottle = target.altitude
-                            this.verticalControlMode = VerticalControlMode.POSITION
-                            this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                            this.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                            this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                        }
+                        FlightSetpoint(
+                            forwardMps = forwardSpeed,
+                            rightMps = lateralSpeed,
+                            vertical = target.altitude,
+                            verticalReference = VerticalReference.ALTITUDE_MSL_M,
+                            yaw = 0.0, // no yaw command during translation; heading set once in Phase 1
+                            yawReference = YawReference.RATE_CW_DPS,
+                        )
 
-                    lastParam?.let { virtualStickVM?.sendVirtualStickAdvancedParam(it) }
+                    primitives?.send(lastParam)
                     controlLoop.postDelayed(this, sendIntervalMs)
                 }
             }
@@ -1672,17 +1565,9 @@ object DroneController {
         val seq = _orbitSeq.incrementAndGet()
         _isOrbitComplete = false
 
-        virtualStickVM?.enableVirtualStickAdvancedMode()
-        // The VM directly rather than enableVirtualStick(), which would cancel the session just
-        // started — the same reason the waypoint controllers do it this way.
-        virtualStickVM?.enableVirtualStick(
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() { /* no-op */ }
-
-                override fun onFailure(error: IDJIError) { /* "already enabled" is not an error */ }
-            },
-        )
-        virtualStickVM?.enableVirtualStickAdvancedMode()
+        // The primitives directly rather than enableVirtualStick(), which would cancel the
+        // session just started — the same reason the waypoint controllers do it this way.
+        primitives?.acquireControl { }
 
         val controlLoop = Handler(Looper.getMainLooper())
         val updateInterval = 100L
@@ -1772,21 +1657,18 @@ object DroneController {
 
                     val body = WaypointControl.bodyVelocity(speed, velocity.directionDeg, heading)
 
-                    // DJI SDK V5 quirk: in BODY frame the SDK's "pitch" field controls lateral
-                    // movement and "roll" controls forward/backward, the inverse of what the names
-                    // suggest. Confirmed empirically, and shared with both waypoint controllers.
-                    val flightControlParam =
-                        VirtualStickFlightControlParam().apply {
-                            this.pitch = body.lateralSpeed
-                            this.roll = body.forwardSpeed
-                            this.yaw = angularVelocity
-                            this.verticalThrottle = targetAltitude
-                            this.verticalControlMode = VerticalControlMode.POSITION
-                            this.rollPitchControlMode = RollPitchControlMode.VELOCITY
-                            this.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                            this.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                        }
-                    virtualStickVM?.sendVirtualStickAdvancedParam(flightControlParam)
+                    // The BODY-frame field inversion (SDK "pitch" drives lateral motion) lives in
+                    // the adapter, so the setpoint is in Lyrebird's forward/right vocabulary.
+                    primitives?.send(
+                        FlightSetpoint(
+                            forwardMps = body.forwardSpeed,
+                            rightMps = body.lateralSpeed,
+                            vertical = targetAltitude,
+                            verticalReference = VerticalReference.ALTITUDE_MSL_M,
+                            yaw = angularVelocity,
+                            yawReference = YawReference.RATE_CW_DPS,
+                        ),
+                    )
                     controlLoop.postDelayed(this, updateInterval)
                 }
             }

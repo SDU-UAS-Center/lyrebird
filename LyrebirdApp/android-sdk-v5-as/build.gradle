@@ -49,6 +49,7 @@ def lyrebirdSourceIncludes = [
         'com/lyrebird/rc/logger/**/*.kt',
     'com/lyrebird/rc/mavlink/**/*.kt',
     'com/lyrebird/rc/perception/**/*.kt',
+    'com/lyrebird/rc/platform/**/*.kt',
         'com/lyrebird/rc/server/**/*.kt',
     'com/lyrebird/rc/settings/**/*.kt',
     'com/lyrebird/rc/telemetry/**/*.kt',
