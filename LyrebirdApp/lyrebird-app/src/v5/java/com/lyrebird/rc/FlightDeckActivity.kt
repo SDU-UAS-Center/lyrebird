@@ -34,15 +34,17 @@ import com.lyrebird.rc.controller.MavlinkMissionHost
 import com.lyrebird.rc.controller.MavlinkMissionPolicy
 import com.lyrebird.rc.controller.MavlinkMotionHost
 import com.lyrebird.rc.controller.MavlinkMotionPolicy
+import com.lyrebird.rc.controller.MavlinkPayloadHost
+import com.lyrebird.rc.controller.MavlinkPayloadPolicy
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
 import com.lyrebird.rc.controller.V5FlightSettingsActions
-import com.lyrebird.rc.controller.V5MavlinkCommandHost
-import com.lyrebird.rc.controller.V5MavlinkCommandSink
 import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.controller.V5MotionCommandPort
 import com.lyrebird.rc.controller.V5NativeMissionAdapter
+import com.lyrebird.rc.controller.V5PayloadCommandHost
+import com.lyrebird.rc.controller.V5PayloadCommandPort
 import com.lyrebird.rc.edge.DetectionRuntimeCallbacks
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
@@ -105,6 +107,7 @@ import com.lyrebird.rc.settings.SettingsSnapshot
 import com.lyrebird.rc.telemetry.AircraftFlightMode
 import com.lyrebird.rc.telemetry.AircraftTelemetryListener
 import com.lyrebird.rc.telemetry.GeoPoint3D
+import com.lyrebird.rc.telemetry.GeoPosition
 import com.lyrebird.rc.telemetry.ProcessTelemetryRuntimeRegistry
 import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
 import com.lyrebird.rc.telemetry.applyTo
@@ -458,10 +461,9 @@ class FlightDeckActivity :
         }
     }
 
-    private val v5MavlinkCommandAdapter by lazy {
-        V5MavlinkCommandSink(
-            object : V5MavlinkCommandHost {
-                override val mainHandler get() = this@FlightDeckActivity.mainHandler
+    private val v5PayloadCommandPort by lazy {
+        V5PayloadCommandPort(
+            object : V5PayloadCommandHost {
                 override val droneName get() = this@FlightDeckActivity.droneName
                 override val mediaVM get() = this@FlightDeckActivity.mediaVM
                 override val payloadWidgetVM get() = this@FlightDeckActivity.payloadWidgetVM
@@ -473,27 +475,6 @@ class FlightDeckActivity :
                 override val zoomKey get() = this@FlightDeckActivity.zoomKey
                 override val startRecording get() = this@FlightDeckActivity.startRecording
                 override val stopRecording get() = this@FlightDeckActivity.stopRecording
-                override var lrfDistanceMeters
-                    get() = this@FlightDeckActivity.lrfDistanceMeters
-                    set(value) {
-                        this@FlightDeckActivity.lrfDistanceMeters = value
-                    }
-                override var lrfTargetLocation
-                    get() = this@FlightDeckActivity.lrfTargetLocation
-                    set(value) {
-                        this@FlightDeckActivity.lrfTargetLocation = value
-                    }
-
-                override fun isMavlinkOriginTrusted() = ProcessMavlinkRuntimeRegistry.isTrustedOrigin()
-
-                override fun reportCaptureStarted() = ProcessMavlinkRuntimeRegistry.reportCaptureStarted()
-
-                override fun reportImageCaptured(
-                    success: Boolean,
-                    fileName: String,
-                ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(success, fileName)
-
-                override val captureExecutor get() = ProcessCaptureExecutorRegistry.executor()
                 override val settings get() = this@FlightDeckActivity.settings
 
                 override fun applyMavlinkParameter(
@@ -534,8 +515,41 @@ class FlightDeckActivity :
         )
     }
 
+    private val mavlinkPayloadPolicy by lazy {
+        MavlinkPayloadPolicy(
+            object : MavlinkPayloadHost {
+                override fun postToMain(block: () -> Unit) {
+                    mainHandler.post(block)
+                }
+
+                override fun runCapture(block: () -> Unit) {
+                    ProcessCaptureExecutorRegistry.executor().execute(block)
+                }
+
+                override fun reportCaptureStarted() = ProcessMavlinkRuntimeRegistry.reportCaptureStarted()
+
+                override fun reportImageCaptured(
+                    success: Boolean,
+                    fileName: String,
+                ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(success, fileName)
+
+                override fun publishLrfReading(
+                    distanceM: Double?,
+                    target: GeoPosition?,
+                ) {
+                    this@FlightDeckActivity.lrfDistanceMeters = distanceM
+                    if (target != null) {
+                        this@FlightDeckActivity.lrfTargetLocation =
+                            LocationCoordinate3D(target.latitudeDeg, target.longitudeDeg, target.altitudeAslM)
+                    }
+                }
+            },
+            v5PayloadCommandPort,
+        )
+    }
+
     private val mavlinkCommandSink: MavlinkCommandSink
-        get() = v5MavlinkCommandAdapter.commandSink
+        get() = mavlinkPayloadPolicy.sink
 
     private val mavlinkMotionPolicy by lazy {
         MavlinkMotionPolicy(
