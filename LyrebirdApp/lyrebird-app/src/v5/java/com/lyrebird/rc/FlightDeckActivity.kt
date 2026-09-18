@@ -33,7 +33,6 @@ import com.lyrebird.rc.controller.MavlinkFlightPolicy
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
-import com.lyrebird.rc.controller.SafetyLatchStore
 import com.lyrebird.rc.controller.V5FlightSettingsActions
 import com.lyrebird.rc.controller.V5MavlinkCommandHost
 import com.lyrebird.rc.controller.V5MavlinkCommandSink
@@ -103,7 +102,6 @@ import com.lyrebird.rc.telemetry.AircraftFlightMode
 import com.lyrebird.rc.telemetry.AircraftTelemetryListener
 import com.lyrebird.rc.telemetry.GeoPoint3D
 import com.lyrebird.rc.telemetry.ProcessTelemetryRuntimeRegistry
-import com.lyrebird.rc.telemetry.TelemetryCoordinator
 import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
 import com.lyrebird.rc.telemetry.applyTo
 import com.lyrebird.rc.telemetry.toFleetBeacon
@@ -268,7 +266,7 @@ class FlightDeckActivity :
 
     override val mainHandler = Handler(Looper.getMainLooper())
 
-    private val telemetryCoordinator = TelemetryCoordinator()
+    private val telemetryCoordinator get() = ProcessTelemetryRuntimeRegistry.telemetryCoordinator()
     private val aircraftTelemetry get() = ProcessTelemetryRuntimeRegistry.aircraftTelemetry()
 
     private val mediaVM: MediaVM get() = ProcessMediaRuntimeRegistry.mediaVM()
@@ -775,7 +773,6 @@ class FlightDeckActivity :
     private var flightStateSubscription: AutoCloseable? = null
 
     // Home point tracking
-    private var isHomePointSetLatch = false
 
     // ==================== AutoSensing (AI Detection) ====================
     private val isAutoSensingActive: Boolean
@@ -1067,14 +1064,9 @@ class FlightDeckActivity :
         }
 
     private fun setupControlAuthorityBanner() {
-        // The latch outlives the process: a restart is not a release, so the stored authority for
-        // this aircraft is read back here, before the command server can accept anything. The
-        // serial is only known once the SDK answers, so it is asked for at each read and written
-        // under whatever it is at the time; see AuthorityLatch.restore().
-        ControlAuthority.attachPersistence(
-            SafetyLatchStore(sharedPreferences),
-            aircraftSerial = { droneSerialNumber },
-        )
+        // The latch outlives the process and is restored by the telemetry runtime as soon as the
+        // SDK reports the serial (it owns the persistence attachment so that a command path with
+        // no screen still reads the right airframe's latch). This screen only draws the banner.
         ControlAuthority.listener =
             object : ControlAuthority.Listener {
                 override fun onAuthorityChanged(authority: ControlAuthority.Authority) {
@@ -1671,6 +1663,9 @@ class FlightDeckActivity :
 
     override fun setLrfTarget(target: GeoPoint3D?) {
         lrfTargetLocation = target?.let { LocationCoordinate3D(it.latitudeDeg, it.longitudeDeg, it.altitudeM) }
+        // The projection is what publishes the target on the telemetry frame; keep its copy in
+        // step even while this screen is the one that received the command.
+        ProcessTelemetryRuntimeRegistry.projection().lrfTarget = target
     }
 
     override fun hasThermalCamera(): Boolean =
@@ -3079,11 +3074,6 @@ class FlightDeckActivity :
                         droneSerialNumber = serialNumber?.trim()?.takeIf { it.isNotEmpty() } ?: "UNKNOWN"
                         Log.i(TAG, "Drone serial number: $droneSerialNumber")
                         LyrebirdFlightLogger.setVehicleSerial(droneSerialNumber)
-                        // The latch is per airframe, and this is the moment the airframe becomes
-                        // known: read its latch now, so a takeover recorded for it is in force
-                        // before its first command, and one recorded for another aircraft is left
-                        // where it belongs.
-                        ControlAuthority.restoreLatch()
                         DroneSettingsProfiles.onAircraftChanged(
                             sharedPreferences,
                             LyrebirdSettings.PER_DRONE_PROFILE_KEYS,
@@ -3139,35 +3129,6 @@ class FlightDeckActivity :
     ) = ProcessRoiRuntimeRegistry.start(latitudeDeg, longitudeDeg, altitudeM)
 
     private fun stopRoiTracking() = ProcessRoiRuntimeRegistry.stop()
-
-    private fun isHomeSet(): Boolean {
-        val shouldLatchHomePoint =
-            !isHomePointSetLatch &&
-                !aircraftTelemetry.readState().readings.flying &&
-                run {
-                    val home = aircraftTelemetry.getHomeLocation()
-                    val hasHomeCoordinates = home.latitude != 0.0 && home.longitude != 0.0
-                    if (!hasHomeCoordinates) {
-                        false
-                    } else {
-                        val current = aircraftTelemetry.getLocation3D()
-                        val distance =
-                            DroneController.calculateDistance(
-                                current.latitude,
-                                current.longitude,
-                                home.latitude,
-                                home.longitude,
-                            )
-                        distance < 0.5
-                    }
-                }
-
-        if (shouldLatchHomePoint) {
-            isHomePointSetLatch = true
-        }
-
-        return isHomePointSetLatch
-    }
 
     private fun getTelemetryJson(): String = telemetryCoordinator.getTelemetryJson()
 
@@ -3339,21 +3300,6 @@ class FlightDeckActivity :
             .getOrDefault(fallback)
 
     /**
-     * Whether a home point is somewhere rather than the SDK's unset value.
-     *
-     * Deliberately not the same question as [isHomeSet], which is a latch meaning "home was
-     * recorded on this flight". DJI knows where home is well before that closes, and the check
-     * that matters for arithmetic is whether the numbers are a place at all.
-     */
-    private fun hasRealHomeCoordinates(
-        latitude: Double,
-        longitude: Double,
-    ): Boolean =
-        (latitude != 0.0 || longitude != 0.0) &&
-            latitude in -90.0..90.0 &&
-            longitude in -180.0..180.0
-
-    /**
      * Stable identity for this device on the fleet mesh.
      *
      * Prefers the aircraft serial, which is immutable, already the key for per-drone settings
@@ -3397,7 +3343,9 @@ class FlightDeckActivity :
             deviceId = fleetDeviceId(),
             droneName = droneName,
             systemId = currentMavlinkSystemId(),
-            homeSet = isHomeSet(),
+            // The latch is maintained by the runtime projection (it survives this screen, as it
+            // should: home is recorded per flight, not per activity).
+            homeSet = telemetryCoordinator.homeSet,
             // The MediaMTX path this aircraft publishes to, resolved exactly as buildWhipUrl
             // resolves it, so a clash the dashboard would suffer is a clash the mesh can see.
             videoPath = droneName.trim().ifEmpty { LyrebirdSettings.DEFAULT_DRONE_NAME },
@@ -3522,7 +3470,7 @@ class FlightDeckActivity :
         return readings.toMavlinkSnapshot(
             MavlinkSnapshot(
                 droneName = droneName,
-                homeSet = isHomeSet(),
+                homeSet = telemetryCoordinator.homeSet,
                 manualOverrideActive = DroneController.isManualOverrideActive,
                 armedCommanded = armedCommanded,
                 // The sequencer flies through virtual stick, so the mode DJI reports (OFFBOARD) would
@@ -3873,47 +3821,10 @@ class FlightDeckActivity :
     }
 
     private fun rebuildRealTelemetryCache() {
-        val readings = aircraftTelemetry.readState().readings
-        readings.applyTo(telemetryCoordinator)
-        val location = readings.location
-        val homeLocation = readings.home
-        // Zero until home is a real place. DJI reports (0, 0) before it has a home point, and
-        // that is a real spot in the Atlantic: measuring to it produced a confident 2,559 km
-        // from a stationary aircraft, which is worse than reporting nothing because it looks
-        // like an answer.
-        telemetryCoordinator.distanceToHome =
-            if (
-                hasRealHomeCoordinates(homeLocation.latitudeDeg, homeLocation.longitudeDeg)
-            ) {
-                DroneController.calculateDistance(
-                    location.latitudeDeg,
-                    location.longitudeDeg,
-                    homeLocation.latitudeDeg,
-                    homeLocation.longitudeDeg,
-                )
-            } else {
-                0.0
-            }
-        telemetryCoordinator.waypointReached = DroneController.isWaypointReached()
-        telemetryCoordinator.intermediaryWaypointReached = DroneController.isIntermediaryWaypointReached()
-        telemetryCoordinator.yawReached = DroneController.isYawReached()
-        telemetryCoordinator.altitudeReached = DroneController.isAltitudeReached()
-        telemetryCoordinator.homeSet = isHomeSet()
-        telemetryCoordinator.waypointSeq = DroneController.getWaypointSeq()
-        telemetryCoordinator.yawSeq = DroneController.getYawSeq()
-        telemetryCoordinator.altitudeSeq = DroneController.getAltitudeSeq()
-        // A laser fix is a place on the globe, not a place relative to take-off, so it maps to the
-        // three-field point rather than to the aircraft's own position type.
-        telemetryCoordinator.lrfTarget =
-            lrfTargetLocation?.let {
-                GeoPoint3D(
-                    latitudeDeg = it.latitude,
-                    longitudeDeg = it.longitude,
-                    altitudeM = it.altitude,
-                )
-            }
-        telemetryCoordinator.isManualOverrideActive = DroneController.isManualOverrideActive
-        telemetryCoordinator.isAutoSensingActive = isAutoSensingActive
+        // The readings, mission latches and sensor flags are applied by the runtime projection —
+        // the same one that keeps the TCP frame moving with no screen attached. Re-applying here
+        // makes a settings change visible immediately rather than at the next telemetry event.
+        ProcessTelemetryRuntimeRegistry.projection().apply()
     }
 
     // ==================== HTTP Server ====================

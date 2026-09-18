@@ -18,6 +18,7 @@ import com.lyrebird.rc.mavlink.GimbalRotation
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
 import com.lyrebird.rc.telemetry.GeoPoint3D
+import com.lyrebird.rc.telemetry.TelemetryFeed
 import java.io.OutputStream
 import java.lang.ref.WeakReference
 
@@ -277,6 +278,9 @@ internal object ProcessNetworkRuntimeRegistry {
         callbacks: NetworkRuntimeCallbacks,
     ) = runtime.attach(context, host, sink, callbacks)
 
+    /** Installs the process-owned telemetry feed served when no screen is attached. */
+    fun attachTelemetryFeed(feed: TelemetryFeed) = runtime.attachTelemetryFeed(feed)
+
     fun start() = runtime.start()
 
     fun status() = runtime.status()
@@ -290,6 +294,7 @@ private class ProcessNetworkRuntime {
     private val hostBridge = RuntimeCommandHost()
     private val sinkBridge = RuntimeMavlinkCommandSink()
     private var callbacksRef: WeakReference<NetworkRuntimeCallbacks> = WeakReference(null)
+    private var telemetryFeed: TelemetryFeed? = null
     private var discovery: LyrebirdDiscoveryManager? = null
     private var session: LyrebirdSession? = null
 
@@ -304,17 +309,28 @@ private class ProcessNetworkRuntime {
         sinkBridge.attach(sink)
         callbacksRef = WeakReference(callbacks)
         if (discovery == null) {
-            discovery = LyrebirdDiscoveryManager(context.applicationContext) { callbacksRef.get()?.runtimeDroneSerial ?: host.droneName }
+            discovery = LyrebirdDiscoveryManager(context.applicationContext) { serialOrName() }
         }
     }
+
+    @Synchronized
+    fun attachTelemetryFeed(feed: TelemetryFeed) {
+        telemetryFeed = feed
+    }
+
+    private fun serialOrName(): String =
+        callbacksRef.get()?.runtimeDroneSerial
+            ?: telemetryFeed?.droneSerial
+            ?: hostBridge.droneName
 
     @Synchronized
     fun start(): LyrebirdSessionStatus {
         val existing = session
         if (existing != null && existing.status.isServing) return existing.status
         val telemetry =
-            TelemetryServer(TELEMETRY_PORT, { callbacksRef.get()?.telemetryJson() ?: "{}" }, {
+            TelemetryServer(TELEMETRY_PORT, { callbacksRef.get()?.telemetryJson() ?: telemetryFeed?.telemetryJson() ?: "{}" }, {
                 callbacksRef.get()?.gapTelemetryJson()
+                    ?: telemetryFeed?.gapTelemetryJson()
                     ?: "{}"
             }).apply {
                 onFirstClientConnected = { clientIp -> callbacksRef.get()?.onTelemetryClient(clientIp) }
@@ -327,6 +343,7 @@ private class ProcessNetworkRuntime {
                 advertiser =
                     DiscoveryAdvertiser(discovery ?: error("runtime not attached")) {
                         callbacksRef.get()?.runtimeDroneSerial
+                            ?: telemetryFeed?.droneSerial
                             ?: hostBridge.droneName
                     },
                 httpPort = HTTP_PORT,
