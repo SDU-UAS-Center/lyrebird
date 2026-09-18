@@ -118,7 +118,6 @@ import com.lyrebird.rc.telemetry.toMavlinkSnapshot
 import com.lyrebird.rc.util.NetworkUtils
 import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.webrtc.TelemetryProvider
-import com.lyrebird.rc.webrtc.V5NativeStreamingHost
 import com.lyrebird.rc.webrtc.WebRTCMediaOptions
 import com.lyrebird.rc.webrtc.WebRTCPeerFactory
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
@@ -737,54 +736,6 @@ class FlightDeckActivity :
         )
     }
 
-    private val nativeStreamingHost =
-        object : V5NativeStreamingHost {
-            override fun rtmpUrl(clientIp: String) = getRtmpUrl(clientIp)
-
-            override fun setRtmpUrl(url: String) = settings.setRtmpUrl(url)
-
-            override fun rtspPort() = settings.getRtspPort()
-
-            override fun setRtspPort(port: Int) = settings.setRtspPort(port)
-
-            override fun resolveRtspPort() = resolveRtspPortForStart()
-
-            override fun rtspUsername() = settings.getRtspUsername()
-
-            override fun rtspPassword() = settings.getRtspPassword()
-
-            override fun agoraChannel() = settings.getAgoraChannel()
-
-            override fun agoraToken() = settings.getAgoraToken()
-
-            override fun agoraUid() = settings.getAgoraUid()
-
-            override fun gbServerIp() = settings.getGbServerIp()
-
-            override fun gbServerPort() = settings.getGbServerPort()
-
-            override fun gbServerId() = settings.getGbServerId()
-
-            override fun gbAgentId() = settings.getGbAgentId()
-
-            override fun gbChannel() = settings.getGbChannel()
-
-            override fun gbLocalPort() = settings.getGbLocalPort()
-
-            override fun gbPassword() = settings.getGbPassword()
-
-            override fun onStatus(status: String) {
-                lastNativeStreamStatus = status
-                mainHandler.post { updateStreamingFooter() }
-            }
-
-            override fun onMessage(message: String) = showStreamToast(message)
-
-            override fun onConfigChanged() {
-                rebuildTelemetryCache()
-                updateStreamingFooter()
-            }
-        }
     override var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
 
     private val deviceStatusSource get() = ProcessTelemetryRuntimeRegistry.deviceStatusSource()
@@ -1189,15 +1140,6 @@ class FlightDeckActivity :
     private fun getRtmpUrl(clientIp: String): String {
         val stored = sharedPreferences.getString(LyrebirdSettings.PREF_RTMP_URL, "")?.trim().orEmpty()
         return stored.ifEmpty { "rtmp://$clientIp:1935/$droneName" }
-    }
-
-    private fun resolveRtspPortForStart(): Int {
-        val configuredPort = settings.getRtspPort()
-        if (!NetworkUtils.isPortInUse(configuredPort)) {
-            return configuredPort
-        }
-        val fallbackPorts = intArrayOf(18554, 28554, 38554)
-        return fallbackPorts.firstOrNull { !NetworkUtils.isPortInUse(it) } ?: configuredPort
     }
 
     private fun storeEdgeModelSelection(uri: Uri) {
@@ -2778,6 +2720,13 @@ class FlightDeckActivity :
         mainHandler.post { updateStreamingFooter() }
     }
 
+    override fun runtimeOnStreamingMessage(message: String) = showStreamToast(message)
+
+    override fun runtimeOnStreamingConfigChanged() {
+        rebuildTelemetryCache()
+        updateStreamingFooter()
+    }
+
     override fun runtimeRebuildTelemetryCache() {
         rebuildTelemetryCache()
     }
@@ -2905,7 +2854,7 @@ class FlightDeckActivity :
     override fun buildFleetBeaconForRuntime(): FleetBeacon? = buildFleetBeacon()
 
     private fun startServers() {
-        ProcessStreamingRuntimeRegistry.attach(applicationContext, this, nativeStreamingHost)
+        ProcessStreamingRuntimeRegistry.attach(applicationContext, this)
         ProcessNetworkRuntimeRegistry.attach(applicationContext, this, mavlinkCommandSink, this)
         val sessionStatus = ProcessNetworkRuntimeRegistry.start()
         Log.i(TAG, "Network session: ${sessionStatus.summary()}")
