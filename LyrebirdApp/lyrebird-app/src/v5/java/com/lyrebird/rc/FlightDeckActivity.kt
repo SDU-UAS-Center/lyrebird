@@ -2526,13 +2526,15 @@ class FlightDeckActivity :
             LyrebirdFlightLogger.logCommand(uri, postData)
         }
         ProcessCommandSurface.attachUi(this)
-        ProcessNetworkRuntimeRegistry.attach(applicationContext, ProcessCommandSurface, mavlinkCommandSink, this)
+        ProcessNetworkRuntimeRegistry.attachCallbacks(this)
+        // The session was brought up with the process (see ProcessAppRuntime); start() is
+        // idempotent while it is serving, and retries a session that failed to bind.
         val sessionStatus = ProcessNetworkRuntimeRegistry.start()
         Log.i(TAG, "Network session: ${sessionStatus.summary()}")
-        sessionStatus?.takeIf { it.blockedByAnotherSession }?.let {
+        sessionStatus.takeIf { it.blockedByAnotherSession }?.let {
             ToastUtils.showLongToast(it.summary())
         }
-        if (sessionStatus?.leaseHeld != true || !sessionStatus.isServing) {
+        if (!sessionStatus.leaseHeld || !sessionStatus.isServing) {
             Log.w(TAG, "Runtime startup skipped because this app does not own a serving session")
             ProcessStreamingRuntimeRegistry.detach(this)
             updateMavlinkHttpStatusView()
@@ -2609,9 +2611,10 @@ class FlightDeckActivity :
             // keeps serving through the surface itself — settings and telemetry no longer need a
             // screen — so there is no host to unplug here; only the weak UI reference goes away.
             ProcessCommandSurface.detachUi(this)
-            // Only this screen's callbacks: the media source and the command sinks are process-
-            // owned now, and detaching them here would unplug the command path the runtime is
-            // supposed to keep serving.
+            // Only this screen's callbacks: the session, the media source and the command sinks
+            // are process-owned now, and detaching them here would unplug the command path the
+            // runtime is supposed to keep serving.
+            ProcessNetworkRuntimeRegistry.detachCallbacks(this)
             ProcessMavlinkRuntimeRegistry.detachCallbacks(this)
             ProcessStreamingRuntimeRegistry.detach(this)
             ProcessObstacleRuntimeRegistry.detach(this)

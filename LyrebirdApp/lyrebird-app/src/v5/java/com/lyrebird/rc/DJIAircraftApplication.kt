@@ -19,6 +19,9 @@ class DJIAircraftApplication : DJIApplication() {
         Log.d("DJIAircraftApp", "attachBaseContext() called")
         try {
             super.attachBaseContext(base)
+            // Installed here, not in onCreate: the app-level runtime that starts before this
+            // class's onCreate reads the application context through it.
+            AppContextHolder.install(this)
             Log.d("DJIAircraftApp", "super.attachBaseContext() completed")
             com.cySdkyc.clx.Helper.install(this)
             Log.d("DJIAircraftApp", "Helper.install() completed")
@@ -32,7 +35,6 @@ class DJIAircraftApplication : DJIApplication() {
         Log.d("DJIAircraftApp", "DJIAircraftApplication onCreate() called")
         try {
             super.onCreate()
-            AppContextHolder.install(this)
             installStrictModeInDebugBuilds()
             Log.d("DJIAircraftApp", "DJIAircraftApplication onCreate() completed successfully")
         } catch (e: Exception) {

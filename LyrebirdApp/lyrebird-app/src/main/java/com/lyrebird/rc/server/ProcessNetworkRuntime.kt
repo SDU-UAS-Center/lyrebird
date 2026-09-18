@@ -30,12 +30,21 @@ internal object ProcessNetworkRuntimeRegistry {
     @Volatile
     var commandLogger: ((uri: String, postData: String) -> Unit)? = null
 
-    fun attach(
+    /**
+     * Brings the session up with the process, before a screen exists: the aircraft serves its
+     * ground station from launch, and keeps serving while its screen is closed or restarting.
+     */
+    fun attachSession(
         context: Context,
         host: LyrebirdCommandHost,
         sink: MavlinkCommandSink,
-        callbacks: NetworkRuntimeCallbacks,
-    ) = runtime.attach(context, host, sink, callbacks)
+    ) = runtime.attachSession(context, host, sink)
+
+    /** Attaches the screen that shows session state; identity-guarded against stale detaches. */
+    fun attachCallbacks(callbacks: NetworkRuntimeCallbacks) = runtime.attachCallbacks(callbacks)
+
+    /** Drops only this screen's callbacks; the session and command path are process-owned. */
+    fun detachCallbacks(callbacks: NetworkRuntimeCallbacks) = runtime.detachCallbacks(callbacks)
 
     /** Installs the process-owned telemetry feed served when no screen is attached. */
     fun attachTelemetryFeed(feed: TelemetryFeed) = runtime.attachTelemetryFeed(feed)
@@ -45,8 +54,6 @@ internal object ProcessNetworkRuntimeRegistry {
     fun status() = runtime.status()
 
     fun hasTelemetryClients() = runtime.hasTelemetryClients()
-
-    fun detach(host: LyrebirdCommandHost) = runtime.detach(host)
 }
 
 private class ProcessNetworkRuntime {
@@ -58,18 +65,26 @@ private class ProcessNetworkRuntime {
     private var session: LyrebirdSession? = null
 
     @Synchronized
-    fun attach(
+    fun attachSession(
         context: Context,
         host: LyrebirdCommandHost,
         sink: MavlinkCommandSink,
-        callbacks: NetworkRuntimeCallbacks,
     ) {
         hostBridge.attach(host)
         sinkBridge.attach(sink)
-        callbacksRef = WeakReference(callbacks)
         if (discovery == null) {
             discovery = LyrebirdDiscoveryManager(context.applicationContext) { serialOrName() }
         }
+    }
+
+    @Synchronized
+    fun attachCallbacks(callbacks: NetworkRuntimeCallbacks) {
+        callbacksRef = WeakReference(callbacks)
+    }
+
+    @Synchronized
+    fun detachCallbacks(callbacks: NetworkRuntimeCallbacks) {
+        if (callbacksRef.get() === callbacks) callbacksRef = WeakReference(null)
     }
 
     @Synchronized
@@ -117,10 +132,4 @@ private class ProcessNetworkRuntime {
     fun status() = session?.status ?: LyrebirdSessionStatus()
 
     fun hasTelemetryClients() = session?.hasTelemetryClients() == true
-
-    @Synchronized
-    fun detach(host: LyrebirdCommandHost) {
-        hostBridge.detach(host)
-        callbacksRef.clear()
-    }
 }

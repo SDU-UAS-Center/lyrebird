@@ -82,6 +82,7 @@ class DroneSettingsProfilesTest {
     internal class FakePrefs(initial: Map<String, Any>) : SharedPreferences {
         private val store = initial.toMutableMap()
         private val removed = Any()
+        private val listeners = mutableSetOf<SharedPreferences.OnSharedPreferenceChangeListener>()
 
         override fun getAll(): MutableMap<String, *> = store
         override fun getString(key: String, defValue: String?): String? = store[key] as? String ?: defValue
@@ -96,11 +97,15 @@ class DroneSettingsProfilesTest {
         override fun edit(): SharedPreferences.Editor = Editor()
         override fun registerOnSharedPreferenceChangeListener(
             listener: SharedPreferences.OnSharedPreferenceChangeListener
-        ) = Unit
+        ) {
+            listeners += listener
+        }
 
         override fun unregisterOnSharedPreferenceChangeListener(
             listener: SharedPreferences.OnSharedPreferenceChangeListener
-        ) = Unit
+        ) {
+            listeners -= listener
+        }
 
         private inner class Editor : SharedPreferences.Editor {
             private val pending = mutableMapOf<String, Any>()
@@ -152,10 +157,15 @@ class DroneSettingsProfilesTest {
             }
 
             override fun apply() {
+                val changed = pending.keys.toList()
                 pending.forEach { (key, value) ->
                     if (value === removed) store.remove(key) else store[key] = value
                 }
                 pending.clear()
+                // Real listeners fire per key on apply; keep that so runtime wiring is testable.
+                changed.forEach { key ->
+                    listeners.toList().forEach { listener -> listener.onSharedPreferenceChanged(this@FakePrefs, key) }
+                }
             }
         }
     }
