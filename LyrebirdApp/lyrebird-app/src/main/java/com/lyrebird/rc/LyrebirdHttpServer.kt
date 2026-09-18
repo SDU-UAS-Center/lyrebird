@@ -4,8 +4,6 @@ import android.os.Handler
 import android.util.Log
 import android.widget.Switch
 import com.lyrebird.rc.controller.ControlAuthority
-import com.lyrebird.rc.controller.DroneController
-import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.logger.LyrebirdFlightLogger
 import com.lyrebird.rc.mavlink.GimbalRotation
 import com.lyrebird.rc.mavlink.GimbalRotationMode
@@ -735,7 +733,7 @@ internal class SimpleHttpServer(
                         !ControlAuthority.authorizeControlCommand(request.source) ->
                             host.media.sendErrorResponse("REJECTED: Safety Computer is in control.", outputStream)
                         fileName.isEmpty() ->
-                            Payload.sendErrorResponse(outputStream, "Expected body '<fileName>'")
+                            host.media.sendErrorResponse("Expected body '<fileName>'", outputStream)
                         else -> host.media.sendMediaFile(fileName, outputStream)
                     }
                     clientSocket.close()

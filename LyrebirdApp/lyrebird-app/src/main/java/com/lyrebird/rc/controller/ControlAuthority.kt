@@ -52,6 +52,17 @@ object ControlAuthority {
     var listener: Listener? = null
 
     /**
+     * Runs once, at the moment the Safety Computer's first command latches authority to SAFETY.
+     *
+     * What "stop and hold" means is the hardware side's business — cancelling the app's control
+     * loop, releasing the SDK's virtual stick — so the host installs it. Keeping it as a hook is
+     * what lets this policy object compile without an SDK and lets a test assert the takeover
+     * instead of flying it. The hook runs under this object's lock, like every other transition
+     * here; installing another one while a takeover is running is not a supported operation.
+     */
+    internal var takeoverHandler: (() -> Unit)? = null
+
+    /**
      * Gives the latch somewhere to live between runs, and the aircraft to key it on.
      *
      * Until this is called the latch is in-memory, which is what the tests and any host without
@@ -95,7 +106,7 @@ object ControlAuthority {
         if (decision == AuthorityLatch.Decision.ALLOWED_TAKEOVER) {
             // Safety has seized control: stop whatever the Pilot was flying so the aircraft
             // holds position until the Safety Computer issues its own commands.
-            DroneController.onSafetyTakeover()
+            takeoverHandler?.invoke()
         }
         return decision != AuthorityLatch.Decision.REJECTED
     }
