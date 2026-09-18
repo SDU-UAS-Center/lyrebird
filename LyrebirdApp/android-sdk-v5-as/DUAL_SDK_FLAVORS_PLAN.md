@@ -397,6 +397,10 @@ policy/workflow classes should return to shared code after their SDK access has 
 - Resolve and inspect the documented V4.18 dependencies in an isolated bootstrap/bench step.
   Pin the resolved version and inspect duplicate classes, native ABI/page size, merged manifests,
   SDK auto-start components and key requirements. Never load V4 and V5 in one test APK.
+  The 2026-09-18 bench record is [V4_FEASIBILITY.md](V4_FEASIBILITY.md): 4.18 resolves and
+  builds in this toolchain, its Java API is shell-loaded (`compileOnly` provided jar,
+  `com.cySdkyc.clx.Helper`), and the merged SDK components, native ABIs and page alignment are
+  recorded there.
 - Use the same V5 phone/Android baseline, with an explicitly selected V4 aircraft/controller/
   firmware. Prove registration/reconnect and decoded video on that tuple before committing to
   the full V4 flight rollout. A missing V4 key blocks registration, not neutral interface work.
