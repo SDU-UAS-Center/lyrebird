@@ -69,6 +69,9 @@ internal class V5AircraftTelemetrySource : AircraftTelemetrySource {
         if (connected) registerGenerationListeners()
     }
 
+    /** Whether the SDK currently reports the aircraft connected; cheap enough for hot paths. */
+    fun isConnected(): Boolean = aircraftConnected
+
     /**
      * Register [listener] for readings and flight-state events.
      *

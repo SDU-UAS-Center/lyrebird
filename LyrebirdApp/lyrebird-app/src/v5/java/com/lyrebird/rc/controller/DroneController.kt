@@ -978,7 +978,8 @@ object DroneController {
         val updateInterval = 100.0 // Nominal update period (ms); real dt is measured each tick.
         val maxYawRate = maxYawRateDegS() // degrees per second, from the active drone profile
         var lastCommandedSpeed = 0.0
-        var lastTickMs = 0L // SystemClock.elapsedRealtime() of the previous tick, 0 = first tick
+        // The tick's measured, clamped timestep — see LoopTiming for why it is measured and clamped.
+        val timing = LoopTiming(nominalIntervalMs = updateInterval.toLong(), maxDtSec = 0.5)
 
         // The primitives directly, not enableVirtualStick() which would cancel the loop we just
         // started; acquireControl runs the same advanced-mode + enable sequence.
@@ -1020,17 +1021,11 @@ object DroneController {
                         return
                     }
 
-                    // Measure the real timestep instead of assuming updateInterval. The loop runs on
-                    // the main Looper, whose cadence drifts under load; clamp so a stalled thread can't
-                    // inject a huge dt spike into the PID derivative/integral or the accel limiter.
-                    val nowMs = android.os.SystemClock.elapsedRealtime()
-                    val dtSec =
-                        if (lastTickMs == 0L) {
-                            updateInterval / 1000.0
-                        } else {
-                            ((nowMs - lastTickMs) / 1000.0).coerceIn(0.02, 0.5)
-                        }
-                    lastTickMs = nowMs
+                    // Measure the real timestep instead of assuming updateInterval; LoopTiming owns
+                    // the clamp that keeps a stalled main Looper from spiking the PID or the
+                    // acceleration limiter.
+                    val nowMs = SystemClock.elapsedRealtime()
+                    val dtSec = timing.nextDtSec(nowMs)
 
                     // A hot-swapped target is a discontinuous setpoint — clear PID history once so the
                     // jump in distance/yaw error doesn't produce an integral/derivative kick.
@@ -1220,7 +1215,10 @@ object DroneController {
         // between PID updates — this kills the once-per-second stutter.
         val maxYawRate = maxYawRateDegS() // degrees per second, from the active drone profile
         var lastCommandedSpeed = 0.0
-        var lastControlMs = 0L // elapsedRealtime() of the last PID/setpoint update, 0 = first tick
+        // The control tick's measured, clamped timestep; see LoopTiming. A longer ceiling than the
+        // waypoint loops': the send path below re-sends the last setpoint every sendIntervalMs, so
+        // a long gap between control ticks cannot leave the sticks unrefreshed for the watchdog.
+        val controlTiming = LoopTiming(nominalIntervalMs = updateInterval.toLong(), maxDtSec = 2.0)
         var lastParam: FlightSetpoint? = null // latest computed command, resent at 10 Hz
 
         // The primitives directly, not enableVirtualStick() which would cancel the loop we just
@@ -1284,26 +1282,20 @@ object DroneController {
                         return
                     }
 
-                    val nowMs = android.os.SystemClock.elapsedRealtime()
+                    val nowMs = SystemClock.elapsedRealtime()
                     // Between PID updates: just re-send the latest command so the SDK watchdog never
                     // zeros the sticks. This is what makes the motion continuous instead of stuttering
                     // once per second — the setpoint only changes at 1 Hz but the drone keeps the
                     // commanded velocity the whole time.
-                    if (lastControlMs != 0L && (nowMs - lastControlMs) < updateInterval.toLong()) {
+                    val sinceLastControlMs = controlTiming.elapsedSinceLastTickMs(nowMs)
+                    if (sinceLastControlMs != null && sinceLastControlMs < updateInterval.toLong()) {
                         lastParam?.let { primitives?.send(it) }
                         controlLoop.postDelayed(this, sendIntervalMs)
                         return
                     }
 
-                    // Control tick: measure real elapsed time since the last PID update. Clamp so a
-                    // stalled main Looper can't inject a huge dt spike into the PID or accel limiter.
-                    val dtSec =
-                        if (lastControlMs == 0L) {
-                            updateInterval / 1000.0
-                        } else {
-                            ((nowMs - lastControlMs) / 1000.0).coerceIn(0.02, 2.0)
-                        }
-                    lastControlMs = nowMs
+                    // Control tick: LoopTiming measures and clamps the real elapsed time.
+                    val dtSec = controlTiming.nextDtSec(nowMs)
 
                     // A hot-swapped target is a discontinuous setpoint — clear PID history once so the
                     // jump in distance/yaw error doesn't produce an integral/derivative kick. Also drop
@@ -1544,7 +1536,7 @@ object DroneController {
         val initialHeading = getHeading()
 
         var lastCommandedSpeed = 0.0
-        var lastTickMs = 0L
+        val timing = LoopTiming(nominalIntervalMs = updateInterval, maxDtSec = 0.5)
         var travelledDeg = 0.0
         var lastBearingDeg = Double.NaN
 
@@ -1556,14 +1548,8 @@ object DroneController {
                         return
                     }
 
-                    val nowMs = android.os.SystemClock.elapsedRealtime()
-                    val dtSec =
-                        if (lastTickMs == 0L) {
-                            updateInterval / 1000.0
-                        } else {
-                            ((nowMs - lastTickMs) / 1000.0).coerceIn(0.02, 0.5)
-                        }
-                    lastTickMs = nowMs
+                    val nowMs = SystemClock.elapsedRealtime()
+                    val dtSec = timing.nextDtSec(nowMs)
 
                     val position = getLocation3D()
                     val heading = getHeading()

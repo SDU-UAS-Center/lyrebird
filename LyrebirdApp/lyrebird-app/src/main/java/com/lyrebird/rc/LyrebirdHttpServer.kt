@@ -235,16 +235,11 @@ internal class LyrebirdHttpCommandHandler(
             },
             // The detected control profile carries the payload index and the drop widget indices
             // (RIGHT + Unlock 3 / All_Down 5 on the M300 SkyPort payload, PORT_4 on the M400, null
-            // where no droppable payload exists). dropPayload pulses unlock then release.
+            // where no droppable payload exists). dropPayload pulses unlock then release; the
+            // profile-dependent prose rides on the command result so this route table stays
+            // unaware of which aircraft is connected.
             "/send/drop" to { _ ->
-                val profile = DroneControlProfiles.activeProfile()
-                val indexType = profile.payloadIndexType
-                when {
-                    indexType == null ->
-                        "REJECTED: ${profile.displayName} has no payload drop port configured."
-                    commandSink.dropPayload().outcome == MavlinkCommandOutcome.ACCEPTED -> "Payload dropped on $indexType"
-                    else -> "Payload drop failed"
-                }
+                commandSink.dropPayload().detail ?: "Payload drop failed"
             },
             "/send/gotoYaw" to { postData ->
                 val yaw = postData.split(",")[0].toDouble()

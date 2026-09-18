@@ -3,7 +3,6 @@ package com.lyrebird.rc.perception
 import android.content.SharedPreferences
 import android.os.SystemClock
 import android.util.Log
-import com.lyrebird.rc.controller.DroneController
 import dji.v5.manager.aircraft.perception.PerceptionManager
 import dji.v5.manager.aircraft.perception.data.ObstacleData
 import dji.v5.manager.aircraft.perception.listener.ObstacleDataListener
@@ -71,8 +70,35 @@ internal object ObstacleGuard {
     /** Fired on the SDK's callback thread after the guard has stopped the aircraft. */
     var onBrake: ((BrakeEvent) -> Unit)? = null
 
-    /** Supplies the aircraft's current velocity and heading. Set by the host before [start]. */
-    var motionProvider: (() -> Motion)? = null
+    /**
+     * Supplies the aircraft's current velocity and heading, or null when the runtime cannot say.
+     *
+     * Null is a real answer, not a value: zeroed motion reads as "hovering" to the brake
+     * arithmetic, and a missing observation must not become a stationary aircraft it can brake
+     * on. Set by the host before [start].
+     */
+    var motionProvider: (() -> Motion?)? = null
+
+    /**
+     * Whether Lyrebird is flying on its own authority right now, asked freshly on every sweep.
+     *
+     * The providers are asked per sweep rather than sampled at [start] so the guard follows a
+     * session through a safety takeover or an override change. Null is a real answer — "cannot
+     * say" — and is treated as a no: a guard that is not told who is flying must not stop a
+     * flight.
+     */
+    var autonomousMotionProvider: (() -> Boolean?)? = null
+
+    /** Whether the physical RC pilot has taken the sticks, asked freshly on every sweep. */
+    var manualOverrideProvider: (() -> Boolean?)? = null
+
+    /**
+     * Stops the autonomous motion this guard is allowed to stop (cancels the app's control loop).
+     *
+     * Set by the host alongside [motionProvider]. Absent means the guard has no way to stop
+     * anything, so it will not latch or report a brake it cannot perform.
+     */
+    var stopMotion: (() -> Unit)? = null
 
     /**
      * Half-angle searched around the direction of travel, mirroring [ObstacleBrake]'s
@@ -208,9 +234,11 @@ internal object ObstacleGuard {
                 velocityEastMps = motion.velocityEastMps,
                 velocityDownMps = motion.velocityDownMps,
                 headingDeg = motion.headingDeg,
+                // Asked per sweep: the app is flying on its own authority only when it says so and
+                // the pilot has not taken over. Either question unanswered means no.
                 autonomousMotionActive =
-                    DroneController.isAutonomousFlightActive &&
-                        !DroneController.isManualOverrideActive,
+                    autonomousMotionProvider?.invoke() == true &&
+                        manualOverrideProvider?.invoke() == false,
                 marginM = marginM,
             )
         if (!decision.shouldBrake) return
@@ -222,6 +250,13 @@ internal object ObstacleGuard {
         decision: BrakeDecision,
         reading: ObstacleReading,
     ) {
+        // No stopper means no brake: latching or reporting one would claim the aircraft was
+        // stopped when it is still moving, and every reader of this state trusts that claim.
+        val stop =
+            stopMotion ?: run {
+                Log.w(TAG, "Obstacle brake due, but no motion stopper is wired; not braking")
+                return
+            }
         latchedUntilElapsedMs = SystemClock.elapsedRealtime() + BRAKE_LATCH_MS
         val event =
             BrakeEvent(
@@ -253,7 +288,7 @@ internal object ObstacleGuard {
         // Cancels the PID loop and zeroes the sticks, so the aircraft holds position. Virtual
         // stick is deliberately left enabled: dropping it would hand control back mid-air, and the
         // next command should be able to fly without re-arming anything.
-        runCatching { DroneController.cancelActiveControlLoop() }
+        runCatching { stop() }
             .onFailure { error -> Log.e(TAG, "Could not stop the control loop: ${error.message}") }
         onBrake?.invoke(event)
     }

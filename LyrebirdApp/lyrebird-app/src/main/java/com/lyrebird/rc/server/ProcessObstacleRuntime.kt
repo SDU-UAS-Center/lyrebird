@@ -18,7 +18,20 @@ data class ObstacleRuntimeBrake(
 )
 
 internal interface ObstacleRuntimeCallbacks {
-    fun runtimeObstacleMotion(): ObstacleRuntimeMotion
+    /**
+     * The aircraft's current motion, or null when the runtime cannot say — a detached UI must not
+     * be answered with zeroes, because zeroes read as "hovering" to the guard.
+     */
+    fun runtimeObstacleMotion(): ObstacleRuntimeMotion?
+
+    /** Whether the app is commanding autonomous motion right now. */
+    fun runtimeAutonomousMotionActive(): Boolean
+
+    /** Whether the physical RC pilot has the sticks. */
+    fun runtimeManualOverrideActive(): Boolean
+
+    /** Cancel the app's active control loop, the same stop [ObstacleGuard] applies on a brake. */
+    fun runtimeStopAutonomousMotion()
 
     fun runtimeOnObstacleBrake(event: ObstacleRuntimeBrake)
 }
@@ -63,8 +76,11 @@ private class ProcessObstacleRuntime {
                     velocityDownMps = it.velocityDownMps,
                     headingDeg = it.headingDeg,
                 )
-            } ?: ObstacleGuard.Motion(0.0, 0.0, 0.0, 0.0)
+            }
         }
+        ObstacleGuard.autonomousMotionProvider = { callbacksRef.get()?.runtimeAutonomousMotionActive() }
+        ObstacleGuard.manualOverrideProvider = { callbacksRef.get()?.runtimeManualOverrideActive() }
+        ObstacleGuard.stopMotion = { callbacksRef.get()?.runtimeStopAutonomousMotion() }
         ObstacleGuard.onBrake = { event ->
             callbacksRef.get()?.runtimeOnObstacleBrake(
                 ObstacleRuntimeBrake(

@@ -2804,7 +2804,10 @@ class FlightDeckActivity :
         }
     }
 
-    override fun runtimeObstacleMotion(): ObstacleRuntimeMotion {
+    override fun runtimeObstacleMotion(): ObstacleRuntimeMotion? {
+        // Null while the link is down: no observation is available, and the guard must not read a
+        // missing one as a hovering aircraft it can brake.
+        if (!aircraftTelemetry.isConnected()) return null
         val speed = aircraftTelemetry.getSpeed()
         return ObstacleRuntimeMotion(
             velocityNorthMps = speed.x,
@@ -2812,6 +2815,14 @@ class FlightDeckActivity :
             velocityDownMps = speed.z,
             headingDeg = aircraftTelemetry.getHeading(),
         )
+    }
+
+    override fun runtimeAutonomousMotionActive(): Boolean = DroneController.isAutonomousFlightActive
+
+    override fun runtimeManualOverrideActive(): Boolean = DroneController.isManualOverrideActive
+
+    override fun runtimeStopAutonomousMotion() {
+        DroneController.cancelActiveControlLoop()
     }
 
     override fun runtimeOnObstacleBrake(event: ObstacleRuntimeBrake) {

@@ -270,9 +270,11 @@ internal class V5MavlinkCommandSink(
                 val profile = DroneControlProfiles.activeProfile()
                 val indexType =
                     profile.payloadIndexType
+                        // The detail is the HTTP surface's prose, composed here where the profile
+                        // is known — the route table on the other side of the port is SDK-free.
                         ?: return CommandResult(
                             MavlinkCommandOutcome.UNSUPPORTED,
-                            "${profile.displayName} has no payload drop port",
+                            "REJECTED: ${profile.displayName} has no payload drop port configured.",
                         )
                 val dropped =
                     Payload.dropPayload(
@@ -282,9 +284,9 @@ internal class V5MavlinkCommandSink(
                         profile.dropReleaseButtonIndex,
                     )
                 return if (dropped) {
-                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                    CommandResult(MavlinkCommandOutcome.ACCEPTED, "Payload dropped on $indexType")
                 } else {
-                    CommandResult(MavlinkCommandOutcome.FAILED, "Drop refused by the payload")
+                    CommandResult(MavlinkCommandOutcome.FAILED, "Payload drop failed")
                 }
             }
 
