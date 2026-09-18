@@ -22,9 +22,14 @@ internal interface MavlinkPayloadHost {
     /** Run a shutter capture on a worker; blocking the caller is never acceptable. */
     fun runCapture(block: () -> Unit)
 
-    fun reportCaptureStarted()
+    /**
+     * Announce a shutter to the MAVLink endpoint, returning the operation id; zero when no
+     * endpoint is attached, which makes the result land on nothing, exactly as before.
+     */
+    fun reportCaptureStarted(): Long
 
     fun reportImageCaptured(
+        captureId: Long,
         success: Boolean,
         fileName: String,
     )
@@ -276,7 +281,10 @@ internal class MavlinkPayloadPolicy(
              * instead of reported — the shutter still fires.
              */
             override fun captureImage(): CommandResult {
-                host.reportCaptureStarted()
+                // The id ties the result to this operation: the worker may finish after the
+                // endpoint restarted, and the result must then land on nothing rather than on a
+                // session that never tripped this shutter.
+                val captureId = host.reportCaptureStarted()
                 host.runCapture {
                     val file =
                         runCatching { payload.capturePhoto() }
@@ -285,7 +293,7 @@ internal class MavlinkPayloadPolicy(
                     if (file == null) {
                         Log.w(TAG, "Capture produced no file")
                     }
-                    host.reportImageCaptured(file != null, file.orEmpty())
+                    host.reportImageCaptured(captureId, file != null, file.orEmpty())
                 }
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }

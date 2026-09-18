@@ -527,12 +527,13 @@ class FlightDeckActivity :
                     ProcessCaptureExecutorRegistry.executor().execute(block)
                 }
 
-                override fun reportCaptureStarted() = ProcessMavlinkRuntimeRegistry.reportCaptureStarted()
+                override fun reportCaptureStarted(): Long = ProcessMavlinkRuntimeRegistry.reportCaptureStarted()
 
                 override fun reportImageCaptured(
+                    captureId: Long,
                     success: Boolean,
                     fileName: String,
-                ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(success, fileName)
+                ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(captureId, success, fileName)
 
                 override fun publishLrfReading(
                     distanceM: Double?,

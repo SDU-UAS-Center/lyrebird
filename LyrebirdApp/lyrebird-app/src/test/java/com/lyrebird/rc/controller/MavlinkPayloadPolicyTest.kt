@@ -226,14 +226,14 @@ class MavlinkPayloadPolicyTest {
         val result = sink.captureImage()
 
         assertEquals(MavlinkCommandOutcome.ACCEPTED, result.outcome)
-        assertEquals(listOf("captureStarted", "captured:true:DSC00001.JPG"), host.events)
+        assertEquals(listOf("captureStarted", "captured:42:true:DSC00001.JPG"), host.events)
 
         host.events.clear()
         payload.photoFile = null
 
         sink.captureImage()
 
-        assertEquals(listOf("captureStarted", "captured:false:"), host.events)
+        assertEquals(listOf("captureStarted", "captured:42:false:"), host.events)
     }
 
     @Test
@@ -258,15 +258,17 @@ class MavlinkPayloadPolicyTest {
             block()
         }
 
-        override fun reportCaptureStarted() {
+        override fun reportCaptureStarted(): Long {
             events += "captureStarted"
+            return 42L
         }
 
         override fun reportImageCaptured(
+            captureId: Long,
             success: Boolean,
             fileName: String,
         ) {
-            events += "captured:$success:$fileName"
+            events += "captured:$captureId:$success:$fileName"
         }
 
         override fun publishLrfReading(

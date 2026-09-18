@@ -182,6 +182,13 @@ object Payload {
     @Volatile
     private var collectingEvents = false
 
+    // Serializes shutter correlations. The event queue and the collection flag above are
+    // process-wide — the SDK's new-file push names no operation — so two overlapping captures
+    // would steal each other's signals: one clearing the queue the other is waiting on, one
+    // disarming the other's collection. A capture is a shutter plus a card read, so serializing
+    // them is the operation correlation the SDK itself cannot provide.
+    private val captureLock = Any()
+
     private fun setupNewMediaListener() {
         if (newMediaListenerRegistered) return
         keyNewlyGeneratedMediaFile.listen(this) { newValue: GeneratedMediaFileInfo? ->
@@ -339,14 +346,17 @@ object Payload {
         val elapsedMs: Long,
     )
 
-    // Fault barrier: the DJI SDK does not document an exception hierarchy for these calls, so a
-    // narrower catch would let an unanticipated type escape. This boundary must degrade, not throw.
-    @Suppress("TooGenericExceptionCaught")
     // Trip one shutter on the payload and return ALL media files it produced (thermal R-JPEG plus,
     // when visible storage is enabled, the wide/zoom visual photo). Blocking, call from a worker
     // thread. mediaVM must be init with SD card storage and the LEFT_OR_MAIN component index
-    // (done in the host activity's onCreate).
-    private fun captureNewMediaFiles(mediaVM: MediaVM): List<MediaFile> {
+    // (done in the host activity's onCreate). One capture at a time — see [captureLock].
+    private fun captureNewMediaFiles(mediaVM: MediaVM): List<MediaFile> =
+        synchronized(captureLock) { captureNewMediaFilesOneAtATime(mediaVM) }
+
+    // Fault barrier: the DJI SDK does not document an exception hierarchy for these calls, so a
+    // narrower catch would let an unanticipated type escape. This boundary must degrade, not throw.
+    @Suppress("TooGenericExceptionCaught")
+    private fun captureNewMediaFilesOneAtATime(mediaVM: MediaVM): List<MediaFile> {
         try {
             setupNewMediaListener()
             val keyBaseline = (keyNewlyGeneratedMediaFile.get() ?: latestGeneratedMediaInfo)?.index
@@ -551,7 +561,9 @@ object Payload {
             // strictly BELOW the baseline can only be the oldest files (wrong order). A shot that
             // simply hasn't landed yet leaves max == baseline, so this never misfires on a slow
             // write. After a few such pulls, drop to full pulls for the rest of the session.
-            if (narrow && baselineIndex != null && data.size >= CAPTURE_PULL_COUNT &&
+            if (narrow &&
+                baselineIndex != null &&
+                data.size >= CAPTURE_PULL_COUNT &&
                 (data.maxOfOrNull { it.fileIndex } ?: Int.MAX_VALUE) < baselineIndex
             ) {
                 if (++emptyNarrowPulls >= NARROW_PULL_FALLBACK_TRIES) {

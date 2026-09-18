@@ -148,9 +148,11 @@ class MavlinkTelemetryEndpoint(
         java.util.concurrent.atomic
             .AtomicInteger(0)
 
-    /** True while a shutter is in flight, so capture status reports it honestly. */
-    @Volatile
-    private var capturing = false
+    /**
+     * The shutter operations this endpoint has in flight, so capture status reports them honestly
+     * and a result from a session this endpoint never served is refused rather than announced.
+     */
+    private val captures = CaptureTracker()
 
     /**
      * Announce the result of a shutter that was started earlier.
@@ -159,12 +161,20 @@ class MavlinkTelemetryEndpoint(
      * takes seconds, and the endpoint's receive thread cannot block for that long. The command is
      * acknowledged immediately and the outcome arrives here, which is exactly the split
      * CAMERA_IMAGE_CAPTURED exists for: `capture_result` reports whether the photo happened.
+     *
+     * [captureId] is the token [reportCaptureStarted] handed out. A result this endpoint never
+     * started — because the shutter was commanded before an endpoint restart — is logged and
+     * dropped: announcing it here would read as this session's photo.
      */
     fun reportImageCaptured(
+        captureId: Long,
         success: Boolean,
         fileName: String,
     ) {
-        capturing = false
+        if (!captures.finished(captureId)) {
+            Log.w(TAG, "Refusing capture result for an operation this endpoint never started (id=$captureId)")
+            return
+        }
         val index = if (success) imageCount.incrementAndGet() else imageCount.get()
         val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
         sendOnce(
@@ -181,10 +191,11 @@ class MavlinkTelemetryEndpoint(
         Log.i(TAG, "Image captured: success=$success file=$fileName index=$index")
     }
 
-    /** Called when a shutter is started, so capture status shows it in progress. */
-    fun reportCaptureStarted() {
-        capturing = true
-    }
+    /**
+     * Called when a shutter is started, so capture status shows it in progress; the returned id
+     * identifies the operation for [reportImageCaptured].
+     */
+    fun reportCaptureStarted(): Long = captures.started()
 
     /**
      * Binds the listen socket and starts streaming.
@@ -492,7 +503,7 @@ class MavlinkTelemetryEndpoint(
                 MavlinkMessages.cameraCaptureStatus(
                     timeBootMs(),
                     it.isRecording,
-                    capturing,
+                    captures.isCapturing,
                     imageCount.get(),
                 )
             },
@@ -1352,7 +1363,7 @@ class MavlinkTelemetryEndpoint(
             MavlinkMessages.cameraCaptureStatus(
                 timeBootMs(),
                 snapshot.isRecording,
-                capturing,
+                captures.isCapturing,
                 imageCount.get(),
             ),
             fromCamera = true,

@@ -246,12 +246,13 @@ internal object ProcessMavlinkRuntimeRegistry {
 
     fun isTrustedOrigin() = runtime.isTrustedOrigin()
 
-    fun reportCaptureStarted() = runtime.reportCaptureStarted()
+    fun reportCaptureStarted(): Long = runtime.reportCaptureStarted()
 
     fun reportImageCaptured(
+        captureId: Long,
         success: Boolean,
         fileName: String,
-    ) = runtime.reportImageCaptured(success, fileName)
+    ) = runtime.reportImageCaptured(captureId, success, fileName)
 }
 
 private class ProcessMavlinkRuntime {
@@ -339,15 +340,14 @@ private class ProcessMavlinkRuntime {
 
     fun isTrustedOrigin() = endpoint?.isTrustedOrigin == true
 
-    fun reportCaptureStarted() {
-        endpoint?.reportCaptureStarted()
-    }
+    fun reportCaptureStarted(): Long = endpoint?.reportCaptureStarted() ?: 0L
 
     fun reportImageCaptured(
+        captureId: Long,
         success: Boolean,
         fileName: String,
     ) {
-        endpoint?.reportImageCaptured(success, fileName)
+        endpoint?.reportImageCaptured(captureId, success, fileName)
     }
 
     companion object {
