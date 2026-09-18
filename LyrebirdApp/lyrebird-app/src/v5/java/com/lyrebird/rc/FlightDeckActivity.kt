@@ -29,21 +29,10 @@ import androidx.core.app.ActivityCompat
 import com.lyrebird.rc.DJIAircraftMainActivity
 import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
-import com.lyrebird.rc.controller.MavlinkFlightPolicy
-import com.lyrebird.rc.controller.MavlinkMissionHost
-import com.lyrebird.rc.controller.MavlinkMissionPolicy
-import com.lyrebird.rc.controller.MavlinkMotionHost
-import com.lyrebird.rc.controller.MavlinkMotionPolicy
-import com.lyrebird.rc.controller.MavlinkPayloadHost
-import com.lyrebird.rc.controller.MavlinkPayloadPolicy
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
 import com.lyrebird.rc.controller.V5FlightSettingsActions
-import com.lyrebird.rc.controller.V5MotionCommandPort
-import com.lyrebird.rc.controller.V5NativeMissionAdapter
-import com.lyrebird.rc.controller.V5PayloadCommandHost
-import com.lyrebird.rc.controller.V5PayloadCommandPort
 import com.lyrebird.rc.edge.DetectionRuntimeCallbacks
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.DetectionWire
@@ -57,7 +46,6 @@ import com.lyrebird.rc.fleet.FleetStripView
 import com.lyrebird.rc.logger.LyrebirdFlightLogger
 import com.lyrebird.rc.mavlink.CommandResult
 import com.lyrebird.rc.mavlink.DetectedTargetSnapshot
-import com.lyrebird.rc.mavlink.Mav
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
 import com.lyrebird.rc.mavlink.MavlinkEndpointConfig
@@ -67,7 +55,6 @@ import com.lyrebird.rc.mavlink.MavlinkSnapshot
 import com.lyrebird.rc.mavlink.MavlinkSystemId
 import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MissionExecutor
-import com.lyrebird.rc.mavlink.MissionItem
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.mavlink.WaypointRejection
@@ -76,18 +63,19 @@ import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
 import com.lyrebird.rc.perception.V5ObstacleSensorPort
 import com.lyrebird.rc.server.CommandSurfaceUi
-import com.lyrebird.rc.server.MavlinkMediaSource
 import com.lyrebird.rc.server.MavlinkRuntimeCallbacks
 import com.lyrebird.rc.server.NetworkRuntimeCallbacks
 import com.lyrebird.rc.server.ObstacleRuntimeBrake
 import com.lyrebird.rc.server.ObstacleRuntimeCallbacks
 import com.lyrebird.rc.server.ObstacleRuntimeMotion
-import com.lyrebird.rc.server.ProcessCaptureExecutorRegistry
 import com.lyrebird.rc.server.ProcessCommandSurface
+import com.lyrebird.rc.server.ProcessFlightCommands
+import com.lyrebird.rc.server.ProcessMavlinkParameters
 import com.lyrebird.rc.server.ProcessMavlinkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessMediaRuntimeRegistry
 import com.lyrebird.rc.server.ProcessNetworkRuntimeRegistry
 import com.lyrebird.rc.server.ProcessObstacleRuntimeRegistry
+import com.lyrebird.rc.server.ProcessPayloadCommands
 import com.lyrebird.rc.server.ProcessPayloadRuntimeRegistry
 import com.lyrebird.rc.server.ProcessSettingsBackupRuntimeRegistry
 import com.lyrebird.rc.server.ProcessStreamingRuntimeRegistry
@@ -108,7 +96,6 @@ import com.lyrebird.rc.settings.SettingsPageActions
 import com.lyrebird.rc.telemetry.AircraftFlightMode
 import com.lyrebird.rc.telemetry.AircraftTelemetryListener
 import com.lyrebird.rc.telemetry.GeoPoint3D
-import com.lyrebird.rc.telemetry.GeoPosition
 import com.lyrebird.rc.telemetry.ProcessTelemetryRuntimeRegistry
 import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
 import com.lyrebird.rc.telemetry.applyTo
@@ -139,8 +126,6 @@ import dji.sdk.keyvalue.value.common.CameraLensType
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.DoubleRect
 import dji.sdk.keyvalue.value.common.EmptyMsg
-import dji.sdk.keyvalue.value.common.LocationCoordinate3D
-import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
 import dji.sdk.keyvalue.value.product.ProductType
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
@@ -157,7 +142,6 @@ import dji.v5.ux.detection.DetectionOverlayView
 import dji.v5.ux.map.MapWidget
 import dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Lyrebird Default Layout Activity
@@ -187,16 +171,6 @@ class FlightDeckActivity :
         /** Match the normal status size so an alert does not resize the status strip. */
         private const val DRONE_STATUS_ALERT_TEXT_SIZE_SP = 11f
 
-        /** How long to wait for a DJI action callback before reporting the command failed. */
-        private const val ACTION_TIMEOUT_MS = 2_000L
-
-        /** How long to wait for a take-off to finish before abandoning a requested climb. */
-        private const val TAKEOFF_CLIMB_TIMEOUT_MS = 30_000L
-        private const val TAKEOFF_POLL_MS = 500L
-
-        /** Longest a single mission leg may take before the plan is abandoned. */
-        private const val MISSION_LEG_TIMEOUT_MS = 300_000L
-
         /**
          * Below this, a DO_REPOSITION coordinate is read as "unset" rather than as a position.
          *
@@ -216,28 +190,9 @@ class FlightDeckActivity :
          * a circle smaller than the error in measuring it.
          */
         private const val MIN_ORBIT_RADIUS_M = 5.0
-        private const val MISSION_POLL_MS = 200L
 
         /** Beyond this, a reported gimbal angle is DJI's unset marker rather than a direction. */
         private const val MAX_PLAUSIBLE_GIMBAL_DEG = 200.0
-
-        /**
-         * The settings a ground station may write over MAVLink.
-         *
-         * Numeric settings only, and deliberately so: PARAM_SET carries a float, and the string
-         * settings behind the rest of the /send/set* surface — the drone's name, the video
-         * source, the MediaMTX address — have no honest float encoding. Those stay on HTTP until
-         * they earn a proper home, rather than being smuggled through as magic numbers.
-         */
-        private const val PARAM_RTH_ALTITUDE = "LB_RTH_ALT"
-        private const val PARAM_MAX_HEIGHT = "LB_MAX_HEIGHT"
-        private const val PARAM_MAX_DISTANCE = "LB_MAX_DIST"
-        private const val PARAM_DISTANCE_LIMIT = "LB_DIST_LIMIT_EN"
-        private const val PARAM_WEBRTC_FPS = "LB_RTC_FPS"
-        private const val PARAM_DETECTIONS = "LB_DETECT_EN"
-        private const val PARAM_EDGE_CONFIDENCE = "LB_EDGE_CONF"
-        private const val PARAM_SURFACE_H264_ENCODER = "LB_SURFACE_H264"
-        private const val PARAM_MAVLINK_SYSTEM_ID = "LB_MAV_SYSID"
 
         /**
          * The string-valued settings, carried by the extended parameter protocol.
@@ -452,169 +407,20 @@ class FlightDeckActivity :
         }
     }
 
-    private val v5PayloadCommandPort by lazy {
-        V5PayloadCommandPort(
-            object : V5PayloadCommandHost {
-                override val droneName get() = this@FlightDeckActivity.droneName
-                override val mediaVM get() = this@FlightDeckActivity.mediaVM
-                override val payloadWidgetVM get() = this@FlightDeckActivity.payloadWidgetVM
-                override var gimbalKey
-                    get() = this@FlightDeckActivity.gimbalKey
-                    set(value) {
-                        this@FlightDeckActivity.gimbalKey = value
-                    }
-                override val zoomKey get() = this@FlightDeckActivity.zoomKey
-                override val startRecording get() = this@FlightDeckActivity.startRecording
-                override val stopRecording get() = this@FlightDeckActivity.stopRecording
-                override val settings get() = this@FlightDeckActivity.settings
-
-                override fun applyMavlinkParameter(
-                    name: String,
-                    value: Float,
-                ) = this@FlightDeckActivity.applyMavlinkParameter(name, value)
-
-                override fun awaitAction(key: DJIKey.ActionKey<EmptyMsg, EmptyMsg>) = this@FlightDeckActivity.awaitAction(key)
-
-                override fun readThermalMaxTempNow() = this@FlightDeckActivity.readThermalMaxTempNow()
-
-                override fun setAutoSensingSwitchChecked(checked: Boolean) = this@FlightDeckActivity.setAutoSensingSwitchChecked(checked)
-
-                override fun setDetectionSource(value: String) = this@FlightDeckActivity.setDetectionSource(value)
-
-                override fun setDroneName(value: String) = ProcessCommandSurface.setDroneName(value)
-
-                override fun setMediamtxServer(value: String) = ProcessCommandSurface.setMediamtxServer(value)
-
-                override fun setStreamingMode(mode: StreamingMode) = this@FlightDeckActivity.setStreamingMode(mode)
-
-                override fun setVideoSource(value: String) = ProcessCommandSurface.setVideoSource(value)
-
-                override fun setWebRtcResolution(value: String) = ProcessCommandSurface.setWebRtcResolution(value)
-
-                override fun startAutoSensing() = ProcessCommandSurface.startAutoSensing()
-
-                override fun stopAutoSensing() = ProcessCommandSurface.stopAutoSensing()
-
-                override fun startRoiTracking(
-                    latitudeDeg: Double,
-                    longitudeDeg: Double,
-                    altitudeM: Double,
-                ) = this@FlightDeckActivity.startRoiTracking(latitudeDeg, longitudeDeg, altitudeM)
-
-                override fun stopRoiTracking() = this@FlightDeckActivity.stopRoiTracking()
-            },
-        )
-    }
-
-    private val mavlinkPayloadPolicy by lazy {
-        MavlinkPayloadPolicy(
-            object : MavlinkPayloadHost {
-                override fun postToMain(block: () -> Unit) {
-                    mainHandler.post(block)
-                }
-
-                override fun runCapture(block: () -> Unit) {
-                    ProcessCaptureExecutorRegistry.executor().execute(block)
-                }
-
-                override fun reportCaptureStarted(): Long = ProcessMavlinkRuntimeRegistry.reportCaptureStarted()
-
-                override fun reportImageCaptured(
-                    captureId: Long,
-                    success: Boolean,
-                    fileName: String,
-                ) = ProcessMavlinkRuntimeRegistry.reportImageCaptured(captureId, success, fileName)
-
-                override fun publishLrfReading(
-                    distanceM: Double?,
-                    target: GeoPosition?,
-                ) {
-                    this@FlightDeckActivity.lrfDistanceMeters = distanceM
-                    if (target != null) {
-                        this@FlightDeckActivity.lrfTargetLocation =
-                            LocationCoordinate3D(target.latitudeDeg, target.longitudeDeg, target.altitudeAslM)
-                    }
-                }
-            },
-            v5PayloadCommandPort,
-        )
-    }
-
     private val mavlinkCommandSink: MavlinkCommandSink
-        get() = mavlinkPayloadPolicy.sink
+        get() = ProcessPayloadCommands.sink
+
+    private val mavlinkMotionSink: MavlinkMotionSink
+        get() = ProcessFlightCommands.motionSink
+
+    private val mavlinkMissionSink: MavlinkMissionSink
+        get() = ProcessFlightCommands.missionSink
 
     /** One sensor registration for the guard; attaching twice must not leak a second listener. */
     private val v5ObstacleSensorPort = V5ObstacleSensorPort()
 
-    private val mavlinkMotionPolicy by lazy {
-        MavlinkMotionPolicy(
-            object : MavlinkMotionHost {
-                override var armedCommanded
-                    get() = this@FlightDeckActivity.armedCommanded
-                    set(value) {
-                        this@FlightDeckActivity.armedCommanded = value
-                    }
-
-                override fun isMavlinkOriginTrusted() = ProcessMavlinkRuntimeRegistry.isTrustedOrigin()
-
-                override fun climbAfterTakeoff(altitudeMeters: Double) = this@FlightDeckActivity.climbAfterTakeoff(altitudeMeters)
-
-                override fun mavlinkFlightGate() = this@FlightDeckActivity.mavlinkFlightGate()
-
-                override fun supersedeMission(reason: String) = this@FlightDeckActivity.supersedeMission(reason)
-
-                override fun currentAltitudeM() = aircraftTelemetry.getLocation3D().altitude
-
-                override fun currentHeadingDeg() = aircraftTelemetry.getHeading()
-
-                override fun defaultCruiseSpeedMps() = DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
-            },
-            V5MotionCommandPort,
-        )
-    }
-
-    private val mavlinkMotionSink: MavlinkMotionSink
-        get() = mavlinkMotionPolicy.sink
-
-    private val mavlinkMissionPolicy by lazy {
-        MavlinkMissionPolicy(
-            object : MavlinkMissionHost {
-                override fun mavlinkFlightGate() = this@FlightDeckActivity.mavlinkFlightGate()
-
-                override fun setCameraMode(mode: Int) = this@FlightDeckActivity.setCameraMode(mode)
-
-                override fun defaultCruiseSpeedMps() = DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
-
-                override fun postToMain(block: () -> Unit) {
-                    mainHandler.post(block)
-                }
-
-                override fun isTakeoffStillClimbing() = DroneController.droneStatus == DroneController.DroneStatus.TAKING_OFF
-
-                override fun startNativeMission(
-                    items: List<MissionItem>,
-                    onProgress: (Int) -> Unit,
-                    onFinished: (Boolean) -> Unit,
-                ) = V5NativeMissionAdapter.start(items, onProgress, onFinished)
-            },
-            V5MotionCommandPort,
-            mavlinkMotionSink,
-            mavlinkCommandSink,
-            aircraftTelemetry,
-        )
-    }
-
-    private val mavlinkMissionSink: MavlinkMissionSink
-        get() = mavlinkMissionPolicy.sink
-
     // Servers
 
-    private val mavlinkMediaSource =
-        object : MavlinkMediaSource {
-            override fun listFiles(): List<Pair<String, Long>> = Payload.listMediaFiles(mediaVM)
-
-            override fun readFileBytes(name: String): ByteArray? = Payload.downloadMediaBytes(mediaVM, name)
-        }
     private var videoSettingRestartScheduled = false
 
     private var droneSerialNumber: String = "UNKNOWN"
@@ -778,13 +584,6 @@ class FlightDeckActivity :
 
     // ==================== End AutoSensing Fields ====================
 
-    // var, not val: on the M400 these are rebound to LEFT_OR_MAIN once the main-camera video is up
-    // (see rebindGimbalKeysForM400). Other aircraft keep the default no-index binding.
-    var gimbalKey: DJIKey.ActionKey<GimbalAngleRotation, EmptyMsg> = GimbalKey.KeyRotateByAngle.create()
-    val zoomKey: DJIKey<Double> = CameraKey.KeyCameraZoomRatios.create()
-    val startRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg> = CameraKey.KeyStartRecord.create()
-    val stopRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg> = CameraKey.KeyStopRecord.create()
-
     // Aircraft idle (low-power / eco) detection.
     // DJI exposes no arming/eco key here (KeyAreMotorsOn is unreliable — it reports true/null in
     // the low-power standby, so it never goes false when the aircraft is genuinely idle). Idle is
@@ -805,18 +604,6 @@ class FlightDeckActivity :
 
     @Volatile private var idleOverlayVisible = false
     private val showIdleOverlayRunnable = Runnable { onIdleDetectDebounceElapsed() }
-
-    @Volatile var lrfTargetLocation: LocationCoordinate3D? = null
-
-    /**
-     * Range from the last laser lock, in metres, or null when it has not locked.
-     *
-     * Kept beside the target point because DISTANCE_SENSOR reports the range and
-     * LYREBIRD_STATUS reports where that range landed; both come from the same reading, and
-     * publishing one without the other would let them drift apart.
-     */
-    @Volatile
-    private var lrfDistanceMeters: Double? = null
 
     private val productTypeKey: DJIKey<ProductType> = ProductKey.KeyProductType.create()
     private val flightControllerConnectionKey: DJIKey<Boolean> = FlightControllerKey.KeyConnection.create()
@@ -1424,8 +1211,9 @@ class FlightDeckActivity :
     // M400-only: rebind the gimbal keys to PORT_3 and point the RC at the PORT_3 gimbal so the
     // physical dial/sticks drive it. Called 10s after the first PORT_3 frame.
     private fun initialiseM400Gimbal() {
-        gimbalKey = GimbalKey.KeyRotateByAngle.create(ComponentIndexType.PORT_3)
-        aircraftTelemetry.gimbalRotationKey = gimbalKey
+        val reboundGimbalKey = GimbalKey.KeyRotateByAngle.create(ComponentIndexType.PORT_3)
+        ProcessPayloadCommands.rebindGimbalKey(reboundGimbalKey)
+        aircraftTelemetry.gimbalRotationKey = reboundGimbalKey
         aircraftTelemetry.gimbalAttitudeKey = GimbalKey.KeyGimbalAttitude.create(ComponentIndexType.PORT_3)
         aircraftTelemetry.gimbalJointAttitudeKey = GimbalKey.KeyGimbalJointAttitude.create(ComponentIndexType.PORT_3)
         aircraftTelemetry.gimbalModeKey = GimbalKey.KeyGimbalMode.create(ComponentIndexType.PORT_3)
@@ -1550,9 +1338,8 @@ class FlightDeckActivity :
     }
 
     fun setLrfTarget(target: GeoPoint3D?) {
-        lrfTargetLocation = target?.let { LocationCoordinate3D(it.latitudeDeg, it.longitudeDeg, it.altitudeM) }
-        // The projection is what publishes the target on the telemetry frame; keep its copy in
-        // step even while this screen is the one that received the command.
+        // The projection is the process's copy — the same one the MAVLink snapshot reads with no
+        // screen attached; keep it in step while this screen received the command.
         ProcessTelemetryRuntimeRegistry.projection().lrfTarget = target
     }
 
@@ -2443,38 +2230,6 @@ class FlightDeckActivity :
         preferSdCardStorage(KeyManager.getInstance().getValue(cameraStorageInfosKey))
     }
 
-    /**
-     * Switch the camera between stills and video, from a plan's MAV_CMD_SET_CAMERA_MODE.
-     *
-     * MAV_CAMERA_MODE's survey mode is stills flown on a grid, which is a property of the flight
-     * rather than of the camera, so DJI has nothing separate to put it in and it maps to stills.
-     */
-    private fun setCameraMode(mavCameraMode: Int) {
-        val mode =
-            when (mavCameraMode) {
-                Mav.CAMERA_MODE_VIDEO -> CameraMode.VIDEO_NORMAL
-                Mav.CAMERA_MODE_IMAGE, Mav.CAMERA_MODE_IMAGE_SURVEY -> CameraMode.PHOTO_NORMAL
-                else -> {
-                    Log.w(TAG, "Unknown MAV_CAMERA_MODE $mavCameraMode; camera left as it is")
-                    return
-                }
-            }
-        if (KeyManager.getInstance().getValue(cameraModeKey) == mode) return
-        KeyManager.getInstance().setValue(
-            cameraModeKey,
-            mode,
-            object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    Log.i(TAG, "Camera mode set to $mode by plan")
-                }
-
-                override fun onFailure(error: IDJIError) {
-                    Log.w(TAG, "Plan could not set camera mode: ${error.description()}")
-                }
-            },
-        )
-    }
-
     private fun setDefaultVideoMode() {
         val currentMode = KeyManager.getInstance().getValue(cameraModeKey)
         if (currentMode == CameraMode.VIDEO_NORMAL) {
@@ -2798,7 +2553,7 @@ class FlightDeckActivity :
         // Start the process-scoped MAVLink endpoint (no-op unless enabled by preference).
         ProcessMavlinkRuntimeRegistry.attach(
             this,
-            mavlinkMediaSource,
+            ProcessPayloadCommands.mediaSource,
             mavlinkCommandSink,
             mavlinkMotionSink,
             mavlinkMissionSink,
@@ -2854,13 +2609,10 @@ class FlightDeckActivity :
             // keeps serving through the surface itself — settings and telemetry no longer need a
             // screen — so there is no host to unplug here; only the weak UI reference goes away.
             ProcessCommandSurface.detachUi(this)
-            ProcessMavlinkRuntimeRegistry.detach(
-                this,
-                mavlinkMediaSource,
-                mavlinkCommandSink,
-                mavlinkMotionSink,
-                mavlinkMissionSink,
-            )
+            // Only this screen's callbacks: the media source and the command sinks are process-
+            // owned now, and detaching them here would unplug the command path the runtime is
+            // supposed to keep serving.
+            ProcessMavlinkRuntimeRegistry.detachCallbacks(this)
             ProcessStreamingRuntimeRegistry.detach(this)
             ProcessObstacleRuntimeRegistry.detach(this)
             ProcessSettingsBackupRuntimeRegistry.detach(this)
@@ -3025,15 +2777,6 @@ class FlightDeckActivity :
     }
 
     // ==================== Telemetry Data ====================
-
-    /**
-     * Set when a ground station's ARM command was accepted. DJI has no arming state — motors
-     * spin only when a takeoff actually runs — so the heartbeat otherwise never reports armed and
-     * QGroundControl's arm wait times out with "vehicle rejected arming" while the aircraft is
-     * already taking off. Cleared by a DISARM, and the armed flag also stands on real motor
-     * activity regardless of this.
-     */
-    @Volatile private var armedCommanded = false
 
     private fun startRoiTracking(
         latitudeDeg: Double,
@@ -3378,21 +3121,21 @@ class FlightDeckActivity :
      */
     private fun buildMavlinkSnapshot(): MavlinkSnapshot {
         val readings = aircraftTelemetry.readState().readings
-        val lrfTarget = lrfTargetLocation
+        val projection = ProcessTelemetryRuntimeRegistry.projection()
 
         return readings.toMavlinkSnapshot(
             MavlinkSnapshot(
                 droneName = droneName,
                 homeSet = telemetryCoordinator.homeSet,
                 manualOverrideActive = DroneController.isManualOverrideActive,
-                armedCommanded = armedCommanded,
+                armedCommanded = ProcessFlightCommands.armedCommanded,
                 // The sequencer flies through virtual stick, so the mode DJI reports (OFFBOARD) would
                 // hide a mission that is actually under way; the heartbeat prefers MISSION instead.
                 missionActive = mavlinkMissionSink.isRunning,
-                lrfDistanceM = lrfDistanceMeters,
-                lrfTargetLatitudeDeg = lrfTarget?.latitude,
-                lrfTargetLongitudeDeg = lrfTarget?.longitude,
-                lrfTargetAltitudeM = lrfTarget?.altitude,
+                lrfDistanceM = projection.lrfDistanceM,
+                lrfTargetLatitudeDeg = projection.lrfTarget?.latitudeDeg,
+                lrfTargetLongitudeDeg = projection.lrfTarget?.longitudeDeg,
+                lrfTargetAltitudeM = projection.lrfTarget?.altitudeM,
                 waypointReached = DroneController.isWaypointReached(),
                 waypointSeq = DroneController.getWaypointSeq(),
                 yawReached = DroneController.isYawReached(),
@@ -3427,116 +3170,6 @@ class FlightDeckActivity :
         MavlinkVideoStream.fromWhipUrl(ProcessStreamingRuntimeRegistry.currentWhipUrl(), droneName)
 
     /**
-     * Apply one parameter write from a ground station.
-     *
-     * An allowlist, not a passthrough. Most of the published list is read-only by nature — PID
-     * gains belong to the control profile, and the PX4 compatibility parameters are constants
-     * that exist only to satisfy QGroundControl's setup checks. Writing those would either do
-     * nothing or quietly change flight behaviour from a settings dialog, so anything not named
-     * here is refused rather than accepted and dropped.
-     */
-    private fun applyMavlinkParameter(
-        name: String,
-        value: Float,
-    ): CommandResult =
-        when (name) {
-            PARAM_MAX_HEIGHT ->
-                awaitParameterWrite { done ->
-                    DroneController.setMaxFlightHeight(value.toInt())
-                    done(true)
-                }
-
-            PARAM_MAX_DISTANCE ->
-                awaitParameterWrite { done ->
-                    DroneController.setMaxFlightDistance(value.toInt())
-                    done(true)
-                }
-
-            PARAM_DISTANCE_LIMIT ->
-                awaitParameterWrite { done ->
-                    DroneController.setDistanceLimitEnabled(value >= 0.5f)
-                    done(true)
-                }
-
-            PARAM_WEBRTC_FPS ->
-                if (ProcessCommandSurface.setWebRtcFps(value.toInt())) {
-                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
-                } else {
-                    CommandResult(MavlinkCommandOutcome.DENIED, "Unsupported frame rate")
-                }
-
-            PARAM_DETECTIONS -> {
-                setDetectionsEnabled(value >= 0.5f)
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            }
-
-            PARAM_SURFACE_H264_ENCODER -> {
-                setDjiSurfaceH264Encoder(value >= 0.5f)
-                CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            }
-
-            PARAM_MAVLINK_SYSTEM_ID -> {
-                val systemId = value.toInt()
-                if (value != systemId.toFloat() || !setMavlinkSystemId(systemId)) {
-                    CommandResult(
-                        MavlinkCommandOutcome.DENIED,
-                        "Use 0 for automatic or 1-99 for a manual vehicle ID",
-                    )
-                } else {
-                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
-                }
-            }
-
-            PARAM_EDGE_CONFIDENCE ->
-                if (ProcessCommandSurface.setEdgeConfidence(value)) {
-                    CommandResult(MavlinkCommandOutcome.ACCEPTED)
-                } else {
-                    CommandResult(MavlinkCommandOutcome.DENIED, "Threshold out of range")
-                }
-
-            PARAM_RTH_ALTITUDE -> {
-                val altitude = value.toInt()
-                if (altitude <= 0) {
-                    CommandResult(MavlinkCommandOutcome.DENIED, "RTH altitude must be positive")
-                } else {
-                    // Waited on rather than fired and forgotten, because the PARAM_VALUE sent back
-                    // immediately afterwards is meant to report what the parameter now holds. Without
-                    // the wait it reports the value from before the write, and a ground station
-                    // correctly concludes the write did not take.
-                    awaitParameterWrite { done -> DroneController.setRTHAltitude(altitude, done) }
-                }
-            }
-
-            else -> {
-                Log.d(TAG, "Refusing write to read-only parameter $name")
-                CommandResult(MavlinkCommandOutcome.DENIED, "$name is read-only")
-            }
-        }
-
-    /**
-     * Run an asynchronous parameter write and wait, briefly, for the aircraft to confirm it.
-     *
-     * Bounded so a key the aircraft never answers cannot wedge the endpoint's receive thread —
-     * a timeout is reported as a failure, which is what it is.
-     */
-    private fun awaitParameterWrite(write: ((Boolean) -> Unit) -> Unit): CommandResult {
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val succeeded =
-            java.util.concurrent.atomic
-                .AtomicBoolean(false)
-        write { ok ->
-            succeeded.set(ok)
-            latch.countDown()
-        }
-        val answered = latch.await(ACTION_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-        return when {
-            !answered -> CommandResult(MavlinkCommandOutcome.FAILED, "Aircraft did not answer")
-            succeeded.get() -> CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            else -> CommandResult(MavlinkCommandOutcome.FAILED, "Aircraft refused the write")
-        }
-    }
-
-    /**
      * The active control profile, published as read-only MAVLink parameters.
      *
      * Two reasons this exists now rather than in a later phase. It is what a ground station needs
@@ -3564,15 +3197,15 @@ class FlightDeckActivity :
             "LB_WP_ACC_YAW" to DroneController.WP_ACCEPT_YAW_DEG.toFloat(),
             // The one writable parameter. Published so a ground station can read it back after a
             // write and see what actually took, which is what makes PARAM_SET meaningful.
-            PARAM_RTH_ALTITUDE to DroneController.getRTHAltitude().toFloat(),
-            PARAM_MAX_HEIGHT to DroneController.getMaxFlightHeight().toFloat(),
-            PARAM_MAX_DISTANCE to DroneController.getMaxFlightDistance().toFloat(),
-            PARAM_DISTANCE_LIMIT to if (DroneController.getDistanceLimitEnabled()) 1f else 0f,
-            PARAM_WEBRTC_FPS to settings.getWebRTCFps().toFloat(),
-            PARAM_DETECTIONS to if (settings.isDetectionsEnabled()) 1f else 0f,
-            PARAM_EDGE_CONFIDENCE to settings.getEdgeConfidenceThreshold(),
-            PARAM_SURFACE_H264_ENCODER to if (settings.isDjiSurfaceH264EncoderEnabled()) 1f else 0f,
-            PARAM_MAVLINK_SYSTEM_ID to currentMavlinkSystemId().toFloat(),
+            ProcessMavlinkParameters.PARAM_RTH_ALTITUDE to DroneController.getRTHAltitude().toFloat(),
+            ProcessMavlinkParameters.PARAM_MAX_HEIGHT to DroneController.getMaxFlightHeight().toFloat(),
+            ProcessMavlinkParameters.PARAM_MAX_DISTANCE to DroneController.getMaxFlightDistance().toFloat(),
+            ProcessMavlinkParameters.PARAM_DISTANCE_LIMIT to if (DroneController.getDistanceLimitEnabled()) 1f else 0f,
+            ProcessMavlinkParameters.PARAM_WEBRTC_FPS to settings.getWebRTCFps().toFloat(),
+            ProcessMavlinkParameters.PARAM_DETECTIONS to if (settings.isDetectionsEnabled()) 1f else 0f,
+            ProcessMavlinkParameters.PARAM_EDGE_CONFIDENCE to settings.getEdgeConfidenceThreshold(),
+            ProcessMavlinkParameters.PARAM_SURFACE_H264_ENCODER to if (settings.isDjiSurfaceH264EncoderEnabled()) 1f else 0f,
+            ProcessMavlinkParameters.PARAM_MAVLINK_SYSTEM_ID to currentMavlinkSystemId().toFloat(),
             // QGC's PX4 airframe component reads this one PX4 parameter and pops a "Parameters
             // are missing from firmware" dialog when it is absent. 4001 is PX4's "Generic
             // Quadcopter" airframe id; published read-only like the rest of the list.
@@ -3599,128 +3232,13 @@ class FlightDeckActivity :
         )
     }
 
-    /**
-     * Issue a DJI action key and report what actually happened.
-     *
-     * The SDK's action callbacks are asynchronous while the command sink is synchronous, so this
-     * waits briefly for the result. Returning ACCEPTED without waiting is what the first version
-     * of this did, and it told a ground station that recording had stopped while the camera was
-     * still rolling — an ack that carries no information is worse than a slow one.
-     *
-     * The wait is bounded: a command the aircraft never answers becomes FAILED rather than
-     * blocking the endpoint's receive thread.
-     */
-    private fun awaitAction(key: DJIKey.ActionKey<EmptyMsg, EmptyMsg>): CommandResult {
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val succeeded =
-            java.util.concurrent.atomic
-                .AtomicBoolean(false)
-        key.action(
-            {
-                succeeded.set(true)
-                latch.countDown()
-            },
-            { error ->
-                Log.w(TAG, "DJI action failed: ${error.description()}")
-                latch.countDown()
-            },
-        )
-        val answered = latch.await(ACTION_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-        return when {
-            !answered -> CommandResult(MavlinkCommandOutcome.FAILED)
-            succeeded.get() -> CommandResult(MavlinkCommandOutcome.ACCEPTED)
-            else -> CommandResult(MavlinkCommandOutcome.FAILED)
-        }
-    }
-
-    /**
-     * Returns a refusal when MAVLink-commanded motion is blocked, or null when it may proceed.
-     *
-     * Lives on the activity rather than inside one sink because both the motion sink and the
-     * mission sink fly the aircraft, and a gate that only one of them consulted would be a hole
-     * rather than a gate.
-     */
-    private fun mavlinkFlightGate(): CommandResult? {
-        val result =
-            MavlinkFlightPolicy().check(
-                flightAllowed = sharedPreferences.getBoolean(MavlinkEndpointConfig.PREF_ALLOW_FLIGHT, true),
-                trustedOrigin = ProcessMavlinkRuntimeRegistry.isTrustedOrigin(),
-            )
-        if (result != null) {
-            // Silent otherwise: the sender gets MAV_RESULT_DENIED over the wire and it lands in
-            // the flight log, but nobody standing at the aircraft would ever see either of those
-            // in the moment — a ground station could sit there commanding takeoff on a fresh
-            // install after the setting has explicitly been blocked and the pilot would have no
-            // idea why the command was refused.
-            val message = result.detail.orEmpty()
-            ToastUtils.showToast(
-                if (message.contains("not allowed")) {
-                    "$message (enable it from the settings menu)"
-                } else {
-                    message
-                },
-            )
-        }
-        return result
-    }
-
-    /**
-     * Stop a running plan before taking the aircraft somewhere else.
-     *
-     * Without this the sequencer keeps its own state: an operator pressing Land or Return in a
-     * ground station would land the aircraft, and the sequencer -- which only watches the reach
-     * latch -- would then issue the next leg and fly it away again. A guided command supersedes a
-     * mission, which is what every other autopilot does and what an operator reaching for Land
-     * plainly means.
-     */
-    private fun supersedeMission(reason: String) {
-        if (mavlinkMissionSink.isRunning) {
-            Log.i(TAG, "Stopping the running mission: superseded by $reason")
-            mavlinkMissionSink.stopMission()
-        }
-    }
-
-    /**
-     * Climb to a requested altitude once the take-off has finished.
-     *
-     * DJI's take-off takes no height, so an altitude asked for in `MAV_CMD_NAV_TAKEOFF` has to be
-     * reached by a second movement afterwards. Waiting matters: issuing the climb while the
-     * aircraft is still in its take-off sequence would have the altitude loop fight DJI for the
-     * sticks, so this waits for the aircraft to report itself flying and out of the TAKING_OFF
-     * state before starting.
-     *
-     * Runs on the capture worker rather than the endpoint's receive thread, and gives up rather
-     * than climbing late if the take-off never completes — a climb that begins minutes afterwards
-     * would be a surprise, not a service.
-     */
-    private fun climbAfterTakeoff(altitudeMeters: Double) {
-        ProcessCaptureExecutorRegistry.executor().execute {
-            val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                val airborne =
-                    aircraftTelemetry.readState().readings.flying &&
-                        DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
-                if (airborne) {
-                    Log.i(TAG, "Take-off complete; climbing to ${altitudeMeters}m")
-                    mainHandler.post { DroneController.gotoAltitude(altitudeMeters) }
-                    return@execute
-                }
-                runCatching { Thread.sleep(TAKEOFF_POLL_MS) }.onFailure {
-                    Thread.currentThread().interrupt()
-                    return@execute
-                }
-            }
-            Log.w(TAG, "Take-off did not complete in time; not climbing to ${altitudeMeters}m")
-        }
-    }
-
     private fun restartMavlinkEndpoint() {
         mainHandler.post {
             if (isDestroyed || isFinishing) return@post
             ProcessMavlinkRuntimeRegistry.stop()
             ProcessMavlinkRuntimeRegistry.attach(
                 this,
-                mavlinkMediaSource,
+                ProcessPayloadCommands.mediaSource,
                 mavlinkCommandSink,
                 mavlinkMotionSink,
                 mavlinkMissionSink,

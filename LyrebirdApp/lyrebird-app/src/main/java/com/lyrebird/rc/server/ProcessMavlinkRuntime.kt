@@ -230,13 +230,7 @@ internal object ProcessMavlinkRuntimeRegistry {
         mission: MavlinkMissionSink,
     ) = runtime.attach(callbacks, media, command, motion, mission)
 
-    fun detach(
-        callbacks: MavlinkRuntimeCallbacks,
-        media: MavlinkMediaSource,
-        command: MavlinkCommandSink,
-        motion: MavlinkMotionSink,
-        mission: MavlinkMissionSink,
-    ) = runtime.detach(callbacks, media, command, motion, mission)
+    fun detachCallbacks(callbacks: MavlinkRuntimeCallbacks) = runtime.detachCallbacks(callbacks)
 
     fun start() = runtime.start()
 
@@ -287,19 +281,14 @@ private class ProcessMavlinkRuntime {
         }
     }
 
+    /**
+     * Drops only this screen's callbacks. The media source and the three command sinks are
+     * process-owned now - detaching them here would unplug the command path the runtime is
+     * supposed to keep serving - so screen teardown must never go through them.
+     */
     @Synchronized
-    fun detach(
-        callbacks: MavlinkRuntimeCallbacks,
-        mediaSource: MavlinkMediaSource,
-        commandSink: MavlinkCommandSink,
-        motionSink: MavlinkMotionSink,
-        missionSink: MavlinkMissionSink,
-    ) {
+    fun detachCallbacks(callbacks: MavlinkRuntimeCallbacks) {
         if (callbacksRef.get() === callbacks) callbacksRef.clear()
-        mediaBridge.detach(mediaSource)
-        command.detach(commandSink)
-        motion.detach(motionSink)
-        mission.detach(missionSink)
     }
 
     @Synchronized

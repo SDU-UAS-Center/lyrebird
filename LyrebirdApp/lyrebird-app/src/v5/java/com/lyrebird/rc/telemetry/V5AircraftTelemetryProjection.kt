@@ -19,6 +19,12 @@ internal class V5AircraftTelemetryProjection(
     /** The laser target most recently reported, or null while the laser has no fix. */
     @Volatile var lrfTarget: GeoPoint3D? = null
 
+    /**
+     * Range of the last laser lock in metres, or null when it has not locked. Held with the
+     * process runtime so the MAVLink snapshot reports it with no screen attached.
+     */
+    @Volatile var lrfDistanceM: Double? = null
+
     /** The home latch is per session: once the aircraft has stood within half a metre of its
      *  reported home point, that point is this flight's home. */
     private var homePointSetLatch = false
