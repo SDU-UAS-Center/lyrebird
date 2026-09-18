@@ -30,6 +30,8 @@ import com.lyrebird.rc.DJIAircraftMainActivity
 import com.lyrebird.rc.controller.ControlAuthority
 import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.MavlinkFlightPolicy
+import com.lyrebird.rc.controller.MavlinkMotionHost
+import com.lyrebird.rc.controller.MavlinkMotionPolicy
 import com.lyrebird.rc.controller.Payload
 import com.lyrebird.rc.controller.ProcessAircraftSessionRegistry
 import com.lyrebird.rc.controller.ProcessRoiRuntimeRegistry
@@ -38,9 +40,8 @@ import com.lyrebird.rc.controller.V5MavlinkCommandHost
 import com.lyrebird.rc.controller.V5MavlinkCommandSink
 import com.lyrebird.rc.controller.V5MavlinkMissionHost
 import com.lyrebird.rc.controller.V5MavlinkMissionSink
-import com.lyrebird.rc.controller.V5MavlinkMotionHost
-import com.lyrebird.rc.controller.V5MavlinkMotionSink
 import com.lyrebird.rc.controller.V5MediaPort
+import com.lyrebird.rc.controller.V5MotionCommandPort
 import com.lyrebird.rc.edge.DetectionRuntimeCallbacks
 import com.lyrebird.rc.edge.DetectionTelemetryProjection
 import com.lyrebird.rc.edge.EdgeDetectionController.EdgeDetectionMetrics
@@ -66,6 +67,7 @@ import com.lyrebird.rc.mavlink.MavlinkVideoStream
 import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
+import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.models.MediaVM
 import com.lyrebird.rc.perception.ObstacleBrake
 import com.lyrebird.rc.perception.ObstacleGuard
@@ -378,7 +380,7 @@ class FlightDeckActivity :
                         )
                     }
                 val refusal = DroneController.lastWaypointRefusal()
-                return if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                return if (refusal?.seq == seq && refusal.reason != WaypointRejection.NONE) {
                     CommandResult(
                         MavlinkCommandOutcome.DENIED,
                         detail = refusal.reason.name,
@@ -533,10 +535,9 @@ class FlightDeckActivity :
     private val mavlinkCommandSink: MavlinkCommandSink
         get() = v5MavlinkCommandAdapter.commandSink
 
-    private val v5MavlinkMotionAdapter by lazy {
-        V5MavlinkMotionSink(
-            object : V5MavlinkMotionHost {
-                override val aircraftTelemetry get() = this@FlightDeckActivity.aircraftTelemetry
+    private val mavlinkMotionPolicy by lazy {
+        MavlinkMotionPolicy(
+            object : MavlinkMotionHost {
                 override var armedCommanded
                     get() = this@FlightDeckActivity.armedCommanded
                     set(value) {
@@ -550,12 +551,19 @@ class FlightDeckActivity :
                 override fun mavlinkFlightGate() = this@FlightDeckActivity.mavlinkFlightGate()
 
                 override fun supersedeMission(reason: String) = this@FlightDeckActivity.supersedeMission(reason)
+
+                override fun currentAltitudeM() = aircraftTelemetry.getLocation3D().altitude
+
+                override fun currentHeadingDeg() = aircraftTelemetry.getHeading()
+
+                override fun defaultCruiseSpeedMps() = DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
             },
+            V5MotionCommandPort,
         )
     }
 
     private val mavlinkMotionSink: MavlinkMotionSink
-        get() = v5MavlinkMotionAdapter.sink
+        get() = mavlinkMotionPolicy.sink
 
     private val v5MavlinkMissionAdapter by lazy {
         V5MavlinkMissionSink(

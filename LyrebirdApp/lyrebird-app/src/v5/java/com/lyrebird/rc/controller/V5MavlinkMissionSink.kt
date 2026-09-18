@@ -15,6 +15,7 @@ import com.lyrebird.rc.mavlink.MavlinkMotionSink
 import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.mavlink.MissionItem
 import com.lyrebird.rc.mavlink.MissionProgressListener
+import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
 import com.lyrebird.rc.utils.wpml.WaypointInfoModel
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
@@ -519,7 +520,7 @@ internal class V5MavlinkMissionSink(
                     // timeout. The obstacle guard publishes the refusal with the same seq the leg
                     // was issued under, which is exactly what makes the two matchable here.
                     val refusal = DroneController.lastWaypointRefusal()
-                    if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                    if (refusal?.seq == seq && refusal.reason != WaypointRejection.NONE) {
                         Log.w(TAG, "Mission leg seq=$seq refused (${refusal.reason}); stopping plan")
                         return false
                     }

@@ -1,18 +1,27 @@
 package com.lyrebird.rc.controller
 
 import android.util.Log
-import com.lyrebird.rc.DroneControlProfiles
 import com.lyrebird.rc.mavlink.CommandProgress
 import com.lyrebird.rc.mavlink.CommandResult
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkMotionSink
+import com.lyrebird.rc.mavlink.MotionCommandPort
 import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
-import com.lyrebird.rc.telemetry.V5AircraftTelemetrySource
+import com.lyrebird.rc.mavlink.WaypointRejection
+import com.lyrebird.rc.platform.ManualStick
 import kotlin.math.abs
 
-internal interface V5MavlinkMotionHost {
-    val aircraftTelemetry: V5AircraftTelemetrySource
+/**
+ * What the shared motion policy needs from its host besides the flight commands themselves.
+ *
+ * The host owns the settings/authority facts (the flight gate, the trusted-origin answer) and the
+ * two actions that stay application-side (mission supersede, the post-takeoff climb), plus the
+ * current altitude and heading the "leave this parameter alone" sentinels resolve to. Deliberately
+ * no telemetry *object* and no SDK value type: an adapter answers the two derived numbers from
+ * whatever source it has.
+ */
+internal interface MavlinkMotionHost {
     var armedCommanded: Boolean
 
     fun isMavlinkOriginTrusted(): Boolean
@@ -22,10 +31,34 @@ internal interface V5MavlinkMotionHost {
     fun mavlinkFlightGate(): CommandResult?
 
     fun supersedeMission(reason: String)
+
+    /** The altitude the aircraft is holding, for unset-altitude commands. */
+    fun currentAltitudeM(): Double
+
+    /** The heading the aircraft currently holds, for "keep the heading" reposition. */
+    fun currentHeadingDeg(): Double
+
+    /** The active aircraft profile's default cruise speed, for an unset ground-speed sentinel. */
+    fun defaultCruiseSpeedMps(): Double
 }
 
-internal class V5MavlinkMotionSink(
-    private val host: V5MavlinkMotionHost,
+/**
+ * Flight-motion commands over MAVLink, behind the safety gate.
+ *
+ * Three layers, checked in order:
+ *   1. lb_mav_0_allow_flight — enabled by default; an explicit settings choice can block it.
+ *   2. command authority — MAVLink speaks as the Pilot, so it is refused once the Safety
+ *      Computer has seized control over HTTP.
+ *   3. the RC manual-override latch — closed-loop commands (reposition, yaw) are refused while
+ *      the physical RC pilot has taken over.
+ *
+ * This is the policy both backends share: it decides, and [MotionCommandPort] flies. It used to
+ * live beside the V5 controller with every command a direct static call, which would have made a
+ * second SDK a second copy of every rule in here.
+ */
+internal class MavlinkMotionPolicy(
+    private val host: MavlinkMotionHost,
+    private val commands: MotionCommandPort,
 ) {
     companion object {
         private const val REPOSITION_COORD_EPSILON = 1e-7
@@ -36,45 +69,35 @@ internal class V5MavlinkMotionSink(
     val sink: MavlinkMotionSink
         get() = mavlinkMotionSink
 
-    /**
-     * Flight-motion commands over MAVLink, behind the safety gate.
-     *
-     * Three layers, checked in order:
-     *   1. lb_mav_0_allow_flight — enabled by default; an explicit settings choice can block it.
-     *   2. command authority — MAVLink speaks as the Pilot, so it is refused once the Safety
-     *      Computer has seized control over HTTP.
-     *   3. the RC manual-override latch — closed-loop commands (reposition, yaw) are refused while
-     *      the physical RC pilot has taken over.
-     */
     internal val mavlinkMotionSink =
         object : MavlinkMotionSink {
             override fun takeoff(altitudeM: Float?): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("takeoff")) {
+                if (commands.shouldRejectAutonomousCommand("takeoff")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                DroneController.startTakeOff()
+                commands.takeoff()
                 if (altitudeM != null) host.climbAfterTakeoff(altitudeM.toDouble())
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
             override fun land(): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("land")) {
+                if (commands.shouldRejectAutonomousCommand("land")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.supersedeMission("land")
-                DroneController.startLanding()
+                commands.land()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
             override fun returnToHome(): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("return to home")) {
+                if (commands.shouldRejectAutonomousCommand("return to home")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.supersedeMission("return to home")
-                DroneController.startReturnToHome()
+                commands.returnToHome()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
@@ -86,7 +109,7 @@ internal class V5MavlinkMotionSink(
                 groundSpeedMps: Double,
             ): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("reposition")) {
+                if (commands.shouldRejectAutonomousCommand("reposition")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.supersedeMission("reposition")
@@ -100,7 +123,7 @@ internal class V5MavlinkMotionSink(
                 val speed =
                     groundSpeedMps
                         .takeIf { it.isFinite() && it > 0.0 }
-                        ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
+                        ?: host.defaultCruiseSpeedMps()
 
                 // param5/param6 NaN mean "hold the current position and change only the altitude",
                 // which is how QGC expresses Change Altitude. A COMMAND_INT carries them as scaled
@@ -124,19 +147,19 @@ internal class V5MavlinkMotionSink(
                     // obvious way to express "stay here": a zero-length leg has no bearing, so the
                     // nose-forward controller reads atan2(0, 0) and turns the aircraft north first.
                     return if (!yawDeg.isNaN()) {
-                        val seq = DroneController.gotoYaw(yawDeg)
+                        val seq = commands.gotoYaw(yawDeg)
                         CommandResult(
                             MavlinkCommandOutcome.ACCEPTED,
                             pending = PendingCommand(PendingKind.YAW, seq),
                         )
                     } else {
                         val seq =
-                            DroneController.gotoAltitude(
+                            commands.gotoAltitude(
                                 // A Change altitude always names one. Defended anyway, because an
                                 // altitude of NaN reaches the vertical controller as a setpoint and
                                 // every comparison against it is false, so the aircraft would hold
                                 // whatever throttle it had rather than refuse.
-                                altitudeMeters.takeIf { it.isFinite() } ?: host.aircraftTelemetry.getLocation3D().altitude,
+                                altitudeMeters.takeIf { it.isFinite() } ?: host.currentAltitudeM(),
                             )
                         CommandResult(
                             MavlinkCommandOutcome.ACCEPTED,
@@ -154,23 +177,25 @@ internal class V5MavlinkMotionSink(
                 // the other three parameters express. Flown as a setpoint it is not refused: every
                 // comparison against NaN is false, so the aircraft never reaches the altitude and
                 // never reports arriving.
-                val altitude = altitudeMeters.takeIf { it.isFinite() } ?: host.aircraftTelemetry.getLocation3D().altitude
+                val altitude = altitudeMeters.takeIf { it.isFinite() } ?: host.currentAltitudeM()
                 val seq =
                     if (yawDeg.isNaN()) {
-                        DroneController.flyToWaypointNoseForward(
-                            latitudeDeg,
-                            longitudeDeg,
-                            altitude,
-                            host.aircraftTelemetry.getHeading(),
-                            speed,
+                        commands.waypoint(
+                            latitudeDeg = latitudeDeg,
+                            longitudeDeg = longitudeDeg,
+                            altitudeMeters = altitude,
+                            yawDeg = host.currentHeadingDeg(),
+                            speedMps = speed,
+                            noseForward = true,
                         )
                     } else {
-                        DroneController.flyToWaypointHoldHeading(
-                            latitudeDeg,
-                            longitudeDeg,
-                            altitude,
-                            yawDeg,
-                            speed,
+                        commands.waypoint(
+                            latitudeDeg = latitudeDeg,
+                            longitudeDeg = longitudeDeg,
+                            altitudeMeters = altitude,
+                            yawDeg = yawDeg,
+                            speedMps = speed,
+                            noseForward = false,
                         )
                     }
                 // A refused leg is a refusal, not a pending flight: the controller published the
@@ -178,8 +203,8 @@ internal class V5MavlinkMotionSink(
                 // ACCEPTED here is what made MAVLink and HTTP disagree about the same command —
                 // HTTP inspects this same refusal, the reposition path did not — and left a ground
                 // station awaiting a leg the aircraft never started flying.
-                val refusal = DroneController.lastWaypointRefusal()
-                if (refusal?.seq == seq && refusal.reason != DroneController.WaypointRejection.NONE) {
+                val refusal = commands.lastWaypointRefusal()
+                if (refusal?.seq == seq && refusal.reason != WaypointRejection.NONE) {
                     return CommandResult(
                         MavlinkCommandOutcome.DENIED,
                         "Waypoint refused: ${refusal.reason}",
@@ -193,11 +218,11 @@ internal class V5MavlinkMotionSink(
 
             override fun setYaw(yawDeg: Double): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("yaw")) {
+                if (commands.shouldRejectAutonomousCommand("yaw")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.supersedeMission("yaw")
-                val seq = DroneController.gotoYaw(yawDeg)
+                val seq = commands.gotoYaw(yawDeg)
                 return CommandResult(
                     MavlinkCommandOutcome.ACCEPTED,
                     pending = PendingCommand(PendingKind.YAW, seq),
@@ -216,7 +241,7 @@ internal class V5MavlinkMotionSink(
                 faceCentre: Boolean,
             ): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("orbit")) {
+                if (commands.shouldRejectAutonomousCommand("orbit")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 if (!latitudeDeg.isFinite() || !longitudeDeg.isFinite()) {
@@ -231,13 +256,11 @@ internal class V5MavlinkMotionSink(
                     )
                 }
                 host.supersedeMission("orbit")
-                DroneController.orbit(
+                commands.orbit(
                     centreLatitude = latitudeDeg,
                     centreLongitude = longitudeDeg,
                     // As everywhere else on this surface, an unset altitude is the one being held.
-                    targetAltitude =
-                        altitudeMeters.takeIf { it.isFinite() }
-                            ?: host.aircraftTelemetry.getLocation3D().altitude,
+                    targetAltitude = altitudeMeters.takeIf { it.isFinite() } ?: host.currentAltitudeM(),
                     radiusMeters = radiusMeters,
                     tangentialSpeedMps = tangentialSpeedMps,
                     clockwise = clockwise,
@@ -254,25 +277,25 @@ internal class V5MavlinkMotionSink(
 
             override fun abortToPositionHold(): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("abort")) {
+                if (commands.shouldRejectAutonomousCommand("abort")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.supersedeMission("abort")
                 // The union of the three HTTP aborts: stop the PID loops, neutralise the sticks and
                 // leave virtual stick, and end any DJI wayline. Each is safe when nothing is running.
-                DroneController.abortAllMissions()
-                DroneController.setStick(0f, 0f, 0f, 0f)
-                DroneController.disableVirtualStick()
-                runCatching { DroneController.endMission() }
+                commands.abortAllMissions()
+                commands.sendManualStick(ManualStick())
+                commands.disableVirtualStick()
+                runCatching { commands.endMission() }
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
             override fun enableOffboard(): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("enableVirtualStick")) {
+                if (commands.shouldRejectAutonomousCommand("enableVirtualStick")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                DroneController.enableVirtualStick()
+                commands.enableVirtualStick()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
@@ -287,27 +310,23 @@ internal class V5MavlinkMotionSink(
                 // already drops virtual stick, so these would most likely be ignored anyway — but
                 // "most likely ignored" is not the guarantee to rely on when the pilot has taken
                 // over, and the two surfaces disagreeing about it is its own bug.
-                if (DroneController.shouldRejectAutonomousCommand("stick")) {
+                if (commands.shouldRejectAutonomousCommand("stick")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 // DJI's sticks: left is yaw/throttle, right is roll/pitch. MAVLink's axes are named
-                // for what they do, so the mapping is by meaning rather than by position.
-                DroneController.setStick(
-                    leftX = yaw,
-                    leftY = throttle,
-                    rightX = roll,
-                    rightY = pitch,
-                )
+                // for what they do, so the mapping is by meaning rather than by position. The port
+                // owns the same shape, so this mapping stays in shared policy.
+                commands.sendManualStick(ManualStick(leftX = yaw, leftY = throttle, rightX = roll, rightY = pitch))
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
             override fun setAltitude(altitudeMeters: Double): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("altitude")) {
+                if (commands.shouldRejectAutonomousCommand("altitude")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.supersedeMission("altitude change")
-                val seq = DroneController.gotoAltitude(altitudeMeters)
+                val seq = commands.gotoAltitude(altitudeMeters)
                 return CommandResult(
                     MavlinkCommandOutcome.ACCEPTED,
                     pending = PendingCommand(PendingKind.ALTITUDE, seq),
@@ -317,7 +336,7 @@ internal class V5MavlinkMotionSink(
             override fun releaseManualOverride(): CommandResult {
                 // Deliberately not behind the flight gate: this grants authority rather than using
                 // it, and the commands it re-enables are each gated in their own right.
-                DroneController.deactivateManualOverride()
+                commands.deactivateManualOverride()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
@@ -353,34 +372,24 @@ internal class V5MavlinkMotionSink(
              * because the command is not going to complete once the pilot has the sticks.
              */
             override fun pollCompletion(pending: PendingCommand): CommandProgress {
-                if (DroneController.isManualOverrideActive) return CommandProgress.ABANDONED
+                if (commands.isManualOverrideActive) return CommandProgress.ABANDONED
                 // A refused waypoint is a refusal the moment it is detected, not a command that
                 // runs until somebody gives up waiting: the leg was never issued to the airframe,
                 // so no reach latch will ever close for it.
                 if (pending.kind == PendingKind.WAYPOINT) {
-                    val refusal = DroneController.lastWaypointRefusal()
+                    val refusal = commands.lastWaypointRefusal()
                     if (refusal?.seq == pending.seq &&
-                        refusal.reason != DroneController.WaypointRejection.NONE
+                        refusal.reason != WaypointRejection.NONE
                     ) {
                         return CommandProgress.ABANDONED
                     }
                 }
-                val (currentSeq, reached) =
-                    when (pending.kind) {
-                        PendingKind.WAYPOINT ->
-                            DroneController.getWaypointSeq() to DroneController.isWaypointReached()
-                        PendingKind.YAW ->
-                            DroneController.getYawSeq() to DroneController.isYawReached()
-                        PendingKind.ALTITUDE ->
-                            DroneController.getAltitudeSeq() to DroneController.isAltitudeReached()
-                        PendingKind.ORBIT ->
-                            DroneController.getOrbitSeq() to DroneController.isOrbitComplete()
-                    }
+                val latch = commands.reachLatch(pending.kind)
                 return when {
                     // A newer command took over. Ordinary, not a failure: this is what re-issuing a
                     // goto looks like from the perspective of the one it replaced.
-                    currentSeq > pending.seq -> CommandProgress.SUPERSEDED
-                    currentSeq == pending.seq && reached -> CommandProgress.ARRIVED
+                    latch.seq > pending.seq -> CommandProgress.SUPERSEDED
+                    latch.seq == pending.seq && latch.reached -> CommandProgress.ARRIVED
                     else -> CommandProgress.RUNNING
                 }
             }
@@ -391,7 +400,7 @@ internal class V5MavlinkMotionSink(
                 // that keeps the sequence moving rather than an honest refusal that aborts it. The
                 // heartbeat reports armed from [host.armedCommanded] so QGC's arm wait sees a result.
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("arm")) {
+                if (commands.shouldRejectAutonomousCommand("arm")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.armedCommanded = true
@@ -401,7 +410,7 @@ internal class V5MavlinkMotionSink(
 
             override fun disarm(): CommandResult {
                 host.mavlinkFlightGate()?.let { return it }
-                if (DroneController.shouldRejectAutonomousCommand("disarm")) {
+                if (commands.shouldRejectAutonomousCommand("disarm")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
                 host.armedCommanded = false

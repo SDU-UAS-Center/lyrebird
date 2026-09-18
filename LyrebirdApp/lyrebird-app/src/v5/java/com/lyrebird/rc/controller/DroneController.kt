@@ -7,6 +7,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.lyrebird.rc.DroneControlProfiles
+import com.lyrebird.rc.mavlink.WaypointRefusal
+import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.models.BasicAircraftControlVM
 import com.lyrebird.rc.models.VirtualStickVM
 import com.lyrebird.rc.perception.ObstacleGuard
@@ -210,25 +212,6 @@ object DroneController {
             return true
         }
         return false
-    }
-
-    /**
-     * Why a waypoint command was refused before it ever reached the control loop.
-     *
-     * The seq of a refused command is still published — the ground station's polling and the
-     * mission sequencer both key on seq — but no leg is flown and no reach latch arms for it.
-     */
-    enum class WaypointRejection {
-        /** Nothing refused it; the command may fly. */
-        NONE,
-
-        /**
-         * The leg starts inside the bearing arc the obstacle guard blocked after its most recent
-         * brake. A safe bearing is not rejected: the aircraft can be moved away without any
-         * operator intervention. Only the direction known to hold the obstacle is closed, and
-         * only while the lockout lasts.
-         */
-        OBSTACLE_BLOCKED,
     }
 
     /**
@@ -1781,19 +1764,6 @@ object DroneController {
     // Id of the most recently accepted waypoint request. Pair this with isWaypointReached()
     // in telemetry so a client can match "reached" to a specific commanded target.
     fun getWaypointSeq(): Long = _waypointSeq.get()
-
-    /**
-     * Why the most recent waypoint request was refused before flying, as its seq key.
-     *
-     * Null when the last request was accepted. The seq travels with the reason so a ground
-     * station can correlate the refusal to the command it just got a seq for: HTTP callers read
-     * this right after their flyTo call, and the MAVLink mission sequencer reads it after
-     * [flyLeg] to fail the leg rather than waiting on a reach latch that will never arm.
-     */
-    data class WaypointRefusal(
-        val seq: Long,
-        val reason: WaypointRejection,
-    )
 
     @Volatile
     private var lastWaypointRefusal: WaypointRefusal? = null
