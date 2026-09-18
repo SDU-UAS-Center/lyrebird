@@ -1,9 +1,28 @@
-# Dual-SDK Flavor Implementation Plan
+# SDK-Neutral Aircraft Bridge and Flavor Plan
 
 Date: 2026-09-15
 
-Status: implementation started. V5 flavor scaffolding and V5 application/bootstrap source
-separation are in place; V4 SDK provisioning and adapter implementation have not started.
+Architecture review: 2026-09-18.
+
+Status: partial implementation. V5 flavor scaffolding and bootstrap separation are committed;
+further V5 source relocations are staged in the reviewed worktree. The SDK-neutral platform
+bridge and activity-independent application runtime are not yet implemented. V4 variants remain
+disabled; V4 registration, connection, and flight behavior are not qualified.
+
+## Architecture Decision
+
+Adopt one shared application runtime over an SDK-neutral `AircraftPlatform` facade composed of
+small hardware ports. Each APK supplies exactly one implementation through its flavor-local
+composition root. Keep flight algorithms, authority, command policy, mission sequencing,
+protocol serialization, and video consumers shared; translate SDK values and operations only
+inside adapters. Treat a possible SDK 6 as a future adapter, not as an API whose behavior is
+already known.
+
+Source relocation is preparation, not proof of this boundary. The reviewed runtime still
+uses activity callbacks to supply command backends and telemetry. For example,
+`FlightDeckActivity.onDestroy()` stops detection and ends the flight log, while
+`ProcessNetworkRuntime` emits empty telemetry after its activity binding is detached. Finishing
+the bridge therefore includes lifecycle ownership, not just a new interface or another rename.
 
 ## 1. Outcome and Scope
 
@@ -35,103 +54,244 @@ The first release targets one explicitly qualified V4 aircraft/controller/firmwa
 
 No device registration, mixed-install test, flight test, or V4 build against Lyrebird's toolchain has been performed for this plan.
 
-## 3. Architecture: One Application Core, Two Hardware Adapters
+## 3. Architecture: One Runtime, One Platform Facade
 
-Use one additional SDK-free Android library, `:lyrebird-core`, plus the existing `:app` and `:uxsdk` modules. Initially keep SDK implementations in app flavor source sets; separate adapter library modules are unnecessary for this two-app scope.
+Use ports and adapters: application behavior depends on contracts owned by Lyrebird, and each
+SDK adapter translates to those contracts. `AircraftPlatform` is a small facade grouping those
+ports, not a universal DJI wrapper, a second controller, or a registry of arbitrary SDK objects.
+Consumers receive the particular port they need; only the composition root needs the whole facade.
 
-Proposed layout, relative to `LyrebirdApp/`:
+Keep the existing SDK-free Android library `:lyrebird-core`. Put hardware contracts, neutral
+state, and testable control/mission policy there; keep Android services, preferences, UI, and
+WebRTC/TFLite orchestration in shared app code where appropriate. SDK-free does not mean every
+Android or video implementation must move into core. Extra adapter modules, a DI framework,
+reflection, and a plugin loader are unnecessary for the first implementation.
 
-```text
-android-sdk-v5-as/              Existing Gradle root, retained during migration
-lyrebird-core/                 New shared Android library; no DJI dependencies
-  src/main/                   Domain contracts, commands, control, protocols, video
-  src/test/                   Shared policy, controller, protocol, and frame tests
-lyrebird-app/
-  src/main/                   Shared app shell, UI presenters, settings, resources
-  src/v5/                     V5 bootstrap, adapters, SDK-bound screens and resources
-  src/v4/                     V4 bootstrap, adapters, SDK-specific resources
-  src/demoBiomass/             Existing product-specific behavior
-  src/test/                   App tests that apply to both SDK flavors
-  src/testV5/                 V5 adapter tests
-  src/testV4/                 V4 adapter tests
-android-sdk-v5-uxsdk/           Existing UXSDK; V5 dependency only
-```
-
-Dependency direction:
+The arrows below show compile-time dependencies, not the direction of telemetry callbacks:
 
 ```mermaid
 flowchart TD
-    APP[Shared app shell and presenters] --> CORE[SDK-free Lyrebird core and contracts]
-    V4[V4 flavor adapters] --> CORE
-    V5[V5 flavor adapters] --> CORE
-    V4 --> DJI4[DJI SDK 4.18]
-    V5 --> DJI5[DJI SDK 5.18.0]
-    V5 --> UX[V5 UXSDK and vendor screens]
+    UI[Shared FlightDeck presenter and controls] --> RT[Shared LyrebirdRuntime and command service]
+    NET[HTTP and MAVLink translators] --> RT
+    RT --> POLICY[Shared safety, control loops and mission sequencer]
+    RT --> PORTS[AircraftPlatform ports and neutral state]
+    POLICY --> PORTS
+    V5[V5AircraftPlatform] --> PORTS
+    V4[V4AircraftPlatform] --> PORTS
+    V6[Future SDK adapter, not implemented] -.-> PORTS
+    V5 --> DJI5[DJI MSDK V5]
+    V4 --> DJI4[DJI MSDK V4]
+    FACTORY[One flavor-local composition factory] --> RT
+    FACTORY --> V5
+    FACTORY --> V4
+    V5UI[V5-only view integration] --> UX[V5 UXSDK]
+    V5UI --> UI
 ```
 
-Each app compiles the shared source plus exactly one adapter set. A flavor-local composition factory supplies the implementations to shared code. Do not scatter `if (sdk == v4)` checks across controllers, HTTP handlers, MAVLink, or UI presenters.
+The factory alternatives are mutually exclusive at build time. A V5 APK constructs one
+`V5AircraftPlatform`; a V4 APK constructs one `V4AircraftPlatform`. It does not load both SDKs
+and choose by aircraft model after launch. Separate APKs and source sets solve packaging;
+the bridge solves code reuse. Both are needed.
 
-### What stays shared
+### The facade and its ports
 
-- Command validation, result mapping, asynchronous completion tracking, and HTTP response rendering.
-- Safety authority, physical-RC override policy, command arbitration, cancellation, and mission sequencing.
-- PID controllers, geometry, waypoint arrival logic, orbit logic, ROI math, and model-independent obstacle policy.
-- MAVLink framing, dialect, signing, parameters, mission exchange, FTP, snapshots, and discovery/network protocols.
-- Explicit HTTP/TCP telemetry serialization, logging policy, identity handling, and settings schemas.
-- WHIP signaling, WebRTC peer setup, encoders, frame fan-out, metadata, frame-rate adaptation, and local TFLite inference.
-- Common flight-deck state, command buttons, connection/status views, and capability-driven feature availability.
+Conceptual API only; introduce each port with a real V5 implementation and a shared consumer,
+not a batch of unused interfaces. Names other than the existing telemetry contract are proposed.
 
-### What differs by SDK
+```kotlin
+interface AircraftPlatform {
+    val telemetry: AircraftTelemetrySource
+    val flight: FlightPrimitives
+    val camera: CameraPort
+    val gimbal: GimbalPort
+    val media: MediaPort
+    val video: DecodedVideoSource
+    val nativeMissions: NativeMissionPort
+    val capabilities: AircraftCapabilities
+    val lifecycle: AircraftConnection
+}
+```
 
-| Boundary | V5 implementation | V4 implementation |
+| Port | App-owned meaning | Adapter responsibility |
 | --- | --- | --- |
-| Bootstrap and connection | `SDKManager`, V5 callbacks and key subscriptions | `DJISDKManager`, product/component connection callbacks |
-| Aircraft state | V5 keys and listeners | Component state callbacks and/or V4 KeyManager |
-| Flight primitives | V5 actions and virtual-stick manager | V4 `FlightController` methods and `FlightControlData` |
-| Camera, gimbal, media | V5 keys and `MediaDataCenter` | V4 `Camera`, `Gimbal`, and `MediaManager` |
-| Native mission execution | WPMZ generation and V5 waypoint manager | Supported V4 waypoint operator, implemented per qualified product |
-| Decoded video input | `ICameraStreamManager` | `VideoFeeder` plus `DJICodecManager` or a validated decoder alternative |
-| Optional sensors/payloads | Existing V5 APIs | Product-specific V4 APIs or explicit unsupported status |
-| Vendor UI | Existing UXSDK widget subtrees and sample screens | Small platform-specific views where genuinely necessary |
+| Telemetry/connection | Identity, component availability, timestamped state, connection generation, closeable subscriptions | Subscribe to SDK keys/components once, map values, invalidate the old connection, fan out neutral updates |
+| Flight primitives | Takeoff, land, RTH, control-mode acquisition/release, typed flight setpoints, supported limits | V5 actions/virtual stick or V4 `FlightController`; unit/axis mapping, mode ordering, bounded send cadence |
+| Camera/gimbal | Capture, recording, zoom, camera selection, gimbal aim and explicit reference frames | SDK commands and asynchronous results, per-camera serialization and capability limits |
+| Media | Typed media descriptors/IDs, list and download, capture-to-file correlation | SDK media objects, download mode, transfer callbacks and resource cleanup; no HTTP JSON rendering |
+| Decoded video | Timed frames with explicit format, dimensions, planes/stride and lifetime | V5 frame listener or V4 compressed feed plus decoder; no consumer depends on a DJI camera index |
+| Native missions | Validate representability, upload/start/stop, normalized progress | SDK-specific compiler/operator; V5 WPMZ remains here, not in the shared sequencer |
+| Optional features | Explicitly described sensor, onboard detection, payload and vendor-streaming capabilities | Real supported operations or explicit unsupported/unavailable results; never successful no-ops |
 
-Do not create separate `V4DroneController` and `V5DroneController` copies of the navigation algorithms. The shared controller issues neutral commands through flight-control adapters. Likewise, do not implement a second MAVLink server or a second HTTP command policy for V4.
+Native streaming is optional, separate from `DecodedVideoSource`. WHIP/WHEP remains the shared
+public video path. DJI native RTMP/RTSP/Agora/GB28181 support must not become a prerequisite for
+a backend that can provide decoded frames. Local TFLite inference is a shared consumer, not an
+SDK capability; only onboard inference belongs behind a hardware capability.
 
-### Contract details
+### Preserve the application layer
 
-Define narrow, SDK-free contracts for telemetry, flight primitives, camera/gimbal operations, media access, native missions, decoded frames, and optional capabilities. Reuse existing `MavlinkMotionSink`, `MavlinkCommandSink`, `MavlinkMissionSink`, `CommandResult`, and `GimbalRotation` where they already express application behavior; these are not replaced by raw SDK wrappers.
+Keep `LyrebirdFlightPort`, `LyrebirdMediaPort`, `MavlinkMotionSink`, `MavlinkCommandSink`,
+`MavlinkMissionSink`, `CommandResult`, `PendingCommand`, and `GimbalRotation` where they already
+express application/protocol intent. Do not implement a fresh set of SDK-specific HTTP/MAVLink
+policies. The media port's JSON/stream response methods are transport-facing, not the new
+hardware boundary. The joystick-shaped `StickCommand` is not a universal physical setpoint.
 
-Contract requirements:
+The intended command path is:
 
-- Coordinates carry an explicit altitude reference. Keep height above takeoff, home altitude, and MSL altitude distinct; unavailable MSL information must not become invented zero or RTH height.
-- Motion commands name physical intent, such as forward/right/up velocity and clockwise yaw rate. Put vendor pitch/roll mapping at the adapter boundary. Preserve existing V5 behavior before considering tuning changes.
-- Distinguish vertical velocity from altitude-position commands and yaw rate from heading commands. A zero position command must never accidentally be treated as a hover command.
-- Telemetry includes freshness, validity, and connection generation. Late callbacks from a previous aircraft cannot update or complete operations in the next session.
-- Convert SDK enums and errors into explicit domain values. Do not serialize SDK `toString()` output, class names, or enum ordinals into new contracts.
-- Keep existing protocol result types and wire meanings. Model SDK acceptance separately from observed completion; cancellation and timeouts must prevent later callbacks from reporting success.
-- Capability data distinguishes supported, unsupported, temporarily unavailable, and unknown states, including optional sensor validity. Keep limits and supported modes with the capability, not only a boolean.
-- Decoded frames specify format, dimensions, stride/planes where needed, timestamps, buffer lifetime, and ownership. Do not assume a V4 callback is already NV21.
-- Export only the contracts needed across modules. Existing Kotlin `internal` types cannot simply move into a library while app code continues accessing them; move their consumers too or deliberately expose the small boundary.
-- Keep the core free of app-specific `R`, `BuildConfig`, activities, DJI types, and transitive SDK dependencies. Inject configuration and platform services.
+```text
+UI / HTTP / MAVLink
+  -> protocol normalization and authenticated command origin
+  -> shared command service: authority, capabilities, validity, cancellation
+  -> shared goto/orbit/ROI/mission algorithm OR a hardware primitive
+  -> the selected SDK adapter
+```
+
+Takeoff's follow-up climb, waypoint arrival, PID gains, cancellation IDs, physical-RC override,
+Safety takeover, and app-executed mission sequencing remain shared. A `FlightPrimitives` port
+does not contain a separately implemented `gotoWaypoint()` loop for each SDK. Native missions
+are deliberately different: the shared service selects the requested executor, then calls its
+native adapter only if the entire plan is representable.
+
+Telemetry flows back as neutral observations into one runtime-owned state store. TCP, MAVLink,
+fleet, video metadata, logging, and UI use projections of that store, not independent reads
+through activity callbacks. This does not assert that every SDK sensor was sampled at the same
+instant; per-field observation metadata must retain that distinction.
+
+### Contract semantics, not just matching signatures
+
+- **Physical intent:** distinguish body forward/right velocity from north/east velocity, up
+  velocity from altitude-position targets, and clockwise yaw rate from absolute heading.
+  Use typed mode/setpoint variants and named units. Keep normalized manual-stick input separate.
+  Adapter tests must prove signs and axes for both SDKs; do not infer them from `pitch`/`roll` names.
+- **Altitude:** encode takeoff-relative, home-relative, and MSL references explicitly. The current
+  `GeoPosition.altitudeAslM` name is not proof of an SDK altitude datum. Verify each mapping;
+  reject unsupported conversions rather than inventing MSL from a relative height or zero.
+- **Validity:** reuse `AircraftState`, `AircraftReadings`, `Reading<T>` and the existing wire
+  serializers, but add the missing observation/validity path deliberately. `AircraftReadings`
+  currently preserves legacy default values, and the envelope timestamp is not per-field
+  freshness. A compatibility serializer may keep old wire defaults; control eligibility must
+  not mistake those defaults for measurements. Separate this policy change from mechanical moves.
+- **Clocks:** measure freshness, deadlines and control refresh against a monotonic clock; retain
+  wall-clock timestamps separately for logs/wire formats that need them. An SDK-provided capture
+  time is not automatically comparable to the runtime clock, and process restart creates a new epoch.
+- **Async results:** distinguish dispatch/SDK acceptance from observed completion. Each operation
+  carries a runtime operation ID and connection generation; ignored, timed-out, cancelled, or
+  superseded callbacks cannot complete a later operation. Map adapter error categories into the
+  existing command results at the application boundary; retain raw vendor detail only for diagnostics.
+- **Capabilities:** distinguish supported, unsupported, temporarily unavailable, and unknown,
+  with limits, modes, reasons and current component identity. Product/firmware capability data
+  changes on reconnect; SDK number alone is insufficient. Shared code branches on capabilities,
+  never on `sdkVersion == 4` or a vendor enum ordinal.
+- **Subscriptions:** one adapter owns each SDK listener registration and exposes fan-out with
+  idempotent subscription disposal. Keep critical flight-state consumers alive when a UI
+  subscriber detaches. Late events from old components cannot overwrite a new generation.
+- **Concurrency:** serialize SDK lifecycle/mode changes using an explicit dispatcher or scheduler.
+  Keep command cancellation responsive; blocking FTP/capture/inference cannot occupy the
+  flight-control queue. Telemetry and video may use latest-value/backpressure policies; operation
+  outcomes and safety events must not be silently dropped.
+- **Frames:** negotiate supported decoded formats and document timestamp clock, rotation,
+  dimensions, stride/planes, buffer bounds and release rules. Borrowed SDK buffers are valid
+  only for their documented callback lifetime; async consumers retain an owned buffer or copy.
+  Preserve the current in-flight-frame drain before disposal. Prefer an SDK-free frame descriptor
+  in core and a shared Android/WebRTC conversion layer, not `DJICodecManager` or `MediaFormat`
+  leaking into consumers. Do not force an extra full-frame conversion where formats already match.
+- **Control refresh:** keep controller computation and SDK send cadence explicit and testable.
+  Any adapter refreshing a last setpoint must also obey operation expiry and cancellation;
+  disconnect/takeover must invalidate it. Never replay a stale setpoint after reconnect.
+
+### Composition and lifetime
+
+Replace the collection of independently accessed `Process*Registry` service locators incrementally
+with one runtime-owned dependency graph. Retain delegating shims during migration if necessary,
+but they must not create a second instance or make controllers look up concrete V5 services.
+Manual constructor injection is sufficient. Match existing callbacks first with a closeable
+subscription handle; adopting Flow internally is optional, not a requirement for the bridge.
+
+The shared application/service owner holds the platform and coordinators strongly. Weak or
+lifecycle-bound references are for UI observers only, not for required telemetry, settings,
+safety, or command backends. Closing an old UI subscription must not detach a newly attached
+screen. Activity destruction does not end a flight log, stop detection, zero obstacle motion,
+or remove the flight-state consumer that updates RC-override eligibility.
+
+The runtime must acquire the device lease before any operation capable of registering/connecting
+an SDK or starting live workers. Creating a Kotlin singleton that eagerly calls SDK managers is
+not a substitute for a gated start method. Keep loader installation separate and qualify whether
+it has connection side effects. On an explicit safe shutdown: reject new work, invalidate/cancel
+operations, stop control refresh and missions as appropriate, drain frame/media work, stop SDK
+subscriptions/publishers/endpoints, execute the validated SDK shutdown sequence, then release the
+lease last. OS process death has no reliable cleanup callback and never implies safe flight resume.
+
+### UI and source placement
+
+Do not require a shared activity to inherit the V5 `DefaultLayoutActivity`. Share the presenter,
+screen state, controls and command/session services first. Keep the existing V5 activity as a
+small platform view shell while preserving UXSDK behavior; a V4 shell consumes the same presenter.
+An app-layer view integration interface may use Android views, but core contracts may not.
+Do not rewrite the entire V5 UI merely to introduce the hardware bridge.
+
+Audit command-capable UXSDK widgets separately: a shared presenter does not intercept a widget's
+internal SDK calls. Command entry points must obey Lyrebird's authority/cancellation policy;
+where a widget cannot be routed through that policy, replacing or constraining it requires
+explicit safety/UI review, not an assumed exemption for vendor code.
+
+Target placement, not a claim about the current worktree:
+
+```text
+lyrebird-core/src/main/       AircraftPlatform ports, state, shared policy/control/protocol
+lyrebird-core/src/test/       Fake platform and hardware-free contract/control tests
+lyrebird-app/src/main/        Shared Android runtime, presenter, settings, video consumers
+lyrebird-app/src/v5/          V5 factory/adapters/bootstrap and retained UXSDK/sample UI
+lyrebird-app/src/v4/          V4 factory/adapters/bootstrap and minimal platform UI
+lyrebird-app/src/test/        Shared runtime/presenter/serialization tests
+lyrebird-app/src/testV5/      V5 mapping and adapter tests
+lyrebird-app/src/testV4/      V4 mapping and adapter tests
+android-sdk-v5-uxsdk/         V5 dependency only
+```
+
+No `src/v6` or speculative V6 implementation is required now. A future SDK adds its dependency,
+manifest/bootstrap, factory and adapters, passes the same conformance tests, then qualifies its
+hardware. Existing shared behavior should stay unchanged for already-supported capabilities.
+Genuinely new hardware semantics may require an additive contract change and tests; no design can
+guarantee zero shared changes for an undocumented future SDK.
+
+### Alternatives and tradeoffs
+
+| Approach | Decision |
+| --- | --- |
+| Copy FlightDeck/controllers per SDK | Reject: duplicates safety, sequencing and protocol behavior; fixes drift across versions |
+| One large wrapper exposing vendor keys or `Any` values | Reject: hides imports, not semantics; SDK-specific casts and mode branches escape into the app |
+| A separate SDK process behind an internal MAVLink/HTTP bridge | Defer: adds IPC, failure modes and high-bandwidth frame ownership; existing protocols do not cover all media/settings/video contracts |
+| One neutral facade over small ports, selected by flavor | Recommend: keeps one application and one safety policy; limits per-SDK work to adaptation and qualification |
+
+This is simpler in ongoing maintenance, not a zero-cost abstraction. Telemetry/command mapping,
+media state machines and video decoding still need genuine per-SDK implementations and device
+tests. It does not turn unsupported features into a lowest-common-denominator fake success.
 
 ## 4. Existing Code to Adapt
 
-Paths below are relative links to the current sources; proposed classes and source sets do not exist yet.
+Audit of the 2026-09-18 worktree at `5b0c032`, including 189 staged source relocations and an
+unstaged Gradle source-root addition. Those source changes were preserved during this
+documentation-only review. Paths below describe that worktree; the proposed facade is not yet code.
 
-| Current owner | Planned change |
+| Current evidence | Required bridge work |
 | --- | --- |
-| [App build configuration](../lyrebird-app/build.gradle) and [Gradle settings](settings.gradle) | Add SDK dimension, flavor dependencies, unique artifacts, and shared core |
-| [FlightDeckActivity](../lyrebird-app/src/main/java/com/lyrebird/rc/FlightDeckActivity.kt) | Extract shared session ownership, telemetry aggregation, sink implementations, and presenters; isolate SDK UI integration |
-| [DroneController](../lyrebird-app/src/main/java/com/lyrebird/rc/controller/DroneController.kt) | Retain shared control algorithms; replace V5 VM/key access with injected telemetry and flight ports |
-| [ControlAuthority](../lyrebird-app/src/main/java/com/lyrebird/rc/controller/ControlAuthority.kt) | Preserve arbitration semantics; decouple its takeover callback from SDK-bound implementation details |
-| [HTTP command host/server](../lyrebird-app/src/main/java/com/lyrebird/rc/LyrebirdHttpServer.kt) | Remove raw `DJIKey`, laser, and UXSDK detection types from shared boundaries; preserve existing responses |
-| [TelemetryCoordinator](../lyrebird-app/src/main/java/com/lyrebird/rc/telemetry/TelemetryCoordinator.kt) | Use explicit neutral values with compatibility-preserving serializers |
-| [Native mission helper](../lyrebird-app/src/main/java/com/lyrebird/rc/controller/WaylineMissionHelper.kt) | Keep WPMZ-specific construction/execution in V5; accept a shared mission description |
-| [Mission contract/default](../lyrebird-app/src/main/java/com/lyrebird/rc/mavlink/MavlinkMissionSink.kt) | Preserve executor names; use a supported first-run V4 default without silently changing a selected executor |
-| [Payload](../lyrebird-app/src/main/java/com/lyrebird/rc/controller/Payload.kt) | Separate shared capture/download workflows from SDK camera, storage, LRF, and payload actions |
-| [SharedDJIFrameSource](../lyrebird-app/src/main/java/com/lyrebird/rc/webrtc/SharedDJIFrameSource.kt) | Extract SDK-free frame fan-out and processing; leave camera selection/listeners in the V5 adapter |
-| [Application bootstrap](../lyrebird-app/src/main/java/com/lyrebird/rc/DJIAircraftApplication.kt) and [manifest](../lyrebird-app/src/main/AndroidManifest.xml) | Flavor-specific SDK startup, compatible USB handling, shared lifecycle policy, and merged-manifest verification |
+| [AircraftReadings / AircraftTelemetrySource](../lyrebird-core/src/main/java/com/lyrebird/rc/telemetry/AircraftReadings.kt), [AircraftState](../lyrebird-core/src/main/java/com/lyrebird/rc/telemetry/AircraftState.kt) and [Reading types](../lyrebird-core/src/main/java/com/lyrebird/rc/telemetry/TelemetryReadings.kt) are neutral; the interface exposes only `read()` | Extend the existing boundary for state/subscriptions and validity; do not introduce a parallel incompatible telemetry model |
+| [LyrebirdCommandPorts](../lyrebird-app/src/main/java/com/lyrebird/rc/LyrebirdCommandPorts.kt) and [HTTP server](../lyrebird-app/src/main/java/com/lyrebird/rc/LyrebirdHttpServer.kt) use neutral command/media values | Preserve these application/protocol contracts; inject a shared command service below them and typed hardware media beneath the HTTP serializer |
+| [DroneController](../lyrebird-app/src/v5/java/com/lyrebird/rc/controller/DroneController.kt) mixes PID/arrival logic with V5 keys, VMs and virtual-stick parameters | Extract flight primitives and telemetry dependencies; return the algorithms to shared code without retuning or copying them for V4 |
+| [ControlAuthority](../lyrebird-app/src/main/java/com/lyrebird/rc/controller/ControlAuthority.kt) directly calls the now V5-local `DroneController.onSafetyTakeover()` | Inject a shared cancellation/control owner; preserve the persisted per-aircraft Safety latch and independent physical-RC override |
+| [V5MavlinkCommandSink](../lyrebird-app/src/v5/java/com/lyrebird/rc/controller/V5MavlinkCommandSink.kt) hosts V5 keys/VMs and settings/ROI callbacks; [V5MavlinkMotionSink](../lyrebird-app/src/v5/java/com/lyrebird/rc/controller/V5MavlinkMotionSink.kt) contains shared command policy | Split hardware translation from command policy; the shared sinks must not require an Activity or a V5 host |
+| [V5MavlinkMissionSink](../lyrebird-app/src/v5/java/com/lyrebird/rc/controller/V5MavlinkMissionSink.kt) contains both `startOnboard` and `startNative` | Share the existing app sequencer; keep [WaylineMissionHelper](../lyrebird-app/src/v5/java/com/lyrebird/rc/controller/WaylineMissionHelper.kt) and WPMZ compilation in the V5 native adapter |
+| [FlightDeckActivity](../lyrebird-app/src/v5/java/com/lyrebird/rc/FlightDeckActivity.kt) owns the sink instances, `isAirborne`/RTH observer effects, armed/home state and telemetry projection; `onDestroy()` still stops detection and ends logging | Move business state/effects into the runtime; retain permission/picker/view handling and V5 widget integration only |
+| [ProcessNetworkRuntime](../lyrebird-app/src/main/java/com/lyrebird/rc/server/ProcessNetworkRuntime.kt) falls back to `{}`/failed commands when detached; its discovery lambda also captures `host` strongly | Bind network services to a runtime-owned command/state provider, not a weak activity backend; audit closure captures as well as declared weak references |
+| [ProcessTelemetryRuntimeRegistry](../lyrebird-app/src/v5/java/com/lyrebird/rc/telemetry/ProcessTelemetryRuntimeRegistry.kt) retains the source but `detachUiObservers()` clears its flight-state observer | Split permanent flight-state consumers from disposable UI observers and keep neutral state updating without a screen |
+| [ProcessObstacleRuntime](../lyrebird-app/src/main/java/com/lyrebird/rc/server/ProcessObstacleRuntime.kt) substitutes zero motion when its activity callback disappears | Feed shared guard policy from valid runtime telemetry, with unknown/unavailable data explicit; do not remove braking protection by detaching UI |
+| [ProcessStreamingRuntime](../lyrebird-app/src/v5/java/com/lyrebird/rc/server/ProcessStreamingRuntime.kt) owns publishers but still requires callbacks for settings/start; `restartActiveStreaming()` reuses healthy-client suppression | Own settings/target/status in shared orchestration; distinguish explicit reconfiguration from duplicate client discovery, and test detach/restart behavior |
+| [SharedDJIFrameSource](../lyrebird-app/src/v5/java/com/lyrebird/rc/webrtc/SharedDJIFrameSource.kt) combines V5 NV21 acquisition with fan-out; inference/metadata use UXSDK target types | Keep acquisition V5-local; reuse common frame processing, `DetectedTargetSnapshot`, WHIP and TFLite with SDK-free consumers |
+| [Payload](../lyrebird-app/src/v5/java/com/lyrebird/rc/controller/Payload.kt) mixes capture/download workflows and V5 operations | Keep one shared workflow over camera/media ports; move V5 manager objects and optional LRF/thermal/payload access into adapters |
+| [V5 bootstrap](../lyrebird-app/src/v5/java/com/lyrebird/rc/DJIAircraftApplication.kt), [shared manifest](../lyrebird-app/src/main/AndroidManifest.xml), and [build configuration](../lyrebird-app/build.gradle) still have unresolved isolation work | Keep the lease gate; audit loader ordering, flavor manifests/resources and compiler inputs before enabling V4 |
 
-The existing command-core direction already favors one result-producing command implementation for HTTP and MAVLink. Extend that design instead of introducing another command architecture.
+These are static source findings, not device reproductions. The existing SDK-free core and
+protocol tests are a useful base; a green V5 compile does not exercise detach/rebind behavior
+or prove that common sources compile without V5. This review does not modify runtime behavior.
 
 ## 5. Build, Identity, and Packaging
 
@@ -148,6 +308,28 @@ The existing command-core direction already favors one result-producing command 
 
 An optional later settings export/import can transfer non-secret preferences, with capability validation and explicit confirmation. It is not needed for initial side-by-side installation.
 
+### Current packaging gaps to close
+
+- The reviewed [app build](../lyrebird-app/build.gradle) adds `src/v5/java` to the Android
+  **main** source set, alongside a V5-only Kotlin task hook. Physical placement is therefore
+  not isolation. Register Java and Kotlin through the supported flavor source configuration for
+  the installed AGP/Kotlin versions; prove actual compiler inputs for debug, release and tests.
+  Do not preserve a task-name workaround as the architecture or solve it by sharing V5 with V4.
+- The shared manifest still names V5 application/UXSDK classes, and shared resources include
+  SDK-bound layouts/navigation. Move those declarations and generated-binding inputs to V5;
+  preserve the existing sample features there. Audit indirect dependencies as well as `dji.*` imports.
+- [CI](../../.github/workflows/ci.yml) uses V5 compile/test names, but
+  [manual hooks](../../.pre-commit-config.yaml) and [quality tasks](build.gradle) retain old app
+  variant names. The [installer](auto_install_on_connect.sh) defaults to `current` and constructs
+  `Lyrebird-currentV5-debug.apk`, whereas the build names `Lyrebird-current-v5-debug.apk`.
+  Reconcile task names, defaults and artifacts, preferably using AGP output metadata, and test
+  both default/alias selection and demo selection. Shell syntax alone cannot establish correctness.
+- V4 dependency coordinates are documented, not unknown: DJI's official sample declares
+  `com.dji:dji-sdk:4.18` and `com.dji:dji-sdk-provided:4.18` (see references). A local reference
+  checkout was inspected in this review. Absence from a Gradle cache is not a provisioning blocker.
+  Resolution, transitive/native inspection, compatibility with this toolchain and real registration
+  still need to be demonstrated; this documentation pass did not download or build a V4 artifact.
+
 ## 6. Same-Phone Session Ownership
 
 Separate application IDs do not isolate network ports or grant simultaneous access to the same USB accessory.
@@ -162,7 +344,17 @@ Separate application IDs do not isolate network ports or grant simultaneous acce
 - Normal app switching requires a safe stopped session, normally landed with confirmed state. Stop/cancel application operations, apply the validated SDK shutdown sequence, stop publishers/listeners/servers, unregister discovery, then release the lease. The second app never forcibly terminates the first.
 - Process death releases the lease but does not prove the aircraft is landed or that a native mission stopped. A subsequent session reconciles aircraft state and never automatically resumes commands or takes over flight. Link-loss behavior remains an independently tested aircraft/SDK failsafe.
 
-Preserve the existing authority model: safety takeover has no timeout, only Safety may release it, and physical RC override remains a separate latch. Activity recreation and transient SDK reconnects must not reset these policies. The current authority object is in-memory and treats process restart as a new session; this migration must not misrepresent it as cross-app persistent state or use app switching as an automatic authority release.
+Preserve the existing authority model: Safety takeover has no timeout, only Safety may release
+it, and physical RC override remains a separate latch. `AuthorityLatch` and `SafetyLatchStore`
+now persist Safety authority per aircraft within the app; the older description of an entirely
+in-memory latch is obsolete. Restore it before accepting commands for the resolved identity.
+Move persistence wiring out of the activity into the shared runtime without weakening its rules.
+
+Persistence within one app is not shared authority across application IDs. The other APK cannot
+infer that control was released from an empty app-private preference store. Require an explicit,
+grounded handover/reconciliation policy; do not automatically copy secrets/latches, reset Safety,
+resume commands, or treat app switching as release. This remains a cross-app qualification/design
+gate, not a guarantee provided by the bridge or the cooperative lease.
 
 ## 7. Capability and Mission Policy
 
@@ -188,88 +380,151 @@ Expose capabilities consistently to the app, HTTP, and MAVLink. Additive capabil
 
 For sensor-dependent modes, unavailable required data produces an explicit refusal or an operator-selected mode that does not claim that protection. Never disable DJI onboard avoidance or weaken safety gates merely to obtain V4 compatibility.
 
-## 8. Implementation Sequence and Gates
+## 8. Bridge-First Implementation Batches
 
-Each phase should be split into reviewable changes, with focused checks immediately after each behavioral extraction. Keep V5 working throughout; do not combine controller retuning, UI redesign, and SDK replacement in one change.
+This order supersedes the earlier relocation-first interpretation of the phases. Keep each
+batch reviewable and V5 operational. A hardware port is complete only when an existing consumer
+uses it and the adapter/fake tests exercise it. Do not count new interfaces, renamed files or
+process singleton declarations as completed behavior. Preserve staged moves; review which
+policy/workflow classes should return to shared code after their SDK access has been removed.
 
-### Phase 0: Qualify the Target and Toolchain
+### B0: Reconcile the Baseline and V4 Feasibility
 
-- Select the first V4 aircraft/controller/firmware, using the existing V5 phone and Android build as the fixed device baseline. Record its model, ARM ABI, and 4 KB/16 KB page size; this is validation of the current phone, not selection of a new one.
-- Prove a V4 4.18 bootstrap can build with the chosen toolchain, register with its own application identity, reconnect, receive telemetry, and provide decoded video. This is a future bench spike, not a flight-control rollout.
-- Verify actual virtual-stick/native-mission/camera capabilities, DJI activation or account requirements, permissions, and any conflicts with installed DJI apps.
-- Use RosettaDrone as a reference for V4 API usage and test cases, not as evidence that its historical device matrix is supported by this new build.
+- Record the current staged/unstaged work and V5 tests before another code edit; checkpoint
+  source-only moves separately from semantic changes. Repair the packaging/tooling gaps in section 5.
+- Freeze representative HTTP, TCP and decoded MAVLink fixtures. Reuse existing fixtures and
+  tests rather than building a second protocol test system.
+- Resolve and inspect the documented V4.18 dependencies in an isolated bootstrap/bench step.
+  Pin the resolved version and inspect duplicate classes, native ABI/page size, merged manifests,
+  SDK auto-start components and key requirements. Never load V4 and V5 in one test APK.
+- Use the same V5 phone/Android baseline, with an explicitly selected V4 aircraft/controller/
+  firmware. Prove registration/reconnect and decoded video on that tuple before committing to
+  the full V4 flight rollout. A missing V4 key blocks registration, not neutral interface work.
 
-Gate: a repeatable target-specific build and bench connection. Native-library or SDK startup incompatibility on the required phone is a blocker to resolve before a large core extraction. Re-estimate after this phase.
+Gate: reproducible V5 baseline and an honest V4 feasibility report separating resolution, build,
+registration, video and hardware checks. A native/startup incompatibility must be resolved before
+claiming a deliverable V4 backend. Small V5 bridge improvements can proceed independently.
 
-### Phase 1: Freeze Contracts and Extract Neutral State
+### B1: Platform Composition and a Telemetry Vertical Slice
 
-- Establish the current V5 compile/unit-test baseline and record HTTP, TCP, and MAVLink behavior for representative telemetry and commands.
-- Introduce neutral telemetry, identity, capabilities, optional-sensor, and detection types. Replace SDK value leakage at protocol boundaries while preserving serialized output.
-- Reuse `CommandResult` and the existing motion/command/mission contracts. Introduce only the lower-level SDK ports needed for the next vertical slice.
-- Start with V5 telemetry through the new types to the existing clients; verify timestamps, altitude references, battery units, and missing-data behavior.
+- Introduce the minimal `AircraftPlatform`/factory boundary and `FakeAircraftPlatform` in tests;
+  add only telemetry/connection capabilities initially. Reuse and evolve the existing neutral
+  telemetry types instead of designing a new all-SDK data schema from scratch.
+- Create a V5 implementation using the existing source. Let the shared runtime own it, its
+  subscriptions and the state/projections feeding TCP, MAVLink and UI.
+- Move `isAirborne`, RC-triggered RTH handling, identity/latch restoration and flight-log
+  lifecycle effects out of UI observers. UI attach/detach disposes only its own subscription.
+- Treat weak activity command bindings as transitional; telemetry must come from the runtime
+  even while command migration is still in progress. Unknown/stale state stays explicit.
 
-Gate: current V5 behavior and wire fixtures remain unchanged, and boundary DTOs have no DJI imports. No V4 behavior is enabled yet.
+Gate: injected fake state reaches the existing serializers with compatibility fixtures intact;
+two UI observers can attach/detach independently; no-UI telemetry keeps updating; old-generation
+callbacks are ignored. V5 mapping is compile-tested and covered by focused adapter tests.
 
-### Phase 2: Extract Shared Command and Control Code Behind V5 Adapters
+### B2: Shared Flight, Authority and Mission Policy
 
-- Adapt V5 telemetry, virtual-stick modes/send operations, takeoff/land/RTH, and flight limits to the new ports.
-- Keep one `DroneController` implementation for all loops, sequencers, session IDs, arrival latches, cancellation, RC override, and safety takeover. Preserve existing V5 axis behavior and timing.
-- Extract SDK-free camera/media workflows and command-sink implementations from the activity. Keep WPMZ compilation in a V5 native-mission implementation.
-- Move cohesive SDK-free slices and their tests into `:lyrebird-core`. Resolve Kotlin visibility, Android resource ownership, lifecycle dependencies, and callbacks deliberately.
-- Route UI, HTTP, MAVLink, and app-executed missions through the same authorization/command policy. Low-level SDK adapters must not become alternate command entry points.
+- First add `FlightPrimitives` and a V5 implementation for existing actions/modes/setpoints;
+  test the SDK-argument mapping and asynchronous mode ordering.
+- Then inject telemetry, primitives, clock/scheduler and native-mission operations into the
+  existing controller. Keep its PID/geometry, sequence IDs, arrival thresholds and timing;
+  move that behavior back to shared code only after V5 comparisons pass.
+- Move HTTP/MAVLink sink policy and the `startOnboard` sequencer into shared services. Keep
+  `startNative` compilation/execution in the V5 native adapter. Do not implement a second V4
+  navigation controller or app mission sequencer.
+- Inject takeover/cancellation into `ControlAuthority`; authenticate origin at the transport
+  boundary, capture it for the operation, and preserve Safety persistence and independent
+  physical-RC override. SDK callbacks cannot reset policy or replay cancelled control.
 
-Gate: V5 compiles and passes the focused controller, safety, protocol, ROI, and media tests; V5 simulator/bench behavior matches baseline. The core builds without either DJI SDK on its classpath.
+Gate: fake-clock controller/mission tests, V5 argument comparisons, refused-waypoint parity,
+accepted-versus-completed results, cancellation/takeover/late-callback tests and RC-override
+tests. Dashboard MAVLink/HTTP and V5 bench comparison are mandatory before flight use.
 
-### Phase 3: Introduce Flavors and Isolate SDK-Bound UI
+### B3: Camera, Media, Gimbal and Optional Sensors
 
-- Add the SDK dimension, V4 identity/key configuration, flavor composition factories, dependencies, manifests, artifact names, and variant-aware build/install tooling.
-- Move remaining V5-only sources/resources into `src/v5`, preserving package names where practical. Retain vendor/sample features there; do not delete them just to make V4 compile.
-- Extract a common flight-deck shell and presenter from the activity. Isolate V5 widget subtrees behind small view integration points; use shared neutral status/controls and video presentation for V4. Do not copy the whole activity or import the entire V4 UXSDK merely for one widget.
-- Add the shared session-ownership/startup/shutdown policy before simultaneous installed-app connection tests. Provide an honest disconnected/bootstrap state for V4, not successful no-op SDK implementations.
+- Introduce the hardware camera/gimbal/media ports under the existing application command/media
+  surfaces. Keep serialized shutter/download workflows and response rendering shared.
+- Give capture-to-file correlation and downloads explicit operation/connection identity; remove
+  activity references from queued work. Do not deliver an old capture into a restarted endpoint
+  or query a replacement aircraft for a previous operation.
+- Put ROI scheduling/math in the shared controller using neutral gimbal/telemetry ports;
+  keep M400 key rebinding and component selection in the V5 implementation.
+- Expose optional LRF/thermal/payload/obstacle readings and limits through capabilities. Feed
+  guard policy from runtime state, never zero-motion fallbacks caused by missing UI callbacks.
 
-Gate: both APKs compile and install together on the target phone with distinct identities. V5 remains operational. V4 runtime contains no V5 SDK/UXSDK artifacts; V5 runtime contains no V4 SDK. The inactive app cannot start competing endpoints or a product connection.
+Gate: capture/download fixtures, command ordering, cancellation during media operations,
+component replacement, ROI cancellation/mode restoration, missing-sensor refusals, and no-UI
+obstacle inputs. Existing V5 camera/payload behavior receives explicit bench regression coverage.
 
-### Phase 4: Implement V4 Telemetry, Flight, Camera, and Media Adapters
+### B4: Shared Video, Streaming and Detection
 
-- Normalize V4 component/key callbacks into the shared snapshot and reconnect model. Subscribe once per component and fan out neutral state; avoid consumers replacing each other's single SDK callbacks.
-- Implement supported flight primitives and mode transitions. Configure modes before sending, use bounded/cancellable retries, and obey V4's documented 5-25 Hz virtual-stick send cadence. Keep controller computation and command refresh rates distinct if needed.
-- Add pure conversion tests for forward/right/up, yaw, ground/body transformations, altitude mode, limits, and manual-stick scaling. Validate each axis on simulator/hardware before autonomous paths.
-- Feed physical RC state and SDK authority changes into Lyrebird's existing override policy. A late callback, retry, or reconnect cannot re-enable motion after cancellation or takeover.
-- Implement supported camera/gimbal/media operations, including asynchronous mode-change ordering, recording transitions, download-mode effects on preview, and reliable capture-to-file identification.
-- Enable the shared app-executed mission path with the explicit V4 default. Keep unavailable capabilities and native execution visibly unsupported.
+- Separate decoded-frame acquisition from `SharedDJIFrameSource` fan-out, processing and
+  metadata. Supply the same frame contract to preview, WHIP and local TFLite consumers.
+- Replace UXSDK `DetectedTarget` outside view integration with the existing neutral target
+  snapshot. Keep model selection, local inference lifecycle and projection shared; onboard
+  AutoSensing is an optional V5 provider.
+- Make streaming settings, target suppression, explicit restart/reconfiguration and metrics
+  runtime-owned. Keep V5 native-stream configuration behind an optional port, not weak getters
+  that turn into empty credentials/configuration when the screen closes.
+- Preserve in-flight frame drain, buffer release/retention and one source registration across
+  consumer changes. Bound queues and prove inference cannot starve command scheduling.
 
-Gate: supported commands have the same HTTP/MAVLink outcomes and safety behavior on V4; unsupported commands fail honestly. Controlled takeoff, landing, RTH, directional motion, cancellation, takeover, and RC override are separately signed off on the target tuple.
+Gate: frame format/stride/lifetime and consumer-detach tests; duplicate discovery does not
+restart a healthy stream, explicit settings changes do; detection and metrics survive UI
+recreation; WHIP -> MediaMTX -> WHEP bench playback remains the only public video workflow.
 
-### Phase 5: Implement V4 Video and Reuse Local Inference
+### B5: Finish Runtime Ownership and the Platform View Shells
 
-- Extract the shared frame consumer/fan-out layer from `SharedDJIFrameSource`; keep V5 camera selection and listeners flavor-local.
-- Implement V4 compressed-feed acquisition and decoding, then adapt actual callback format/stride to the common decoded-frame contract. Verify timestamp monotonicity, buffer ownership, rotation, and source-size changes.
-- Reuse the current WebRTC encoder/peer/WHIP path, metrics, adaptive frame rate, and MediaMTX integration. Keep the optional V5 surface encoder V5-specific.
-- Reuse local TFLite inference with neutral detection types. Tune resolution, inference cadence, and frame dropping from measurements on the target phone, independently of the control thread.
-- Test decoder teardown, feed reconnection, recording/photo transitions, and consumer removal while frames are in flight.
+- Consolidate startup/stop ordering under the shared application runtime. Registries become
+  temporary delegates, not separate lifetime authorities. UI depends on presenter/state and
+  commands; SDK initialization never depends on a screen being opened.
+- Remove the remaining activity-hosted command, sensor, state and settings callbacks; retain
+  only UI-only observers, permissions, pickers and platform view integration.
+- Move V5 manifest/resources and retained sample screens into flavor ownership. Replace the
+  `src/v5`-added-to-`main` workaround with proven flavor-only Java/Kotlin registration, including
+  release and test inputs. Update quality scopes and installer/CI/manual-hook tasks together.
+- Audit SDK-issued commands inside retained vendor widgets so the UI cannot bypass shared
+  authorization merely because its controller path has been made neutral.
+- Add a test harness composing the shared runtime with a fake platform and no DJI SDK/UXSDK;
+  use it to expose indirect dependencies, not just search for import strings.
 
-Gate: visible preview and WHIP-to-MediaMTX-to-WHEP playback on both apps, stable reconnects, and an agreed-duration bench soak with latency/load recorded. Video or inference stalls cannot starve flight commands. Do not add a direct WebSocket-signaling viewer or a second public RTP-only video path.
+Gate: shared runtime/controller/mission tests compile without DJI, no runtime call depends on
+an Activity, stale UI detach cannot remove the current observer, and explicit safe shutdown
+releases the lease last. V5 recreation/background behavior still needs device qualification.
 
-### Phase 6: Add V4 Native Missions Where Required
+### B6: Add the Real V4 Adapter
 
-This is a separately scoped milestone, not a prerequisite for V4 models that only support app-executed missions.
+- Enable `currentV4` only with its real bootstrap, separate key, manifest and V4-only dependency
+  graph. Keep `demoBiomassV4` disabled. No placeholder that returns successful SDK operations.
+- Implement the ports using the B0-qualified SDK and target. Reuse the same command service,
+  controller, sequencer, telemetry serializers, WHIP pipeline and local inference.
+- Run the common conformance suite plus V4-specific callback/mode/axis tests. Verify V4
+  `FlightControlData` units and 5-25 Hz send cadence; qualify axes and altitude references before
+  closed-loop movement. Preserve cancellation while enabling/changing SDK control modes.
+- Adapt `VideoFeeder`/decoder output to the tested decoded-frame contract. Measure format,
+  stride, timestamp and buffer behavior; recording/photo transitions must not corrupt frames.
+- Select the shared app executor for a fresh V4 installation; reject requested native execution
+  until implemented. Optional native support is a separate adapter milestone with a representable
+  mission subset, original item-index mapping and upload/start/progress/stop tests.
 
-- Reuse the shared mission storage, MAVLink exchange, validation, and progress contract. Compile the neutral mission into the operator supported by the target aircraft, rather than trying to upload V5 KMZ files.
-- Define an explicit supported subset for actions, headings, speeds, waypoint counts, altitude frames, finish behavior, and link-loss behavior. Add a separate V4 operator-generation adapter only when a target product needs it.
-- Preserve original mission item indices through compilation so acknowledgments, progress, restart/current-item behavior, and downloads agree with the shared mission model.
-- Test upload acceptance versus execution readiness, errors, start/pause/resume/stop, reconnection, safety takeover, and unsupported mission rejection. Never infer completion solely from a successful SDK method callback.
+Gate: both APKs build/install with distinct IDs and no cross-generation SDK classes/native
+libraries. V4 telemetry, supported camera/media/video and flight primitives pass their bench
+gates; unavailable capabilities fail honestly. No app switch or reconnect resumes commands.
 
-Gate: native execution is advertised only for qualified combinations and representable plans. V5 native mission behavior is unchanged; app-executed missions remain a separate explicit choice.
+### B7: Qualify the Two Apps and Document Extension Rules
 
-### Phase 7: Qualify and Release the Two Apps
+- Exercise cold start, both app launch orders, USB chooser/defaults, reconnect, stale callbacks,
+  recreation, screen lock, port conflicts, partial startup failure, process death and grounded
+  handover. Confirm persistent Safety behavior and the unresolved cross-app authority policy.
+- Compare HTTP/TCP/MAVLink on both backends using the dashboard, including negative cases,
+  missing data, signing, mission progress and media completion. Run relevant Python regressions.
+- Qualify video/inference latency, load and soak on the fixed phone baseline; test release
+  packaging and V5 upgrades/demo behavior as well as debug builds.
+- Publish supported tuples, capability limits, key/signing provisioning, artifacts and rollback
+  instructions. Record the adapter contract and conformance checklist for any future SDK 6.
 
-- Exercise cold start, USB attached before launch, detach/reconnect, activity recreation, screen lock/background behavior, port conflicts, process death, and wrong-app selection with both APKs installed.
-- Verify separate preferences, credentials, files, provider authorities, versioning, and V5 upgrade continuity. Test both app launch orders and normal handover while safely grounded.
-- Use the GroundStation dashboard to compare MAVLink telemetry/commands against HTTP on both backends. Include missing values, units, cancellation, photo/download, mission progress, and negative/unauthorized cases.
-- Run the relevant Python regression suite and existing Android quality gates. Update quality scopes for the new core/flavor roots, CI tasks, manual pre-commit hooks, and installer variant names.
-- Publish two clearly named standard artifacts, supported-device/capability matrices, installation/USB-default instructions, and rollback steps. Keep V5 demo builds available separately.
-
-Gate: the acceptance checklist below is complete for each claimed target. A successful build or a historical RosettaDrone support claim is not a substitute for this qualification.
+Gate: section 9 is satisfied for every advertised target. Future SDK work starts with a new
+adapter and feasibility spike; it does not require copying application policy or guaranteeing
+compatibility with an SDK whose interfaces have not yet been examined.
 
 ## 9. Verification and Acceptance
 
@@ -277,6 +532,12 @@ Reuse existing controller, ROI, MAVLink signing/mission/FTP/message, and frame-m
 
 Required regression cases include:
 
+- The same shared runtime can use V5 or a hardware-free fake by constructor injection, with no
+  `dji.*`, UXSDK, V5 registry or Activity type in the shared contract/dependency graph. Later run
+  the same behavioral contract suite against V4; SDK-specific mapping tests remain separate.
+- Detaching/recreating UI keeps live telemetry, command handling, flight-state effects, logging,
+  obstacle inputs and detection intact. Two observers and stale-detach ordering are covered;
+  check behavior, not just whether a socket remains bound or an object is still reachable.
 - Identical neutral commands produce equivalent physical intent in both adapters, including heading wrap, downward/upward signs, altitude references, ignored axes, and limits.
 - A disable/cancel operation can never retry as enable; a timed-out or superseded operation cannot finish a later command.
 - Safety takeover stays latched without a timeout, Pilot cannot release it, and reconnect/UI recreation cannot bypass it. Physical RC override remains independently enforced.
@@ -284,15 +545,28 @@ Required regression cases include:
 - HTTP/TCP compatibility fixtures and decoded MAVLink values agree, including errors and unsupported features. Do not blindly compare packets containing variable sequence numbers/timestamps.
 - Requested native missions never silently become app-executed missions. Unsupported items do not produce accepted/executed status.
 - Frame callbacks cannot outlive disposed consumers; repeated start/stop/reconnect remains stable with video and inference enabled.
+- Explicit stream reconfiguration is not suppressed as duplicate discovery; disappearing UI
+  cannot erase native-mode configuration or prevent stream recovery.
+- Blocked startup touches no connection-capable SDK component, media worker or publisher;
+  partial startup rolls back; explicit stop is idempotent and releases the lease last. Process
+  death is tested separately and never treated as a graceful stop or mission completion.
 
-Representative future Gradle gates, run from this directory after the variants/modules exist:
+Existing V5/core gates, run from this directory for each affected implementation batch:
 
 ```bash
 ./gradlew :lyrebird-core:testDebugUnitTest
 ./gradlew :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest
+./gradlew :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck
+./gradlew :app:assembleCurrentV5Debug :app:assembleDemoBiomassV5Debug
+```
+
+Additional gates only after the real V4 variant is enabled:
+
+```bash
 ./gradlew :app:compileCurrentV4DebugKotlin :app:testCurrentV4DebugUnitTest
 ./gradlew :app:assembleCurrentV5Debug :app:assembleCurrentV4Debug
-./gradlew :app:assembleDemoBiomassV5Debug
+./gradlew :app:dependencies --configuration currentV4DebugRuntimeClasspath
+./gradlew :app:dependencies --configuration currentV5DebugRuntimeClasspath
 ```
 
 Also configure and run Spotless, Detekt/Lint, and release-variant build checks for the new source roots. Inspect both resolved runtime classpaths and merged manifests/APKs. From the repository root, run `python -m pytest GroundStation/tests -q` and the applicable Python quality gates when shared client contracts are touched.
@@ -301,6 +575,8 @@ Release acceptance:
 
 - [ ] V4 and V5 standard apps install together and have distinct labels/IDs; V5 upgrades preserve its identity and settings.
 - [ ] Shared core contains no DJI dependency; each APK contains only its selected SDK generation.
+- [ ] Shared runtime, controller and presenter depend on the platform ports, not on concrete
+  flavor classes or Activity callbacks; the fake-platform harness proves this dependency boundary.
 - [ ] Common control/protocol/video-processing implementations are shared, not duplicated across flavors.
 - [ ] Only one app owns the live connection/server session; both launch orders, failure cleanup, and safe handover pass.
 - [ ] Each advertised V4 feature has passed the relevant target-specific test; missing features fail explicitly.
@@ -339,22 +615,55 @@ Lyrebird's current [license](../../LICENSE) is Business Source License 1.1 with 
 
 Planning range for one Android/DJI engineer with timely access to the required hardware: approximately 8-13 engineer-weeks for shared-core extraction, two apps, one qualified V4 target, shared app-executed missions, media/video, and V5 regression work. This is an estimate, not a commitment. Native V4 mission support, additional aircraft families, older 32-bit phones, or decoder/platform incompatibilities add separate work and qualification time.
 
-RosettaDrone reduces API-discovery effort and supplies test scenarios; it does not remove Lyrebird's extraction, safety, video, or hardware-validation work. Re-estimate after Phase 0 instead of treating the earlier feasibility estimate as a fixed schedule.
+RosettaDrone reduces API-discovery effort and supplies test scenarios; it does not remove
+Lyrebird's extraction, safety, video, or hardware-validation work. The range above is a historical
+planning estimate, not a revised quote after the source moves. Re-estimate after B0 and the first
+V5 bridge slice; subtracting moved lines or counting registries is not a measure of completion.
 
-Inputs to settle before implementation starts:
+Inputs to settle before the V4 hardware rollout:
 
 1. First V4 aircraft model, controller, and firmware. Record the existing V5 phone/Android baseline and use that same phone for V4 qualification and V5 regression; the phone target is already decided.
 2. Whether V4 native aircraft missions are required for the first delivery or may follow app-executed missions.
 3. Required V4 camera/media/optional-payload features and acceptable video/latency/soak targets.
 4. Distribution route, signing ownership, and separate application-key provisioning for V4.
 
-Recommended first implementation change after the bench spike: a V5-only telemetry/command-contract extraction with compatibility tests. It creates the shared foundation without mixing the initial refactor with unverified V4 flight behavior.
+Recommended next code batch: B0's baseline/tooling reconciliation, then B1's V5 telemetry path
+through a minimal platform facade and the shared runtime. The V4 feasibility spike is separately
+gated. No V4 artifact is needed to test a shared runtime with a fake backend, but a fake is not
+evidence that the actual V4 SDK registers, decodes video or flies correctly.
+
+## Research Evidence and Limits
+
+The 2026-09-18 review used the current source paths in section 4, the SDK-free core build,
+the staged Gradle/source layout, current DJI V5 documentation via Context7, the official V4
+sample/API reference and Android's flavor documentation. No runtime code, staged moves or
+build configuration was changed by this review; no aircraft or V4 build was exercised.
+
+| Verified API fact | Architectural consequence |
+| --- | --- |
+| V4 `FlightControlData` documents mode-dependent m/s, degrees, degrees/s and altitude; `FlightController` documents 5-25 Hz sends | Use typed physical setpoints and adapter mapping/cadence tests, not a universal normalized joystick wrapper |
+| V5 advanced virtual stick requires its mode enabled and documents a 5-25 Hz send range; KeyManager listeners have holder-based cancellation | Adapters own SDK mode ordering/subscriptions; shared runtime owns authority and cancellation, including late callbacks |
+| V4 decoded YUV callback includes `MediaFormat`, `ByteBuffer`, size and dimensions; V5 frame callbacks expose a requested format and offset/length | Normalize and qualify decoded frames with explicit lifetime/stride; do not cast or assume both SDKs supply interchangeable NV21 |
+| Official V4 sample declares runtime/provided 4.18 coordinates | Dependency resolution is an actionable spike, not a user-supplied binary prerequisite inferred from cache contents |
+| Android merges `main` with the selected flavor source sets | Adding `src/v5` to `main` is not SDK isolation; validate compiler inputs, resources, manifests and runtime artifacts |
+
+Context7's V4 excerpts included conflicting legacy/normalized descriptions, so the physical-unit
+statement was checked against the official V4 `FlightControlData` and `FlightController` HTML
+reference in the local DJI checkout. Documentation establishes an API contract, not axis/frame
+correctness or timing on a particular aircraft. Verify actual callback buffer lifetime and
+SDK shutdown behavior on the chosen SDK/device. No claims about SDK 6 availability or API shape
+are made here.
 
 ## Reference Documentation
 
 - [Android build variants and source sets](https://developer.android.com/build/build-variants).
+- [Official DJI V4 Android sample dependencies](https://github.com/dji-sdk/Mobile-SDK-Android/blob/master/Sample%20Code/app/build.gradle).
 - [DJI V4 keyed interface](https://github.com/dji-sdk/Mobile-SDK-Android/blob/master/docs/README-KeyedInterface.md).
 - [DJI V4 flight-controller API, including virtual-stick cadence](https://developer.dji.com/api-reference/android-api/Components/FlightController/DJIFlightController.html).
 - [DJI V4 FlightControlData units](https://developer.dji.com/api-reference/android-api/Components/FlightController/DJIFlightController_DJIVirtualStickFlightControlData.html).
 - [DJI V4 decoder API](https://developer.dji.com/api-reference/android-api/Components/CodecManager/DJICodecManager.html).
+- [DJI V4 decoded YUV callback](https://developer.dji.com/api-reference/android-api/Components/CodecManager/DJICodecManager_YuvDataCallbackInterface.html).
+- [DJI V5.18 virtual-stick API](https://github.com/dji-sdk/Mobile-SDK-Doc-V5/blob/sdk_releases/v_5.18.0/api-reference/en/android-api/Components/IVirtualStickManager/IVirtualStickManager.html).
+- [DJI V5.18 key manager API](https://github.com/dji-sdk/Mobile-SDK-Doc-V5/blob/sdk_releases/v_5.18.0/api-reference/en/android-api/Components/IKeyManager/IKeyManager.html).
+- [DJI V5.18 camera stream/frame API](https://github.com/dji-sdk/Mobile-SDK-Doc-V5/blob/sdk_releases/v_5.18.0/api-reference/en/android-api/Components/IMediaDataCenter/ICameraStreamManager.html).
 - [DJI V5 release notes and supported aircraft/controller combinations](https://developer.dji.com/doc/mobile-sdk-tutorial/en/).

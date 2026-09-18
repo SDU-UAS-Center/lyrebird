@@ -1,7 +1,25 @@
 # Flight Deck Decomposition Plan
 
 Date: 2026-09-15
-Status: implementation in progress on `feature/dual-sdk-implementation`; changes are not committed.
+Reviewed: 2026-09-18.
+Status: partial implementation on `feature/dual-sdk-implementation`. Several extraction batches
+are committed and further V5 source relocations are staged. The activity-independent runtime
+and SDK-neutral platform bridge remain incomplete.
+
+## Readiness Correction
+
+The earlier completion descriptions overstated the result. Moving a class into `src/v5` or
+keeping its instance in a process registry does not make application behavior SDK-neutral or
+independent of the screen. In the current worktree, `FlightDeckActivity.onDestroy()` still stops
+detection and ends flight logging; its flight-state observer updates controller state and
+detects RC-triggered RTH. Network and MAVLink runtimes still obtain behavior through replaceable
+activity bindings. These are remaining implementation tasks, not only device-test gates.
+
+Continue with the `AircraftPlatform` bridge and shared runtime described in
+[DUAL_SDK_FLAVORS_PLAN.md](DUAL_SDK_FLAVORS_PLAN.md#architecture-decision). Preserve the source
+relocations, but prioritize one end-to-end V5 telemetry/command path through that boundary over
+further broad file moves. Do not duplicate FlightDeck, control loops, or mission sequencing for
+V4 or a hypothetical SDK 6.
 
 ## Implementation Checkpoint
 
@@ -14,23 +32,24 @@ line numbers. Progress is tracked by responsibility and validation, not by lines
 | 1 | `LyrebirdSettings` owns typed preferences, validators, and the unchanged per-aircraft key set. `SettingsSnapshot` owns settings JSON; `StreamingMode` retains its original package in a separate file. | Live settings comparison. SDK effects and MAVLink parameter dispatch remain in their existing callers. |
 | 2 | `SettingsDialogViews` owns dialog rendering; `FlightDeckSettingsPages` uses SDK-free `SettingsPageActions` and `FlightSettingsActions`. Display labels and settings JSON have regression tests. | Manual navigation through every settings page and dialog, including dismiss/recreation. |
 | 3 | `DeviceStatusSource` owns application-context sensor/location subscriptions and a weak location listener. `DeviceStatusSnapshot` feeds the existing wire fields. Permissions remain in the activity; streaming Wi-Fi lock ownership is now process-scoped. | Sensor/permission checks and LeakCanary on the target device. |
-| 4 | `V5AircraftTelemetrySource` owns key reads, battery subscriptions, high-frequency telemetry, flight-state callbacks, and generation-scoped listener registration. `ProcessTelemetryRuntimeRegistry` also owns the aircraft connection listener and process phone-status source. Core `AircraftState` carries readings plus connection generation and observation time; shared projections feed TCP, MAVLink, and fleet output. | Samples are still obtained from SDK caches at each existing emission; video metadata retains its separate V5 telemetry provider. A future step may consolidate that provider and make freshness policy affect command acceptance. |
-| 5 | HTTP command boundary exposes neutral media, detection, LRF, and flight ports; `LyrebirdHttpServer.kt` has no direct DJI, ViewModel, UXSDK, or `DroneController` dependency. V5 media, payload/camera, motion, and mission sinks now live in dedicated adapters; MAVLink flight policy is pure and tested. | Shared mission/controller policy and adapter contract tests can be broadened later; native V4 mission implementation remains future work. |
-| 6 | Target selection, WHIP endpoint construction, V5 WebRTC streamer construction, V5 native RTMP/RTSP/Agora/GB28181 lifecycle, and process-scoped publisher trigger/Wi-Fi-lock ownership are extracted behind streaming helpers and `ProcessStreamingRuntimeRegistry`. The activity retains only the weak V5 settings/status host. | Device qualification of each streaming mode and activity recreation. |
-| 7 | Detection port, neutral source/active/model/threshold telemetry projection, provider lifecycles, and `ProcessDetectionRuntimeRegistry` are extracted. The process coordinator owns V5 AutoSensing and local TFLite/frame-listener state; the activity retains eligibility messages, file pickers, and overlay rendering. | Verify provider transitions, frame delivery, model selection, and activity recreation on-device. |
-| 8 | Runtime startup now stops after a blocked/non-serving session, activity teardown releases the lease last, `ProcessNetworkRuntime` owns HTTP/telemetry/discovery sockets and their multicast lock, `FleetMeshSessionRegistry` owns fleet state, `ProcessMavlinkRuntimeRegistry` owns MAVLink/FTP, `ProcessStreamingRuntimeRegistry` owns WebRTC and native RTMP/RTSP/Agora/GB28181, `ProcessObstacleRuntimeRegistry` owns obstacle callbacks, `ProcessCaptureExecutorRegistry` owns capture work, `ProcessSettingsBackupRuntimeRegistry` owns settings backup, `ProcessAircraftSessionRegistry` owns V5 control ViewModels/DroneController, `ProcessTelemetryRuntimeRegistry` owns aircraft/phone telemetry, `ProcessMediaRuntimeRegistry` owns MediaVM, `ProcessPayloadRuntimeRegistry` owns payload controls, `ProcessRoiRuntimeRegistry` owns the ROI gimbal loop, and `ProcessDetectionRuntimeRegistry` owns detection providers/frame listeners. Activity bindings are weak or neutral and replaceable. SDK bootstrap is lease-gated. | Verify activity recreation, SDK initialization, lease ordering, control safety, media/payload access, detection, ROI braking, settings persistence, discovery multicast, and long-lived streaming on-device. |
-| 9 | The existing `FlightDeckActivity` remains the canonical class name and manifest entry, its DJI V5 implementation lives under `lyrebird-app/src/v5/java`, and the V5 application/bootstrap/launcher/testing entry classes now live there as well. The SDK flavor dimension declares `v5` and `v4`; `currentV5` and `demoBiomassV5` register the V5 shell/dependencies, while V4 variants are disabled until a real DJI V4 artifact and V4 source tree are provisioned. No fake V4 dependency or adapter has been added. | Provision and inspect DJI V4.18 artifacts, then add V4 bootstrap/source registration and neutral adapters; perform explicit lifecycle/device qualification. |
+| 4 | Neutral readings/state and V5 subscription code exist; the process registry owns the source and a connection listener. | Finish the neutral observable telemetry port and one runtime state store. Flight-state business effects still live in an activity observer, which detach clears. Cache defaults/envelope timestamps do not establish per-field validity. |
+| 5 | HTTP exposes neutral application ports; V5 payload/camera, motion and mission sink classes are extracted. | Split shared command/controller/onboard-sequencer policy from SDK primitives. V5 hosts still expose keys/VMs or concrete telemetry; shared `ControlAuthority` directly calls the V5-local controller. Add conformance tests and safety review. |
+| 6 | Policy helpers and process-retained WebRTC/native publishers exist. | Runtime-owned settings, targets, metrics and explicit restart semantics still need separation from activity callbacks. Add a decoded-frame port and optional native-streaming adapter; keep WHIP and its consumers shared. |
+| 7 | Process detection registry and provider classes exist. | Activity teardown still stops detection; startup/configuration needs an activity binding and inference uses UXSDK targets. Share coordination/neutral detections, preserve provider/frame ownership without UI, and keep only messages/pickers/overlay rendering on screen. |
+| 8 | Process registries retain many sockets, sources, VMs and workers; a lease gates application SDK startup and network startup checks its serving state. | Build one runtime-owned dependency graph over `AircraftPlatform`. Required command/telemetry/safety/obstacle providers must not be weak activity callbacks. Implement/verify gated initialization, stale-detach handling, logging lifetime, safe explicit stop and lease-last teardown across all owners. |
+| 9 | `FlightDeckActivity` and V5 bootstrap are under `src/v5`; additional V5 relocations are staged. `sdk` flavors exist, V4 is disabled. | A current Gradle edit adds `src/v5/java` back to `main`; V5 manifest/resources and indirect dependencies still need isolation. Implement shared presenter/composition, retain V5 view integration, and qualify the real V4 dependencies rather than treating cache absence as a blocker. |
 
-Automated checks at this checkpoint include both Android unit-test suites, both Spotless checks,
-and `assembleCurrentDebug` plus `assembleDemoBiomassDebug`. The settings regression pins the
+Previously recorded implementation checks include Android unit tests, Spotless, and V5 debug
+assembly (earlier checkpoints used the pre-flavor task names). The settings regression pins the
 representative JSON bytes; telemetry tests compare units, axes, defaults, and preservation of
 session authority/progress across projections. No connected Android device was available for UI,
 SDK, flight, or streaming qualification. A green build is not a completed bench gate.
 
-Latest results: 241 app tests, 81 core tests, and 138 Python tests passed, with no failures or
-skips. The activity is 3,924 lines, down from 7,665. The V5 flavor builds are `currentV5` and
-`demoBiomassV5`; V4 variants are intentionally disabled pending SDK provisioning. The documentation
-build passed.
+Historical suite results were 241 app tests, 81 core tests, and 138 Python tests. They are not
+new evidence of a platform bridge or no-UI runtime; this documentation review does not rerun
+Android/Python or device tests. The reviewed activity has 3,925 lines, down from 7,665. Current
+V5 variants are `currentV5` and `demoBiomassV5`; V4 remains disabled pending implementation and
+qualification, not just SDK cache population.
 `qualityLyrebird` generated reports with non-blocking findings; Android Lint reported no errors
 in the new extracted files. Style/localization findings remain, including those carried with
 the existing UI code. These are not being represented as clean static-analysis reports.
@@ -42,8 +61,9 @@ Since that checkpoint, the branch has also landed:
 - V5 media, detection, MAVLink payload/camera, motion, and mission adapters;
 - pure MAVLink flight policy, WHIP target/endpoint policies, detection telemetry projection, and
   V5 WebRTC construction policies;
-- blocked-runtime startup handling, lease-last teardown ordering, and a process-scoped lease gate
-  before DJI SDK initialization.
+- blocked-network startup handling and a process-scoped lease gate in application SDK startup.
+  Full connection-capable initialization and coordinated shutdown across registries remain to be
+  verified, including the V5 helper installed in `attachBaseContext()`.
 
 The extracted adapters and process owners are not proof of device-qualified activity-independent
 operation. Activity recreation, background operation, process death, USB chooser behavior, and
@@ -61,30 +81,31 @@ review before they affect command acceptance or reconnect behavior.
 
 ## 1. Purpose and Scope
 
-This is the **pre-step** to [DUAL_SDK_FLAVORS_PLAN.md](DUAL_SDK_FLAVORS_PLAN.md). That plan
-requires shared session ownership, neutral contracts, and extracted SDK-free slices (§4, §6, §8
-Phase 1-3). Those extractions are currently blocked by the fact that
-[FlightDeckActivity](../lyrebird-app/src/main/java/com/lyrebird/rc/FlightDeckActivity.kt) is both
-the flight-deck screen and most of the application runtime.
+This document records the FlightDeck decomposition and its remaining work. The authoritative
+architecture and next batch order are now in
+[DUAL_SDK_FLAVORS_PLAN.md](DUAL_SDK_FLAVORS_PLAN.md#8-bridge-first-implementation-batches).
+[FlightDeckActivity](../lyrebird-app/src/v5/java/com/lyrebird/rc/FlightDeckActivity.kt) is smaller,
+but still supplies runtime behavior as well as the screen. The bridge review in that plan maps
+the current owners to concrete missing boundaries.
 
 Goal: reduce the activity to a **view and lifecycle adapter**, and move application behavior into
 named components with explicit ownership — *without* changing observable behavior, the HTTP/MAVLink
 wire surfaces, or any safety policy.
 
-The SDK dimension and the V4 flavor are **out of scope here**. This plan prepares the seams they
-need and deliberately stops before adding a second SDK. It also does not attempt to finish the
-`DroneController`, `Payload`, or `WaylineMissionHelper` conversions — those follow the flavor
-split, not this pre-step.
+The original 2026-09-15 pre-step excluded flavor implementation. The SDK dimension now exists;
+V4 hardware implementation remains in the bridge/flavor plan. Do not defer `DroneController`,
+`Payload`, mission or frame-consumer separation merely because the files have moved to `src/v5`:
+their shared policy must consume neutral ports before a second backend can reuse it.
 
 Non-goals:
 
-- No `sdk` flavor dimension, no V4 dependency, no `src/v4` source set.
+- No new V4 SDK implementation in this documentation review; no speculative V6 API or source set.
 - No wire-format change on HTTP, TCP telemetry, or MAVLink.
 - No change to authority semantics, the RC-override latch, or the per-aircraft Safety persistence.
 - No re-introduction of removed mock/phone video or mock telemetry.
 - No controller retuning, UI redesign, or mission-executor behavior change.
 
-## 2. Measured Current State
+## 2. Original Baseline
 
 Measured at `fb394dc` (`feature/dual-sdk-implementation`), worktree clean.
 
@@ -105,6 +126,9 @@ addresses to paste into a script.
 
 ## 3. Why This Matters More Than Line Count
 
+The findings and line numbers in sections 2-4 describe the original `fb394dc` baseline. Some
+have been repaired; use the current checkpoint and bridge audit above to identify what remains.
+
 Three findings from the review drive the ordering:
 
 1. **Screen lifetime and runtime lifetime are the same object.** `onDestroy` (5035-5129) stops the
@@ -115,11 +139,11 @@ Three findings from the review drive the ordering:
    takes the lease and binds HTTP/telemetry, but then unconditionally continues into fleet mesh,
    obstacle guard, MAVLink, and streamer creation — so a session blocked by the other APK still
    starts everything else. SDK initialization happens earlier still, in
-   [DJIApplication.onCreate](../lyrebird-app/src/main/java/com/lyrebird/rc/DJIApplication.kt#L24),
+  `DJIApplication.onCreate`,
    before any lease exists. On the way out, the lease is released inside `session.stop()` *before*
    streaming, MAVLink, and controller teardown finish.
 3. **The protocol boundary still carries V5 types.** `LyrebirdCommandHost`
-   ([LyrebirdHttpServer.kt](../lyrebird-app/src/main/java/com/lyrebird/rc/LyrebirdHttpServer.kt#L52))
+  (`LyrebirdHttpServer.kt` in the starting revision)
    exposes `DJIKey`, `MediaVM`, `PayloadWidgetVM`, `LocationCoordinate3D`, and UXSDK
    `DetectedTarget`. The HTTP surface cannot be shared with a second SDK until these become neutral
    operations.
@@ -141,7 +165,8 @@ Two additional defects were found while inventorying, and belong to Step 0:
 
 ## 4. Region Map
 
-Sections as they exist today. Region markers come from the file's own `// ====` banners.
+Sections in the starting revision. Region markers came from its `// ====` banners; these are
+not a claim that the current activity still contains every listed block.
 
 | Lines | Region | Target owner |
 | --- | --- | --- |
@@ -179,29 +204,36 @@ Sections as they exist today. Region markers come from the file's own `// ====` 
 
 ## 5. Target Architecture
 
+Target, not current completion status. The facade groups narrow hardware ports; it does not
+absorb policy or duplicate the existing protocol-facing command interfaces. Contract semantics,
+SDK differences and tradeoffs are specified in the
+[bridge plan](DUAL_SDK_FLAVORS_PLAN.md#3-architecture-one-runtime-one-platform-facade).
+
 ```mermaid
 flowchart TD
     UI[FlightDeckActivity: views, permissions, pickers] --> P[Presenters]
-    UI --> RT[LyrebirdRuntime]
+  P --> RT[Shared LyrebirdRuntime]
     P --> SET[Settings repository]
     RT --> SESS[LyrebirdSession: lease + servers]
     RT --> MAV[MAVLink endpoint and FTP]
     RT --> STR[Streaming coordinator]
     RT --> DET[Detection coordinator]
-    RT --> FLEET[Fleet mesh and obstacle guard]
-    RT --> TEL[Aircraft telemetry source]
-    TEL --> NEU[Neutral aircraft state]
-    NEU --> COORD[TelemetryCoordinator]
-    COORD --> MAV
-    COORD --> SESS
-    CMD[Command and mission layer] --> OPS[Aircraft ops ports]
-    OPS --> V5[V5 adapter: keys, WPMZ, media]
-    CMD --> MAV
+  RT --> FLEET[Fleet and obstacle policy]
+  RT --> STATE[Neutral runtime state and wire projections]
+  RT --> CMD[Shared command, safety and mission services]
+  CMD --> OPS[AircraftPlatform hardware ports]
+  STATE --> OPS
+  STR --> OPS
+  DET --> OPS
+  V5[V5 adapters: keys, primitives, media, frames] --> OPS
+  FACTORY[Flavor composition root] --> V5
+  FACTORY --> RT
 ```
 
-The activity keeps: view binding, menu and dialog presentation, permission and file-picker results,
-lifecycle callbacks, and forwarding user intent to presenters. It does not own sockets, workers,
-mission sequencing, or SDK subscriptions.
+The activity should keep view binding, menu/dialog presentation, permission/file-picker results,
+lifecycle callbacks, and forwarding user intent to presenters. SDK-owned widget wiring can stay
+in the V5 view shell. It must not supply the command backend, critical flight-state/identity
+effects, worker lifetime, mission sequencing or sensor subscriptions needed without a screen.
 
 ### Ownership rules (hard constraints)
 
@@ -212,8 +244,12 @@ mission sequencing, or SDK subscriptions.
 - **Components are testable without an aircraft.** Anything holding SDK types stays in the adapter
   layer, and anything with logic moves to a pure class with an existing test style (`RoiControl`,
   `DistanceTrigger`, `AuthorityLatch`, `ObstacleBrake`).
-- **UI-visible state is observed, not pushed.** Presenters expose state; the activity renders it.
-  Telemetry, streaming metrics, and authority already behave this way.
+- **UI observes runtime state.** Permanent telemetry/safety/command consumers belong to the
+  runtime; disposable UI observers only render. A weak activity callback is not an adequate source
+  of live settings, motion, media or telemetry. Recreating the screen must not stop those consumers.
+- **A facade is composition, not another service locator.** Inject the appropriate platform port
+  into each coordinator/controller. Preserve registry shims temporarily, with a single instance
+  owner and explicit stop path, rather than adding a new singleton for each extracted feature.
 - **SDK and lease lifetime stay independent of the screen.** A blocked session must start nothing
   else; a recreation must not drop a live session; process death releases the lease but never
   resumes a mission.
@@ -222,9 +258,9 @@ mission sequencing, or SDK subscriptions.
 
 ## 6. Steps
 
-Each step is one reviewable change (or a small series), with the gates below run
-before moving on. Keep V5 working throughout; never combine a mechanical extraction with a behavior
-change.
+The original steps remain useful as responsibility-specific acceptance criteria. Their current
+status is the checkpoint table, not their presence in this list. Execute the remaining work in
+bridge-plan batches B0-B7; keep V5 working, and separate mechanical moves from semantic changes.
 
 ### Step 0 — Baseline, gate repair, duplicate removal
 
@@ -289,8 +325,9 @@ Gate: every page, value, toggle, and overflow action behaves identically; no dia
 
 Phone location, heading, pressure, battery, and Wi-Fi are real device readings and stay.
 
-- New `DeviceStatusSource` owning `LocationManager`, `SensorManager`, `BatteryManager`, the Wi-Fi
-  manager and multicast lock, and the orientation math (516-595, 4849-4898, 5551-5560).
+- `DeviceStatusSource` owns `LocationManager`, `SensorManager`, `BatteryManager`, Wi-Fi status
+  and orientation math (original regions 516-595, 4849-4898, 5551-5560). Discovery/fleet multicast
+  locks belong to their socket owners; the streaming Wi-Fi lock belongs to streaming lifetime.
 - Expose a snapshot plus a change callback; keep the `WeakReference` listener pattern for location,
   and keep the application-context choice — both exist to prevent the ~7.8 MB activity leak.
 
@@ -305,7 +342,8 @@ This is the step that makes the telemetry path shareable with a second SDK.
 
 - Define a neutral `AircraftState` in the shared layer: the values currently read through DJI
   accessors, each with freshness/validity and a connection generation, per the dual-SDK plan's
-  contract requirements (§4, "Contract details").
+  contract semantics (section 3). The existing types are the starting point; do not create a
+  second snapshot hierarchy simply to add a facade.
 - New V5 adapter implementing it: the ~30 keys (659-780), the accessors (5265-5467), the listeners
   (3930-4018, 4135-4154), the SDK-to-neutral conversion (5501-5560, 7550-7665), the MAVLink snapshot
   builder (5904-5997), and the fleet beacon builder (5739-5780).
@@ -328,8 +366,10 @@ unchanged; `MavlinkSnapshot.altitudeAglM` and `FleetBeacon.altitudeAglM` preserv
 The highest-risk step; split it into at least three commits (ports, sinks, native mission).
 
 - Define narrow neutral ports: `AircraftFlightOps` (take-off, land, RTH, virtual stick, goto, yaw,
-  altitude, cancel), `CameraGimbalOps` (gimbal rotate, zoom, record, capture, thermal, LRF, payload
-  drop), and `NativeMissionCompiler`.
+  altitude, cancel), `CameraGimbalOps`, and `NativeMissionCompiler` were the original proposal.
+  Refine that boundary now: reuse existing application command ports and put SDK-neutral
+  `FlightPrimitives`, camera/gimbal/media and native-mission ports below the shared controller.
+  Goto/orbit/ROI algorithms do not get an implementation per SDK.
 - Move the sinks out of the activity into their own files: `mavlinkCommandSink` (6184-6456),
   `mavlinkMotionSink` (6544-6920), `mavlinkMissionSink` (6955-7469), plus `mavlinkFlightGate` (6487),
   `supersedeMission` (6527), `climbAfterTakeoff` (6921), and the ROI loop (5302-5410).
@@ -339,8 +379,10 @@ The highest-risk step; split it into at least three commits (ports, sinks, nativ
   selectable exactly as today.
 - Replace the DJI types in `LyrebirdCommandHost` with the neutral ports. This is what makes the HTTP
   handler independent of V5; keep every route's response text identical.
-- Keep `awaitAction`/`awaitParameterWrite` bounded waits as they are, and keep the single-flight
-  shutter and two-thread FTP executors' semantics.
+- Preserve the external timeout/result behavior of `awaitAction`/`awaitParameterWrite`, and
+  single-flight shutter/two-thread FTP ordering. Adapters report asynchronous results; bounded
+  blocking compatibility wrappers stay off SDK callback and flight-control threads. Cancellation
+  and connection generation must follow queued work across UI recreation.
 
 Tests: sequencer tests with fake ops (arrival, refusal, cancellation, supersede, distance-triggered
 capture); parameter allowlist/refusal behavior; authority and RC-override rejection paths. Existing
@@ -356,10 +398,10 @@ still reported as refused on both surfaces.
 - New `StreamingCoordinator` owning mode selection, WHIP URL construction, publisher lifecycle,
   retry and the override-failure fallback, the Wi-Fi low-latency lock, streamer listener wiring, and
   per-client start suppression (1946-2269, 4819-4848, 4899-5006 streamer portion).
-- Contracts: `StreamingPublisher` (start/stop/change options/state) and a frame-source provider.
-  `WebRTCStreamer`, `WhipPublisher`, and `SharedDJIFrameSource` stay where they are for now; only
-  their orchestration moves. The frame-source seam is what Phase 5 of the dual-SDK plan later
-  implements for V4.
+- Contracts: `StreamingPublisher` (start/stop/change options/state) and the bridge's decoded-frame
+  port. Share `WhipPublisher` and video consumers; keep V5 camera acquisition and optional native
+  streaming behind adapters. Batch B4 separates acquisition from `SharedDJIFrameSource` fan-out
+  before V4 adds its decoder; do not duplicate the publishing pipeline.
 - Preserve: the anti-hijack retarget rule, the "no dead RTSP URL advertised" rule, and that
   streaming starts on the first telemetry client.
 
@@ -372,9 +414,10 @@ started when the session is blocked.
 
 ### Step 7 — Detection coordinator
 
-- Move AutoSensing (2271-2560), edge detection (2562-2730), the overlay wiring, and the model/label
-  file selection (1194-1225, 1345-1483) behind a `DetectionProvider` seam: DJI onboard AutoSensing
-  as one V5 implementation, local TFLite inference as another, `NONE` as the default.
+- Move AutoSensing and local-inference lifecycle/eligibility behind the shared coordinator and
+  an optional hardware detection port. Local TFLite consumes neutral frames/targets. Overlay,
+  picker launch/results and messages remain UI; approved model/label settings belong to the
+  runtime. Preserve existing defaults and wire values rather than deriving them from SDK version.
 - Capability-gated, so a future V4 build reports onboard detection as unsupported rather than
   no-op'ing.
 - Preserve the detections telemetry JSON exactly, including `source`, `selectedSource`, `active`,
@@ -390,16 +433,17 @@ aircraft for the onboard source, as today.
 
 The behavioral step. Do it only after the components exist.
 
-- New runtime component owning: SDK connection gating, the network session, the MAVLink endpoint and
-  FTP server, fleet mesh, obstacle guard, streaming coordinator, executors, idle monitor, and the
-  teardown order.
+- One shared runtime component owns the platform facade, SDK connection gating, network/MAVLink/
+  FTP, fleet, obstacle inputs/policy, detection, streaming, command workers, identity and logging.
+  Purely visual idle/loading timers remain in the presenter. Existing registries are not proof
+  of this dependency graph or of correct teardown order.
 - **Fix the ordering gaps:**
   - Acquire the session lease *before* any SDK operation that can start a product connection, so
     the inactive app does not initialize a competing connection, control loops, or publishers.
     Do not assume registration is separable from automatic connection: validate that boundary for
     the selected SDK before leaving any initialization or registration outside the lease.
-  - A blocked session must skip fleet mesh, obstacle guard, MAVLink, and streaming. Current
-    `startServers()` continues past the block.
+  - A blocked session must skip all live SDK/control/media/publisher initialization, not only
+    the resources after the serving check in `startServers()`.
   - Release the lease **last**, after publishers, servers, listeners, and control loops have stopped,
     rather than inside `session.stop()` before the rest of teardown runs.
 - Make the runtime's lifetime independent of the activity's: an explicit stop path for real
@@ -410,9 +454,11 @@ The behavioral step. Do it only after the components exist.
   authority release on app switch, and the banner showing a restored SAFETY state before the
   aircraft connects.
 
-Tests: extend `LyrebirdSessionTest` and `SessionLeaseTest` with ordering, idempotency, and
-"blocked session starts nothing" cases using fakes; add a recreation test (Robolectric if it fits
-the existing `returnDefaultValues` setup, otherwise a bench procedure).
+Tests: extend `LyrebirdSessionTest` and `SessionLeaseTest` with ordering, idempotency and blocked
+startup cases. Use a fake platform and explicit scheduler to test no-UI command/telemetry behavior,
+multiple UI observers, stale-detach ordering, logging/detection continuity and stale callbacks.
+Android stub defaults are not a simulation of Handler/Activity lifecycle; an instrumentation or
+appropriate Robolectric/bench recreation check is additional evidence, not replaced by compilation.
 
 Gate for this pre-step: injected competing-owner tests and a V5 device test prove that recreation
 keeps the session and stream alive, a blocked session starts nothing, and teardown releases the
@@ -421,16 +467,19 @@ the second SDK app actually exists; they cannot be claimed as completed by this 
 
 ### Step 9 — Activity shell, flavor seams, documentation
 
-- Register pages and trim the activity to the UI shell described in §5; verify no remaining
-  `KeyManager`, socket, or executor ownership in it.
-- Prepare the flavor seam without adding a flavor: confirm the new components sit in packages that
-  can move to `src/v5` wholesale, and that nothing shared imports DJI types. `DefaultLayoutActivity`
-  inheritance stays in what will become the V5 source set.
+- Trim the activity to the view adapter described in section 5. Move its non-UI SDK/business
+  effects into runtime/ports; preserve required UXSDK widget lifecycle in the V5 shell.
+- The flavor dimension is already declared. Finish flavor-local composition and manifests/
+  resources, with no V5 source root added to `main`. Compile the shared runtime with a fake
+  platform and without DJI dependencies to catch indirect coupling as well as imports.
+- Do not copy FlightDeck for V4 or require a shared activity to extend `DefaultLayoutActivity`.
+  Share the presenter/state/controls first and retain a V5-specific view wrapper.
 - Update `src/content/docs/android-app.md` (runtime/session behavior if Step 8 changed ordering) and
   record the extraction in the quality plan.
 
-Gate: build, tests, and Spotless green; a documented list of what remains V5-bound, to hand over to
-Phase 3 of the dual-SDK plan.
+Gate: build/tests/quality scopes cover the actual selected source roots; no-UI and fake-backend
+tests pass; the remaining V5 view integration is documented. Physical relocation alone does not
+meet this gate. V4 hardware work follows the bridge plan, and any SDK 6 remains hypothetical.
 
 ## 7. Shared vs Flavor-Specific Placement
 
@@ -445,25 +494,28 @@ Phase 3 of the dual-SDK plan.
 | Native WPMZ compiler and executor | app `controller/` | `src/v5` |
 | ROI, orbit, PID, waypoint geometry | `controller/` (already pure) | core / shared |
 | Streaming coordinator | shared app package | shared |
-| Frame source and publisher | `webrtc/` (V5-bound today) | V5 adapter behind the frame-source seam |
+| Decoded frame acquisition | concrete V5 source today | V5/V4 adapter implementing the same frame port |
+| Frame fan-out, WHIP publisher, local inference | mixed shared and V5-bound today | shared Android consumers of neutral frames/targets |
 | Detection coordinator | shared app package | shared |
 | DJI onboard AutoSensing | app `adapter/` | `src/v5`, capability-gated |
 | Runtime owner and session | shared app package | shared, with flavor-supplied SDK hooks |
-| Activity and UXSDK widget integration | app root | `src/v5` |
+| FlightDeck presenter and application state | still partly in activity | shared app code |
+| Activity/UXSDK view integration | `src/v5` view shell | flavor-specific, consuming the shared presenter |
 
-Rule of thumb for this pre-step: if a file imports a `dji.*` type or an SDK view model, it belongs
-in an `adapter/` package or stays in the activity — nowhere else. That single rule is what makes the
-later move mechanical.
+Placement follows responsibility, not only imports. A mixed controller that contains SDK calls
+needs an injected primitive port before its algorithms become shared; moving the whole controller
+to V5 is only transitional. Conversely, an SDK-free file referencing a V5 registry or controller
+is still indirectly V5-bound. Keep one shared implementation of application policy.
 
 ## 8. Quality Gates and Verification
 
 Run from `LyrebirdApp/android-sdk-v5-as` after every step:
 
 ```bash
-./gradlew :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest
+./gradlew :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest
 ./gradlew :lyrebird-core:testDebugUnitTest
 ./gradlew :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck
-./gradlew :app:assembleCurrentDebug
+./gradlew :app:assembleCurrentV5Debug :app:assembleDemoBiomassV5Debug
 ```
 
 Manual pre-commit hooks (tests are in the manual stage locally, always run in CI):
@@ -479,10 +531,11 @@ From the repository root, when a shared client contract is touched:
 ```
 
 App unit-test reports land at
-`LyrebirdApp/lyrebird-app/build/test-results/testCurrentDebugUnitTest/`; core reports land at
+`LyrebirdApp/lyrebird-app/build/test-results/testCurrentV5DebugUnitTest/`; core reports land at
 `LyrebirdApp/lyrebird-core/build/test-results/testDebugUnitTest/`. Neither is under the Gradle root
-because `settings.gradle` remaps `projectDir`. The app variant remains `currentDebug`, not
-`currentV5Debug`, until the SDK dimension exists.
+because `settings.gradle` remaps `projectDir`. Manual hook/lint/installer names and artifact paths
+still need the reconciliation listed in the bridge plan; do not cite a syntax check or old task
+name as proof of the renamed flavor workflow.
 
 Baseline at the start of this work: 229 app tests, 81 core tests, 138 Python tests, Spotless and
 debug assembly passing. Test counts may rise but must never fall silently — a dropped test in an
@@ -530,10 +583,12 @@ Step 8  runtime owner and session lifecycle         (behavioral; fixes ordering)
 Step 9  activity shell, flavor seams, documentation
 ```
 
-Steps 1-4 are behavior-preserving and can proceed quickly. Steps 5 and 8 are the two that require
-real review and bench time. After Step 9, the dual-SDK plan's Phase 1 (contracts and neutral state)
-is substantially complete and Phase 3 (flavors and SDK-bound UI isolation) becomes a packaging
-exercise rather than an excavation.
+The diagram above is the original decomposition sequence, not a completion checklist. Remaining
+implementation follows bridge batches B0-B7: baseline/build isolation, observable telemetry,
+shared flight/authority/mission policy, camera/media/ROI, video/detection, runtime/view composition,
+then real V4 adaptation and qualification. Steps 5 and 8 still require safety review and bench
+time. V4 is not merely a packaging exercise, and a future SDK should add adapters rather than
+another application/controller copy.
 
 ## 11. Commit Discipline
 
