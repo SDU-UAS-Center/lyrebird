@@ -26,6 +26,7 @@ Select the wire with the ``LB_TRANSPORT`` environment variable:
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import math
 import os
@@ -667,6 +668,28 @@ class MavlinkRoute:
                 continue
 
 
+class MavlinkPortInUseError(OSError):
+    """Raised when this ground station cannot own the MAVLink listen port.
+
+    The bind deliberately does not set SO_REUSEADDR: a UDP datagram goes to exactly one socket, so
+    two stations sharing one port would each receive an arbitrary subset of telemetry and both
+    would look intermittently broken. First-come-first-served is the honest behaviour; this error
+    is what makes the loser of that race say which port is taken and what to do about it, instead
+    of surfacing as a bare OSError once per aircraft and once per discovery cycle.
+    """
+
+    def __init__(self, port: int, bind_host: str) -> None:
+        self.port = port
+        self.bind_host = bind_host
+        super().__init__(
+            f"UDP port {port} on {bind_host} is already owned by another process on this host "
+            "(another ground station, a ROS bridge, or the debug stack). Stop that process, or "
+            "start this one on a free port with LB_MAVLINK_PORT=<port> -- the aircraft keeps "
+            "answering on LB_MAVLINK_PEER_PORT (14550 by default), and this station tells it "
+            "where to send by heartbeating from the new port."
+        )
+
+
 class MavlinkRouter:
     """One UDP listener that demultiplexes MAVLink frames into logical aircraft routes.
 
@@ -762,7 +785,15 @@ class MavlinkRouter:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             # Deliberately do not set SO_REUSEADDR: another ground station must not silently
             # compete for the same UDP endpoint and lose an arbitrary subset of datagrams.
-            sock.bind((self.bind_host, self.port))
+            try:
+                sock.bind((self.bind_host, self.port))
+            except OSError as error:
+                # Leave nothing half-open: a socket that exists but cannot receive is worse than
+                # no socket, and the caller gets one actionable error instead.
+                sock.close()
+                if error.errno == errno.EADDRINUSE:
+                    raise MavlinkPortInUseError(self.port, self.bind_host) from error
+                raise
             sock.settimeout(0.2)
             self.port = sock.getsockname()[1]
             self._parser = parser

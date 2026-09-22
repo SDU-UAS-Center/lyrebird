@@ -29,7 +29,7 @@ discovery_timeout_sec: 5.0
 # mavlink_port is one shared listener for the whole fleet. 14551 leaves QGroundControl's usual
 # 14550 available on the same host. The legacy mavlink_port_base key is still accepted by the
 # manager as an alias.
-mavlink_port: 14551
+mavlink_port: 14561
 # mavlink_peer_port is the common port every aircraft listens on for commands.
 mavlink_peer_port: 14550
 

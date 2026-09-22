@@ -43,6 +43,7 @@ from pathlib import Path
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from lyrebird_groundstation.transport import (
+    MavlinkPortInUseError,
     MavlinkRouter,
     Transport,
     mavlink_peer_port_from_env,
@@ -162,6 +163,9 @@ class FleetAutoDiscoveryManager(Node):
             if configured_transport.uses_mavlink
             else None
         )
+        # Whether the MAVLink listener was last refused because another process owns the port, so
+        # the condition is reported once on the transition instead of every cycle.
+        self._mavlink_port_blocked = False
 
         self.create_timer(period, self._discover)
 
@@ -189,6 +193,12 @@ class FleetAutoDiscoveryManager(Node):
         drone to an external registry). No-op by default."""
 
     def _discover(self):
+        """Timer entry point: a cycle that cannot listen is a cycle not worth running."""
+        if not self._mavlink_listener_is_available():
+            return
+        self._discover_cycle()
+
+    def _discover_cycle(self):
         try:
             drones = discover_all_drones(timeout=self._timeout, verbose=False)
         except Exception as error:
@@ -238,6 +248,34 @@ class FleetAutoDiscoveryManager(Node):
             if name:
                 self._drones[name] = namespace
             self.on_drone_discovered(namespace, node, ip, name)
+
+    def _mavlink_listener_is_available(self) -> bool:
+        """Whether this station can own its MAVLink port, checking once per cycle.
+
+        The listener is bound lazily, on the first aircraft's registration, so a port owned by
+        another process used to surface as a failed node creation per aircraft per cycle -- an
+        endless error storm for a condition a human fixes once and permanently. Asking the router
+        directly answers the same question in one place, skips the discovery broadcast while the
+        answer is no (a station that cannot listen should not probe the aircraft), and recovers on
+        its own when the port frees up.
+        """
+        router = self._mavlink_router
+        if router is None:
+            return True
+        try:
+            router.start()
+        except MavlinkPortInUseError as error:
+            if not self._mavlink_port_blocked:
+                self._mavlink_port_blocked = True
+                self.get_logger().error(f"{error} Discovery is paused until the port is free.")
+            return False
+        if self._mavlink_port_blocked:
+            self._mavlink_port_blocked = False
+            self.get_logger().info(
+                f"MAVLink listener on port {self._mavlink_port_base} is available again; "
+                "resuming discovery."
+            )
+        return True
 
     def _warn_if_renamed(self, node, namespace):
         """Report a drone node that got renamed by a process-wide node-name remap.

@@ -339,6 +339,40 @@ def test_shared_router_dispatches_two_aircraft_to_separate_telemetry_states():
         route_b.close()
 
 
+def test_a_port_another_process_owns_fails_loudly_without_leaving_anything_open():
+    """One port, one ground station: the loser is told which port and what to do.
+
+    The bind refuses to share on purpose (a UDP datagram goes to exactly one socket, so two
+    stations on one port would each see a random subset of telemetry), but the refusal used to
+    surface as a bare OSError per aircraft per discovery cycle. It now names the port and leaves
+    no socket or route behind that cannot receive.
+    """
+    import socket
+
+    from lyrebird_groundstation.transport import MavlinkPortInUseError
+
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    blocker.bind(("", 0))
+    port = blocker.getsockname()[1]
+    router = MavlinkRouter(port=port)
+    try:
+        with pytest.raises(MavlinkPortInUseError) as reported:
+            router.start()
+        assert str(port) in str(reported.value)
+        assert reported.value.port == port
+        assert router._socket is None
+        assert router._running is False
+        assert router._thread is None
+
+        # Registering an aircraft goes through the same bind: it must fail the same way and not
+        # keep a route pointing at a listener that was never created.
+        with pytest.raises(MavlinkPortInUseError):
+            router.register("10.0.0.9", name="alpha")
+        assert router._routes_by_host == {}
+    finally:
+        blocker.close()
+
+
 def test_shared_router_routes_commands_to_the_registered_aircraft_endpoint():
     router = MavlinkRouter(port=0, peer_port=14550)
     route_a = router.register("10.0.0.1", name="alpha")
