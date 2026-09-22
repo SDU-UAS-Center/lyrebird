@@ -97,5 +97,12 @@
     <color name="lyrebird_blue">#FF1769AA</color>
     <color name="lyrebird_border">#FFBCC8D3</color>
     <color name="lyrebird_danger">#FFB4232E</color>
+    <!-- Peak of the red pulse that marks a missing drone on the home screen title. -->
+    <color name="lyrebird_danger_glow">#FFDA3B47</color>
+    <!-- A drone the app can see: the home screen title says so in this green. -->
+    <color name="lyrebird_ok">#FF1B7F4B</color>
+    <!-- The Lyrebird mark's deep plumage blue: used with lyrebird_orange (its rusty feathers) on
+         the Flight Deck button, so the button and the logo it carries share one palette. -->
+    <color name="lyrebird_logo_navy">#FF1E2A3A</color>
 
 </resources>

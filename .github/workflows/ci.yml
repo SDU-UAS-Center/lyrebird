@@ -4,6 +4,11 @@ name: CI
 # Default-stage hooks run on every commit locally; CI runs the same commands
 # (check-only, no --fix) plus the GroundStation pytest suite and Android
 # compile/unit tests that are manual-stage hooks locally.
+#
+# Every Python job installs through uv dependency groups, so CI runs the same
+# locked environment (uv.lock, .python-version) a developer gets from `uv sync`.
+# uv fetches the interpreter itself; a single lock serves every Python version
+# the jobs need.
 
 on:
   pull_request:
@@ -19,22 +24,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.10"
-          cache: pip
+          version: "0.12.17"
+          enable-cache: true
 
-      - name: Install Ruff
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ruff
+      - name: Lockfile is up to date
+        run: uv lock --check
 
       - name: Run Ruff linter
-        run: python -m ruff check GroundStation --output-format=github
+        run: uv run --locked --only-group lint ruff check GroundStation --output-format=github
 
       - name: Run Ruff formatter check
-        run: python -m ruff format --check GroundStation
+        run: uv run --locked --only-group lint ruff format --check GroundStation
 
   python-radon-metrics:
     name: Python Radon metrics
@@ -43,24 +46,19 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.10"
-          cache: pip
-
-      - name: Install Radon
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install radon
+          version: "0.12.17"
+          enable-cache: true
 
       - name: Enforce cyclomatic complexity threshold
-        run: python scripts/check_radon_complexity.py
+        run: uv run --locked --only-group metrics python scripts/check_radon_complexity.py
 
       - name: Print maintainability and size summaries
         run: |
-          python -m radon mi -s GroundStation > radon-mi.txt
-          python - <<'PY'
+          uv run --locked --only-group metrics radon mi -s GroundStation > radon-mi.txt
+          uv run --locked --only-group metrics python - <<'PY'
           import re
           from collections import Counter
           from pathlib import Path
@@ -71,9 +69,9 @@ jobs:
           for grade in "ABC":
               print(f"  {grade}: {counts.get(grade, 0)}")
           PY
-          python -m radon raw -s GroundStation | tail -20
-          python -m radon hal -j GroundStation > radon-hal.json
-          python - <<'PY'
+          uv run --locked --only-group metrics radon raw -s GroundStation | tail -20
+          uv run --locked --only-group metrics radon hal -j GroundStation > radon-hal.json
+          uv run --locked --only-group metrics python - <<'PY'
           import json
           from pathlib import Path
 
@@ -96,19 +94,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.10"
-          cache: pip
-
-      - name: Install Mypy
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install mypy types-requests
+          version: "0.12.17"
+          enable-cache: true
 
       - name: Run Mypy type checker
-        run: python -m mypy
+        run: uv run --locked --only-group typecheck mypy
 
   python-bandit-checks:
     name: Python Bandit security scanning
@@ -117,43 +110,38 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.10"
-          cache: pip
-
-      - name: Install Bandit
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install bandit
+          version: "0.12.17"
+          enable-cache: true
 
       - name: Run Bandit security scanner
-        run: python -m bandit -r GroundStation -ll --skip B101
+        run: uv run --locked --only-group security bandit -r GroundStation -ll --skip B101
 
   python-tests:
-    name: Python tests
+    name: Python tests (${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.14.7 is what developers run and what the images ship. 3.10 is the
+        # interpreter of the ros:humble containers that import the shared client,
+        # so the floor is exercised for real rather than assumed. One lock and
+        # one command cover both.
+        python: ["3.14.7", "3.10"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.10"
-          cache: pip
-          cache-dependency-path: GroundStation/Python/pyproject.toml
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # 2.4.47+ wheels omit message_definitions/v1.0, which the dialect
-          # compatibility test regenerates from the repository XML.
-          python -m pip install -e GroundStation/Python pytest pymavlink==2.4.43
+          version: "0.12.17"
+          enable-cache: true
 
       - name: Run GroundStation tests
-        run: python -m pytest GroundStation/tests -q
+        run: uv run --locked --python ${{ matrix.python }} --group test python -m pytest GroundStation/tests -q
 
   android-quality:
     name: Android quality checks
@@ -176,7 +164,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        # v4, not v3: v3 installs the `tools` package by default, and that package no longer
+        # exists in the SDK repository, so the step died before any build ran. v4 defaults to
+        # `platform-tools` only.
+        uses: android-actions/setup-android@v4
 
       - name: Write CI local.properties
         run: |
@@ -186,8 +177,14 @@ jobs:
             echo "MAPLIBRE_TOKEN=dummy"
           } > local.properties
 
+      - name: Shared sources, manifest and resources are SDK-neutral
+        run: python3 ../../scripts/check_main_sdk_free.py
+
+      - name: Process runtimes are screen-free
+        run: python3 ../../scripts/check_process_ownership.py
+
       - name: Spotless, compile, and unit tests
-        run: ./gradlew --no-daemon :app:spotlessKotlinCheck :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest
+        run: ./gradlew --no-daemon :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck :lyrebird-core:compileDebugKotlin :lyrebird-core:testDebugUnitTest :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest
 
       - name: Lyrebird Detekt and Lint reports
         run: ./gradlew --no-daemon qualityLyrebird

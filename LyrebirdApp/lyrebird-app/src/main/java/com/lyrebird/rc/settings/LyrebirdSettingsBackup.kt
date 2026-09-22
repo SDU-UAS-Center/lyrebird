@@ -24,7 +24,6 @@ import java.util.Locale
  * degrades to a no-op when that is not granted.
  */
 object LyrebirdSettingsBackup {
-
     private const val TAG = "LyrebirdSettings"
     private const val FILE_NAME = "lyrebird-settings.json"
     private const val KEY_SAVED_AT = "savedAt"
@@ -43,7 +42,10 @@ object LyrebirdSettingsBackup {
      * Types are preserved so the restore round-trips: [SharedPreferences] distinguishes a string
      * "true" from a boolean, and putting the wrong one back would break the reader.
      */
-    fun save(prefs: SharedPreferences, droneName: String) {
+    fun save(
+        prefs: SharedPreferences,
+        droneName: String,
+    ) {
         val target = backupFile() ?: return
         runCatching {
             val values = JSONObject()
@@ -56,10 +58,11 @@ object LyrebirdSettingsBackup {
                     else -> values.put(key, value)
                 }
             }
-            val payload = JSONObject()
-                .put(KEY_SAVED_AT, SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date()))
-                .put(KEY_DRONE_NAME, droneName)
-                .put(KEY_VALUES, values)
+            val payload =
+                JSONObject()
+                    .put(KEY_SAVED_AT, SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date()))
+                    .put(KEY_DRONE_NAME, droneName)
+                    .put(KEY_VALUES, values)
             target.writeText(payload.toString(2))
             Log.i(TAG, "Saved ${values.length()} settings to ${target.absolutePath}")
         }.onFailure { error ->
@@ -75,7 +78,7 @@ object LyrebirdSettingsBackup {
             Backup(
                 savedAt = payload.optString(KEY_SAVED_AT, "unknown"),
                 droneName = payload.optString(KEY_DRONE_NAME, ""),
-                values = payload.optJSONObject(KEY_VALUES) ?: JSONObject()
+                values = payload.optJSONObject(KEY_VALUES) ?: JSONObject(),
             )
         }.onFailure { error ->
             Log.w(TAG, "Could not read settings backup: ${error.message}")
@@ -88,7 +91,10 @@ object LyrebirdSettingsBackup {
      * Returns the number of entries written. The caller is expected to have asked the operator
      * first — see the class comment.
      */
-    fun restore(prefs: SharedPreferences, backup: Backup): Int {
+    fun restore(
+        prefs: SharedPreferences,
+        backup: Backup,
+    ): Int {
         val editor = prefs.edit()
         var applied = 0
         backup.values.keys().forEach { key ->
@@ -114,7 +120,7 @@ object LyrebirdSettingsBackup {
     data class Backup(
         val savedAt: String,
         val droneName: String,
-        val values: JSONObject
+        val values: JSONObject,
     ) {
         val entryCount: Int get() = values.length()
     }

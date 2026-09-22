@@ -1500,6 +1500,9 @@ pre {
 .settingsFieldRow input[type="text"] { flex: 0 0 120px; background: var(--sunken); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .settingsFieldRow input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--info); }
 .settingsFieldRow select { flex: 0 0 150px; background: var(--sunken); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; font-family: inherit; }
+.settingsFieldRow input:disabled,
+.settingsFieldRow select:disabled,
+.settingsFieldRow button:disabled { opacity: 0.45; cursor: not-allowed; }
 .settingsStatus { font-size: 0.85em; color: var(--muted); min-height: 1em; }
 @media (max-width: 720px) {
   .settingsGrid { grid-template-columns: 1fr; }

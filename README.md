@@ -71,7 +71,7 @@ The full manual — quick start, MAVLink 2, HTTP API, telemetry, ROS 2, and fiel
 
 ```bash
 git clone https://github.com/SDU-UAS-Center/lyrebird.git && cd lyrebird
-pip install -e GroundStation/Python            # Python ground-station client
+uv sync                                        # Python ground-station client (uv.lock)
 ```
 
 For the Android app, open `LyrebirdApp/android-sdk-v5-as` in Android Studio, copy `local.properties.example` to `local.properties` (set `sdk.dir` and `AIRCRAFT_API_KEY`), build the `current` variant, and install it on the RC. The servers start automatically on launch.

@@ -19,31 +19,76 @@ package com.lyrebird.rc.controller
  *  - The only way back is an explicit POST /releaseSafetyControl, callable solely by the
  *    Safety Computer, which returns authority to the Pilot.
  *
- * State is in-memory only (a @Volatile latch); an app restart resets to [Authority.PILOT],
- * which matches "restart == fresh mission". This object is orthogonal to DroneController's
- * RC manual-override latch — that tracks the physical RC pilot, this tracks which computer
- * commands the server.
+ * The latch survives a restart. It used to be in-memory, which made an app restart the same thing
+ * as a release — and a crash, an OOM kill, or an Android-initiated restart are not the Safety
+ * Computer deciding to hand control back. It is now read back on start and keyed by aircraft
+ * serial, so a takeover only ever holds the airframe it happened on. See [AuthorityLatch] for the
+ * rule and [SafetyLatchStore] for where it is kept; clearing app data is the deliberate bypass.
+ * This object is orthogonal to DroneController's RC manual-override latch — that tracks the
+ * physical RC pilot, this tracks which computer commands the server, and a restart restores
+ * neither of them into the other.
  *
  * Thread-safety: the command server handles requests on a 10-thread pool, so the
  * check-and-latch in [authorizeControlCommand]/[releaseSafetyControl] is @Synchronized.
  */
 object ControlAuthority {
-
     /** Which computer currently holds command authority. */
     enum class Authority { PILOT, SAFETY }
 
     /** Origin of an individual HTTP request, derived from the X-Safety-Token header. */
     enum class Source { PILOT, SAFETY }
 
-    @Volatile
-    var active: Authority = Authority.PILOT
-        private set
+    private val latch = AuthorityLatch()
+
+    /** The latch is the state; this is a view of it, not a second copy to drift out of step. */
+    val active: Authority
+        get() = latch.active
 
     /** UI hook — fires only when [active] actually changes. */
     interface Listener {
         fun onAuthorityChanged(authority: Authority)
     }
+
     var listener: Listener? = null
+
+    /**
+     * Runs once, at the moment the Safety Computer's first command latches authority to SAFETY.
+     *
+     * What "stop and hold" means is the hardware side's business — cancelling the app's control
+     * loop, releasing the SDK's virtual stick — so the host installs it. Keeping it as a hook is
+     * what lets this policy object compile without an SDK and lets a test assert the takeover
+     * instead of flying it. The hook runs under this object's lock, like every other transition
+     * here; installing another one while a takeover is running is not a supported operation.
+     */
+    internal var takeoverHandler: (() -> Unit)? = null
+
+    /**
+     * Gives the latch somewhere to live between runs, and the aircraft to key it on.
+     *
+     * Until this is called the latch is in-memory, which is what the tests and any host without
+     * storage get. The app calls it during startup, before the servers accept anything.
+     */
+    internal fun attachPersistence(
+        store: AuthorityLatch.LatchStore,
+        aircraftSerial: () -> String,
+    ) {
+        latch.attach(store, aircraftSerial)
+        restoreLatch()
+    }
+
+    /**
+     * Re-reads the latch for the aircraft now in play, and tells the UI if that changed anything.
+     *
+     * Call this when the airframe identity becomes known: a takeover recorded against one aircraft
+     * must not be carried onto another, and a takeover recorded for the aircraft that just
+     * connected must be in force before its first command.
+     */
+    @Synchronized
+    internal fun restoreLatch() {
+        val before = latch.active
+        latch.restore()
+        if (latch.active != before) listener?.onAuthorityChanged(latch.active)
+    }
 
     /**
      * Gate for every drone-control command (the /send/ family).
@@ -54,17 +99,16 @@ object ControlAuthority {
      * while the Pilot still holds authority.
      */
     @Synchronized
-    fun authorizeControlCommand(source: Source): Boolean = when (source) {
-        Source.SAFETY -> {
-            if (active != Authority.SAFETY) {
-                setAuthority(Authority.SAFETY)
-                // Safety has seized control: stop whatever the Pilot was flying so the aircraft
-                // holds position until the Safety Computer issues its own commands.
-                DroneController.onSafetyTakeover()
-            }
-            true
+    fun authorizeControlCommand(source: Source): Boolean {
+        val before = latch.active
+        val decision = latch.authorize(source)
+        if (latch.active != before) listener?.onAuthorityChanged(latch.active)
+        if (decision == AuthorityLatch.Decision.ALLOWED_TAKEOVER) {
+            // Safety has seized control: stop whatever the Pilot was flying so the aircraft
+            // holds position until the Safety Computer issues its own commands.
+            takeoverHandler?.invoke()
         }
-        Source.PILOT -> active == Authority.PILOT
+        return decision != AuthorityLatch.Decision.REJECTED
     }
 
     /**
@@ -73,13 +117,9 @@ object ControlAuthority {
      */
     @Synchronized
     fun releaseSafetyControl(source: Source): Boolean {
-        if (source != Source.SAFETY) return false
-        if (active != Authority.PILOT) setAuthority(Authority.PILOT)
+        val before = latch.active
+        if (!latch.release(source)) return false
+        if (latch.active != before) listener?.onAuthorityChanged(latch.active)
         return true
-    }
-
-    private fun setAuthority(authority: Authority) {
-        active = authority
-        listener?.onAuthorityChanged(authority)
     }
 }

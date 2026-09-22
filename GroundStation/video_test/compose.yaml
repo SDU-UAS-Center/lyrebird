@@ -1,9 +1,10 @@
 services:
   mediamtx:
-    # Stock image is scratch-based (no shell or wget), so a healthcheck would force a custom
-    # busybox image. Not needed: the webapp polls the MediaMTX API in a daemon thread and
-    # retries, so a plain start-order dependency is enough.
-    image: bluenviron/mediamtx:latest
+    # Pinned to a release rather than :latest so a field stack is reproducible.
+    # The stock image is scratch-based (no shell and no wget: /bin/busybox is absent),
+    # so a healthcheck would force a custom image. Not needed either: the webapp polls
+    # the MediaMTX API in a daemon thread and retries, so start order is enough.
+    image: bluenviron/mediamtx:1.21.1
     container_name: lyrebird_mediamtx
     network_mode: host
     environment:
@@ -15,10 +16,11 @@ services:
   video-grid:
     image: lyrebird-video-grid:latest
     build:
-      # Rooted at GroundStation (one level up from this file) so the image can also carry the
-      # shared Python client the MAVLink comparison panel reads both wires through.
-      context: ..
-      dockerfile: video_test/webapp/Dockerfile
+      # Rooted at the repository root so the dashboard installs the shared Python
+      # client and its MAVLink decoder from pyproject.toml + uv.lock, instead of
+      # carrying a second, hand-maintained list of versions.
+      context: ../..
+      dockerfile: GroundStation/video_test/webapp/Dockerfile
     container_name: lyrebird_video_grid
     network_mode: host
     depends_on:
@@ -45,13 +47,10 @@ services:
       # make them compete and each see part of the stream.
       - LB_WEBAPP_MAVLINK_PORT=${LB_WEBAPP_MAVLINK_PORT:-14552}
       - LB_MAVLINK_PEER_PORT=${LB_MAVLINK_PEER_PORT:-14550}
-      # This image is ROS-based and runs on the host network, but the dashboard starts no ROS
-      # node. These keep it that way by construction: an isolated domain and discovery confined
-      # to loopback, so nothing here can ever join the fleet's DDS graph (domain 0, discovery
-      # across the subnet) and show up as a phantom participant.
-      - ROS_DOMAIN_ID=${VIDEO_GRID_ROS_DOMAIN_ID:-89}
-      - ROS_LOCALHOST_ONLY=1
-      - ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+      # No ROS_* settings: the image carries no ROS runtime at all (plain Python
+      # on the same interpreter the tests use), so this container cannot join the
+      # fleet's DDS graph on domain 0 and show up as a phantom participant -- by
+      # construction rather than by configuration.
     volumes:
       - ./logs:/logs
       - /etc/localtime:/etc/localtime:ro

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The button is a light card with an orange border, so its label uses the mark's plumage blue. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_enabled="false" android:color="@color/lyrebird_teal" />
-    <item android:color="#FFFFFFFF" />
+    <item android:state_enabled="false" android:color="@color/lyrebird_muted" />
+    <item android:state_pressed="true" android:color="@color/lyrebird_surface" />
+    <item android:color="@color/lyrebird_logo_navy" />
 </selector>

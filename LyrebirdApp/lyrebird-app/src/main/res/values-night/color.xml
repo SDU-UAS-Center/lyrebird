@@ -10,4 +10,7 @@
     <color name="lyrebird_blue">#FF60A5FA</color>
     <color name="lyrebird_border">#FF2A3544</color>
     <color name="lyrebird_danger">#FFF87171</color>
+    <color name="lyrebird_danger_glow">#FFFECACA</color>
+    <color name="lyrebird_ok">#FF6EE7A0</color>
+    <color name="lyrebird_logo_navy">#FFC9D6E4</color>
 </resources>

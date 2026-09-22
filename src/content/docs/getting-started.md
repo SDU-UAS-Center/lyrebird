@@ -44,30 +44,30 @@ git clone https://github.com/SDU-UAS-Center/lyrebird.git
 
 ```bash
 cd Lyrebird/LyrebirdApp/android-sdk-v5-as
-./gradlew :app:assembleCurrentDebug
-./gradlew :app:assembleDemoBiomassDebug
+./gradlew :app:assembleCurrentV5Debug
+./gradlew :app:assembleDemoBiomassV5Debug
 ```
 
 The debug APKs are written to:
 
 ```text
-LyrebirdApp/lyrebird-app/build/outputs/apk/current/debug/Lyrebird-debug.apk
-LyrebirdApp/lyrebird-app/build/outputs/apk/demoBiomass/debug/Lyrebird-debug.apk
+LyrebirdApp/lyrebird-app/build/outputs/apk/currentV5/debug/Lyrebird-current-v5-debug.apk
+LyrebirdApp/lyrebird-app/build/outputs/apk/demoBiomassV5/debug/Lyrebird-demoBiomass-v5-debug.apk
 ```
 
 To build/install a selected variant when an Android device is connected over ADB:
 
 ```bash
 cd LyrebirdApp/android-sdk-v5-as
-./auto_install_on_connect.sh current --build
-./auto_install_on_connect.sh demo_biomass --build
+./auto_install_on_connect.sh currentV5 --build
+./auto_install_on_connect.sh demoBiomassV5 --build
 ```
 
 To only check which APK will be used:
 
 ```bash
-./auto_install_on_connect.sh current --check
-./auto_install_on_connect.sh demo_biomass --check
+./auto_install_on_connect.sh currentV5 --check
+./auto_install_on_connect.sh demoBiomassV5 --check
 ```
 
 ## Start the server
@@ -79,8 +79,8 @@ To only check which APK will be used:
 ## Ground station dependencies
 
 ```bash
-pip install -e GroundStation/Python                     # Python interface
-pip install -r GroundStation/ROS/requirements.txt      # ROS 2 interface
+uv sync                          # Python interface (installs the ground-station client)
+uv sync --group ros              # ROS 2 interface (numpy + OpenCV for the ROS nodes)
 ```
 
 ## Connect and control
@@ -92,8 +92,7 @@ Both interfaces are enabled by default — pick whichever fits, or run both side
 Point QGroundControl at the RC's IP address and it connects automatically — Fly View and Plan view both light up with no plugin and no configuration file. To check the link without QGroundControl:
 
 ```bash
-pip install pymavlink
-lyrebird-mavlink-listen --summary 5
+uv run --locked --group mavlink lyrebird-mavlink-listen --summary 5
 ```
 
 This is the lighter-weight path for flight and telemetry. See [MAVLink 2](/mavlink/) for the full command and mission surface.

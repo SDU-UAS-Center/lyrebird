@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VARIANT="current"
+VARIANT="currentV5"
 BUILD=false
 CHECK_ONLY=false
 # Which device to install onto. Empty means "the only one attached", which is what a bare adb
@@ -34,14 +34,14 @@ while [[ $# -gt 0 ]]; do
     --all)
       ALL_DEVICES=true
       ;;
-    current)
-      VARIANT="current"
+    current|currentV5)
+      VARIANT="currentV5"
       ;;
-    demoBiomass|demo_biomass)
-      VARIANT="demoBiomass"
+    demoBiomass|demo_biomass|demoBiomassV5)
+      VARIANT="demoBiomassV5"
       ;;
     *)
-      echo "Usage: $0 [current|demoBiomass|demo_biomass] [--build] [--check]" >&2
+      echo "Usage: $0 [currentV5|demoBiomassV5] [--build] [--check]" >&2
       echo "          [--serial SERIAL | --all]" >&2
       exit 1
       ;;
@@ -54,13 +54,24 @@ if [[ "$ALL_DEVICES" == true && -n "$SERIAL" ]]; then
   exit 1
 fi
 
-if [[ "$VARIANT" == "demoBiomass" ]]; then
+if [[ "$VARIANT" == "demoBiomassV5" ]]; then
   PACKAGE_NAME="com.lyrebird.rc.demo_biomass"
 else
   PACKAGE_NAME="com.lyrebird.rc"
 fi
+# AGP writes the output under the combined variant name (apk/currentV5/debug) while the file
+# name set by onVariants joins the flavor names with dashes
+# (Lyrebird-current-v5-debug.apk). Derive both parts from the selected variant.
+case "$VARIANT" in
+  currentV5) APP_VARIANT="current"; SDK_VARIANT="v5" ;;
+  demoBiomassV5) APP_VARIANT="demoBiomass"; SDK_VARIANT="v5" ;;
+  *)
+    echo "Unsupported variant: $VARIANT" >&2
+    exit 1
+    ;;
+esac
 TASK_NAME="assemble${VARIANT^}Debug"
-APK_PATH="$ROOT_DIR/../lyrebird-app/build/outputs/apk/$VARIANT/debug/Lyrebird-debug.apk"
+APK_PATH="$ROOT_DIR/../lyrebird-app/build/outputs/apk/$VARIANT/debug/Lyrebird-${APP_VARIANT}-${SDK_VARIANT}-debug.apk"
 LAUNCH_ACTIVITY="com.lyrebird.rc.DJIAircraftMainActivity"
 
 use_android_sdk() {
@@ -146,7 +157,7 @@ if [[ ! -f "$APK_PATH" ]]; then
 fi
 
 if [[ ! -f "$APK_PATH" ]]; then
-  APK_PATH="$(find "$ROOT_DIR/../lyrebird-app/build/outputs/apk/$VARIANT" -type f -name "Lyrebird-debug.apk" -print -quit 2>/dev/null || true)"
+  APK_PATH="$(find "$ROOT_DIR/../lyrebird-app/build/outputs/apk/$VARIANT" -type f -name "Lyrebird-${APP_VARIANT}-${SDK_VARIANT}-debug.apk" -print -quit 2>/dev/null || true)"
 fi
 
 if [[ -z "$APK_PATH" || ! -f "$APK_PATH" ]]; then

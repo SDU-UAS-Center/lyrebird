@@ -44,8 +44,10 @@ Two related environment variables matter once MAVLink is in play:
 `GroundStation/Python` is a real pip-installable package (`pyproject.toml`, distribution name `lyrebird-groundstation`) — it does not need to be vendored (copy-pasted) into a consuming project. Install it straight from this repo, pinned to a commit or tag:
 
 ```bash
-pip install "git+https://github.com/SDU-UAS-Center/lyrebird.git@<commit-or-tag>#subdirectory=GroundStation/Python"
+uv add "git+https://github.com/SDU-UAS-Center/lyrebird.git@<commit-or-tag>#subdirectory=GroundStation/Python"
 ```
+
+(or `pip install` with the same URL — it is a normal distribution, uv simply records it in your lockfile)
 
 or as a `requirements.txt` / `pyproject.toml` dependency line:
 

@@ -66,14 +66,16 @@ android {
         manifestPlaceholders["API_KEY"] = aircraftApiKey
         manifestPlaceholders["GMAP_API_KEY"] = gmapApiKey
         manifestPlaceholders["MAPLIBRE_TOKEN"] = maplibreToken
-        manifestPlaceholders["APP_ICON"] = "@mipmap/ic_main"
+        // The adaptive launcher icon (and with it the Android 12+ splash icon) rather than the
+        // 192 px ic_main mipmap, which the system had to scale up on high-density screens.
+        manifestPlaceholders["APP_ICON"] = "@mipmap/ic_launcher_lyrebird"
         ndk {
             //noinspection ChromeOsAbiSupport
             abiFilters 'arm64-v8a'
         }
     }
 
-    flavorDimensions "appVariant"
+    flavorDimensions "appVariant", "sdk"
     productFlavors {
         current {
             dimension "appVariant"
@@ -83,7 +85,15 @@ android {
             applicationIdSuffix ".demo_biomass"
             versionNameSuffix "-demo_biomass"
             manifestPlaceholders["API_KEY"] = demoBiomassAircraftApiKey
-            manifestPlaceholders["APP_ICON"] = "@mipmap/ic_main"
+            manifestPlaceholders["APP_ICON"] = "@mipmap/ic_launcher_lyrebird"
+        }
+        v5 {
+            dimension "sdk"
+        }
+        v4 {
+            dimension "sdk"
+            applicationIdSuffix ".v4"
+            versionNameSuffix "-v4"
         }
     }
 
@@ -111,11 +121,19 @@ android {
     }
 
     androidComponents {
+        // V4 SDK coordinates and platform sources are not provisioned yet. Keep the flavor
+        // identity declared, but do not publish an unbuildable V4 APK.
+        beforeVariants(selector().all()) { variant ->
+            if (variant.productFlavors.any { it.second == "v4" }) {
+                variant.enable = false
+            }
+        }
         onVariants(selector().all()) { variant ->
+            def flavorNames = variant.productFlavors.collect { it.second }
+            def appVariant = flavorNames.find { it == "current" || it == "demoBiomass" } ?: "unknown"
+            def sdkVariant = flavorNames.find { it == "v5" || it == "v4" } ?: "unknown"
             variant.outputs.forEach { output ->
-                // Flavor already separates output directories, so the file name only needs the
-                // build type: Lyrebird-debug.apk, Lyrebird-release.apk.
-                output.outputFileName.set("Lyrebird-${variant.buildType}.apk")
+                output.outputFileName.set("Lyrebird-${appVariant}-${sdkVariant}-${variant.buildType}.apk")
             }
         }
     }
@@ -189,12 +207,19 @@ android {
 }
 
 dependencies {
+    /**
+     * <----------------- Shared SDK-free code ------------------>
+     * Protocol, mission model and command contracts shared with any future hardware adapter.
+     * Carries no DJI dependency, so it cannot drift into a specific SDK generation.
+     **/
+    implementation project(':lyrebird-core')
+
     /** <----------------- MSDK dependencies ------------------> **/
-    compileOnly deps.aircraftProvided
-    implementation deps.aircraft
+    v5CompileOnly deps.aircraftProvided
+    v5Implementation deps.aircraft
 
     /** <----------------- Sample dependencies ------------------> **/
-    implementation project(':uxsdk')
+    v5Implementation project(':uxsdk')
     implementation deps.appcompat
     implementation deps.constraintLayout
     implementation deps.aacCommon

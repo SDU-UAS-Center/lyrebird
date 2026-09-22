@@ -49,20 +49,27 @@ SYNC_INTERVAL = float(os.environ.get("ROS_SYNC_INTERVAL", "2"))
 # drones are never re-probed.
 PHONE_RETRY_INTERVAL = 10.0
 
-# Topic name -> message type, sourced from lyrebird_controller's own registry
-# (the single source of truth DjiNode itself publishes/subscribes from) rather
-# than a hand-mirrored copy that can drift out of sync with controller.py.
+# Topic name -> (message type, QoS profile), sourced from lyrebird_controller's own
+# registry (the single source of truth DjiNode itself publishes/subscribes from)
+# rather than a hand-mirrored copy that can drift out of sync with controller.py.
 # Subscribed per-drone as f"/{namespace}/{topic}"; topic already carries its
 # fmu/in/ or fmu/out/ prefix from the registry, so the app.js dashboard can
 # tell commands and telemetry apart by that prefix alone.
+#
+# The QoS profile travels with the type because it is not optional here: the sensor
+# topics are published BEST_EFFORT (see topics.QOS_SENSOR), and a subscription with
+# the default RELIABLE profile is *incompatible* with a best-effort publisher. ROS 2
+# delivers nothing across that pair and says nothing about it either, so every topic
+# read "not seen" in the dashboard while `ros2 topic hz` happily showed 8 Hz -- the
+# CLI adapts its QoS to the publisher, this monitor has to match it exactly.
 TOPICS = {
     **{
-        lyrebird_topics.topic_in(name): msg_type
-        for name, (msg_type, _qos) in lyrebird_topics.IN_TOPICS.items()
+        lyrebird_topics.topic_in(name): (msg_type, qos)
+        for name, (msg_type, qos) in lyrebird_topics.IN_TOPICS.items()
     },
     **{
-        lyrebird_topics.topic_out(name): msg_type
-        for name, (msg_type, _qos) in lyrebird_topics.OUT_TOPICS.items()
+        lyrebird_topics.topic_out(name): (msg_type, qos)
+        for name, (msg_type, qos) in lyrebird_topics.OUT_TOPICS.items()
     },
 }
 
@@ -134,7 +141,7 @@ class RosMonitor(Node):
         self.get_logger().info(f"Attaching drone namespace: {namespace}")
         stats = {}
         subs = {}
-        for topic, msg_type in TOPICS.items():
+        for topic, (msg_type, qos) in TOPICS.items():
             stats[topic] = {
                 "count": 0,
                 "last_value": None,
@@ -142,7 +149,10 @@ class RosMonitor(Node):
                 "type": msg_type.__name__,
             }
             subs[topic] = self.create_subscription(
-                msg_type, f"/{namespace}/{topic}", self._make_callback(namespace, topic), 10
+                msg_type,
+                f"/{namespace}/{topic}",
+                self._make_callback(namespace, topic),
+                qos,
             )
         self.drone_stats[namespace] = stats
         self.drone_subs[namespace] = subs

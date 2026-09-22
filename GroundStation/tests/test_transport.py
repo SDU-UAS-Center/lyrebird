@@ -366,11 +366,22 @@ def test_shared_router_routes_commands_to_the_registered_aircraft_endpoint():
         channel_a._send_frame(channel_a._frame_command(CMD_NAV_TAKEOFF, [0] * 7))
         channel_b._send_frame(channel_b._frame_command(CMD_NAV_TAKEOFF, [0] * 7))
 
-        assert [address for _, address in sent] == [
+        # The router heartbeats every registered route twice a second, so this socket sees more
+        # than the two commands: comparing the whole list is a race against that timer, and it is
+        # how this test failed on a slow CI runner — the two commands with a heartbeat between
+        # them. What is under test is where the commands went, so select those.
+        from pymavlink.dialects.v20 import common as mavlink_common
+
+        commands = [
+            (frame, address)
+            for frame, address in sent
+            if _decode(frame).get_msgId() == mavlink_common.MAVLINK_MSG_ID_COMMAND_LONG
+        ]
+        assert [address for _, address in commands] == [
             ("10.0.0.1", 14550),
             ("10.0.0.2", 14550),
         ]
-        assert [_decode(frame).target_system for frame, _ in sent] == [41, 42]
+        assert [_decode(frame).target_system for frame, _ in commands] == [41, 42]
     finally:
         channel_a.close()
         channel_b.close()
@@ -779,6 +790,13 @@ def test_the_hand_decoder_matches_the_dialect_definition():
 
     pymavlink = pytest.importorskip("pymavlink")
     definitions = pathlib.Path(pymavlink.__file__).parent / "message_definitions" / "v1.0"
+    if not definitions.exists():
+        # The published wheels do not all carry the tree: pymavlink 2.4.49 has it
+        # inside the package on 3.14 but not on 3.10. What this test checks (the
+        # hand-written struct/CRC_EXTRA against the XML) is a property of this
+        # repository, not of the interpreter, so the 3.10 leg skips it instead of
+        # pinning the whole workspace back to the one version that has both.
+        pytest.skip(f"pymavlink {pymavlink.__version__} ships no message_definitions here")
 
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(tmp)

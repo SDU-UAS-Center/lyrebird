@@ -27,9 +27,10 @@ object SdpUtils {
         val lines = sdp.split(lineEnding)
         val videoSection = findVideoSection(lines) ?: return sdp
         val codecInfo = collectCodecInfo(lines, videoSection)
-        val h264PayloadTypes = codecInfo.codecForPayloadType
-            .filter { it.value.equals("H264", ignoreCase = true) }
-            .keys
+        val h264PayloadTypes =
+            codecInfo.codecForPayloadType
+                .filter { it.value.equals("H264", ignoreCase = true) }
+                .keys
 
         return if (h264PayloadTypes.isEmpty()) {
             sdp
@@ -46,12 +47,21 @@ object SdpUtils {
      *
      * @param intervalMs max interval between keyframes in milliseconds (e.g. 2000)
      */
-    fun setKeyframeInterval(sdp: String, intervalMs: Int): String {
+    fun setKeyframeInterval(
+        sdp: String,
+        intervalMs: Int,
+    ): String {
         val lineEnding = if ("\r\n" in sdp) "\r\n" else "\n"
         val lines = sdp.split(lineEnding)
-        val h264PayloadTypes = lines.mapNotNull { line ->
-            H264_RTPMAP_REGEX.find(line)?.groupValues?.get(1)?.toInt()
-        }.toSet()
+        val h264PayloadTypes =
+            lines
+                .mapNotNull { line ->
+                    H264_RTPMAP_REGEX
+                        .find(line)
+                        ?.groupValues
+                        ?.get(1)
+                        ?.toInt()
+                }.toSet()
 
         return if (intervalMs <= 0 || h264PayloadTypes.isEmpty()) {
             sdp
@@ -65,18 +75,20 @@ object SdpUtils {
     /**
      * Apply both H264 enforcement and keyframe interval to an SDP string.
      */
-    fun mungeForH264(sdp: String, keyframeIntervalMs: Int = 2000): String =
-        setKeyframeInterval(forceH264Only(sdp), keyframeIntervalMs)
+    fun mungeForH264(
+        sdp: String,
+        keyframeIntervalMs: Int = 2000,
+    ): String = setKeyframeInterval(forceH264Only(sdp), keyframeIntervalMs)
 
     private data class VideoSection(
         val lineIndex: Int,
         val endIndex: Int,
-        val payloadTypes: List<Int>
+        val payloadTypes: List<Int>,
     )
 
     private data class CodecInfo(
         val codecForPayloadType: Map<Int, String>,
-        val rtxAssociatedPayloadType: Map<Int, Int>
+        val rtxAssociatedPayloadType: Map<Int, Int>,
     )
 
     private fun findVideoSection(lines: List<String>): VideoSection? {
@@ -84,22 +96,27 @@ object SdpUtils {
 
         return videoLineIndex.takeIf { it >= 0 }?.let { lineIndex ->
             val nextMediaLineOffset = lines.drop(lineIndex + 1).indexOfFirst { it.startsWith("m=") }
-            val endIndex = if (nextMediaLineOffset >= 0) {
-                lineIndex + 1 + nextMediaLineOffset
-            } else {
-                lines.size
-            }
+            val endIndex =
+                if (nextMediaLineOffset >= 0) {
+                    lineIndex + 1 + nextMediaLineOffset
+                } else {
+                    lines.size
+                }
             val payloadTypes = lines[lineIndex].split(" ").drop(3).mapNotNull { it.toIntOrNull() }
 
             VideoSection(lineIndex, endIndex, payloadTypes)
         }
     }
 
-    private fun collectCodecInfo(lines: List<String>, section: VideoSection): CodecInfo {
+    private fun collectCodecInfo(
+        lines: List<String>,
+        section: VideoSection,
+    ): CodecInfo {
         val codecForPayloadType = mutableMapOf<Int, String>()
         val rtxAssociatedPayloadType = mutableMapOf<Int, Int>()
 
-        lines.asSequence()
+        lines
+            .asSequence()
             .drop(section.lineIndex + 1)
             .take(section.endIndex - section.lineIndex - 1)
             .forEach { line ->
@@ -114,16 +131,22 @@ object SdpUtils {
         return CodecInfo(codecForPayloadType, rtxAssociatedPayloadType)
     }
 
-    private fun allowedVideoPayloadTypes(codecInfo: CodecInfo, h264PayloadTypes: Set<Int>): Set<Int> {
-        val h264RtxPayloadTypes = codecInfo.rtxAssociatedPayloadType
-            .filter { it.value in h264PayloadTypes }
-            .keys
-        val redPayloadTypes = codecInfo.codecForPayloadType
-            .filter { it.value.equals("red", ignoreCase = true) }
-            .keys
-        val ulpfecPayloadTypes = codecInfo.codecForPayloadType
-            .filter { it.value.equals("ulpfec", ignoreCase = true) }
-            .keys
+    private fun allowedVideoPayloadTypes(
+        codecInfo: CodecInfo,
+        h264PayloadTypes: Set<Int>,
+    ): Set<Int> {
+        val h264RtxPayloadTypes =
+            codecInfo.rtxAssociatedPayloadType
+                .filter { it.value in h264PayloadTypes }
+                .keys
+        val redPayloadTypes =
+            codecInfo.codecForPayloadType
+                .filter { it.value.equals("red", ignoreCase = true) }
+                .keys
+        val ulpfecPayloadTypes =
+            codecInfo.codecForPayloadType
+                .filter { it.value.equals("ulpfec", ignoreCase = true) }
+                .keys
 
         return h264PayloadTypes + h264RtxPayloadTypes + redPayloadTypes + ulpfecPayloadTypes
     }
@@ -132,18 +155,22 @@ object SdpUtils {
         lines: List<String>,
         lineEnding: String,
         section: VideoSection,
-        allowedPayloadTypes: Set<Int>
-    ): String {
-        return lines.mapIndexedNotNull { index, line ->
-            when {
-                index == section.lineIndex -> rewriteVideoLine(line, section.payloadTypes, allowedPayloadTypes)
-                isDroppedVideoAttribute(index, line, section, allowedPayloadTypes) -> null
-                else -> line
-            }
-        }.joinToString(lineEnding)
-    }
+        allowedPayloadTypes: Set<Int>,
+    ): String =
+        lines
+            .mapIndexedNotNull { index, line ->
+                when {
+                    index == section.lineIndex -> rewriteVideoLine(line, section.payloadTypes, allowedPayloadTypes)
+                    isDroppedVideoAttribute(index, line, section, allowedPayloadTypes) -> null
+                    else -> line
+                }
+            }.joinToString(lineEnding)
 
-    private fun rewriteVideoLine(line: String, payloadTypes: List<Int>, allowedPayloadTypes: Set<Int>): String {
+    private fun rewriteVideoLine(
+        line: String,
+        payloadTypes: List<Int>,
+        allowedPayloadTypes: Set<Int>,
+    ): String {
         val parts = line.split(" ")
         val prefix = parts.take(3).joinToString(" ")
         val keptPayloadTypes = payloadTypes.filter { it in allowedPayloadTypes }
@@ -154,16 +181,30 @@ object SdpUtils {
         index: Int,
         line: String,
         section: VideoSection,
-        allowedPayloadTypes: Set<Int>
+        allowedPayloadTypes: Set<Int>,
     ): Boolean {
-        val payloadType = PAYLOAD_ATTRIBUTE_REGEX.find(line)?.groupValues?.get(1)?.toInt()
+        val payloadType =
+            PAYLOAD_ATTRIBUTE_REGEX
+                .find(line)
+                ?.groupValues
+                ?.get(1)
+                ?.toInt()
         return index in (section.lineIndex + 1) until section.endIndex &&
             payloadType != null &&
             payloadType !in allowedPayloadTypes
     }
 
-    private fun addKeyframeInterval(line: String, intervalMs: Int, h264PayloadTypes: Set<Int>): String {
-        val payloadType = FMTP_REGEX.find(line)?.groupValues?.get(1)?.toInt()
+    private fun addKeyframeInterval(
+        line: String,
+        intervalMs: Int,
+        h264PayloadTypes: Set<Int>,
+    ): String {
+        val payloadType =
+            FMTP_REGEX
+                .find(line)
+                ?.groupValues
+                ?.get(1)
+                ?.toInt()
         return if (payloadType in h264PayloadTypes && "x-google-max-keyframe-interval" !in line) {
             "$line;x-google-max-keyframe-interval=$intervalMs"
         } else {

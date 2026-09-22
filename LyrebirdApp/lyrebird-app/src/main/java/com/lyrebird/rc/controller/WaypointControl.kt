@@ -8,18 +8,18 @@ internal object WaypointControl {
     data class Acceptance(
         val distanceMeters: Double,
         val yawDegrees: Double,
-        val altitudeMeters: Double
+        val altitudeMeters: Double,
     )
 
     data class BodyVelocity(
         val forwardSpeed: Double,
-        val lateralSpeed: Double
+        val lateralSpeed: Double,
     )
 
     data class CooldownPlan(
         val waypointReached: Boolean,
         val reachedAtMs: Long,
-        val stopAtWaypoint: Boolean
+        val stopAtWaypoint: Boolean,
     )
 
     /**
@@ -43,27 +43,34 @@ internal object WaypointControl {
         pidSpeed: Double,
         targetMaxSpeed: Double,
         lastCommandedSpeed: Double,
-        maxSpeedStep: Double
-    ): Double {
-        return pidSpeed
+        maxSpeedStep: Double,
+    ): Double =
+        pidSpeed
             .coerceAtMost(targetMaxSpeed)
             .coerceAtMost(lastCommandedSpeed + maxSpeedStep)
             .coerceAtLeast(0.0)
-    }
 
-    fun bodyVelocity(targetSpeed: Double, movementDirection: Double, currentYaw: Double): BodyVelocity {
+    fun bodyVelocity(
+        targetSpeed: Double,
+        movementDirection: Double,
+        currentYaw: Double,
+    ): BodyVelocity {
         val movementDirectionRelative = normalizeAngle(movementDirection - currentYaw)
         return BodyVelocity(
             forwardSpeed = targetSpeed * cos(Math.toRadians(movementDirectionRelative)),
-            lateralSpeed = targetSpeed * sin(Math.toRadians(movementDirectionRelative))
+            lateralSpeed = targetSpeed * sin(Math.toRadians(movementDirectionRelative)),
         )
     }
 
-    fun reachedTarget(distance: Double, yawError: Double, altitudeError: Double, acceptance: Acceptance): Boolean {
-        return distance < acceptance.distanceMeters &&
+    fun reachedTarget(
+        distance: Double,
+        yawError: Double,
+        altitudeError: Double,
+        acceptance: Acceptance,
+    ): Boolean =
+        distance < acceptance.distanceMeters &&
             abs(yawError) < acceptance.yawDegrees &&
             abs(altitudeError) < acceptance.altitudeMeters
-    }
 
     fun cooldownPlan(
         targetReached: Boolean,
@@ -80,7 +87,7 @@ internal object WaypointControl {
          * genuinely a metre out. Without a dwell that one sample is permanent, because the latch
          * does not fall again once set.
          */
-        dwellMs: Long = 0L
+        dwellMs: Long = 0L,
     ): CooldownPlan {
         if (!targetReached) {
             return CooldownPlan(
@@ -88,7 +95,7 @@ internal object WaypointControl {
                 // Zero re-arms the dwell: leaving the box means the next entry starts counting
                 // again, so a run of noisy in-box samples cannot accumulate into an arrival.
                 reachedAtMs = 0L,
-                stopAtWaypoint = false
+                stopAtWaypoint = false,
             )
         }
 
@@ -100,7 +107,7 @@ internal object WaypointControl {
         return CooldownPlan(
             waypointReached = reached,
             reachedAtMs = insideSinceMs,
-            stopAtWaypoint = reached && nowMs - insideSinceMs >= dwellMs + holdCooldownMs
+            stopAtWaypoint = reached && nowMs - insideSinceMs >= dwellMs + holdCooldownMs,
         )
     }
 

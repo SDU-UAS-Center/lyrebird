@@ -33,7 +33,14 @@ const settingsCards = new Map();
 const telemetryCards = new Map();
 const chartInstances = new Map();
 const chartHistory = new Map();
-const telemetryRateState = new Map();
+// Telemetry packet rate, measured over a window rather than between two polls. Each aircraft sends
+// its message set in a batch about once a second, so a per-poll delta lands either in a gap (0 Hz)
+// or on a batch (~30 Hz) and drew a sawtooth that looked like a dropping link. The window is wide
+// enough that the counter's own +/-1 packet lands as a fraction of a Hz: telemetry arrives at a
+// steady 2 Hz and the chart should say so.
+const TELEMETRY_RATE_WINDOW_MS = 15000;
+const TELEMETRY_RATE_MIN_SPAN_MS = 4000;
+const telemetryRateSamples = new Map();
 const healthTrendState = new Map();
 const chartRangeSelects = [...document.querySelectorAll('[data-chart-range]')];
 const CHART_HISTORY_SECONDS = 60 * 60;
@@ -704,6 +711,40 @@ async function loadSettings(name) {
   }
 }
 
+/**
+ * The phone reports -1 for a flight limit it cannot read yet (the aircraft is asleep, powered off,
+ * or not connected) — the same sentinel the app's own settings page shows as "Unavailable".
+ * Printing the raw number here invites an operator to apply -1, which the aircraft rejects.
+ */
+const LIMIT_UNAVAILABLE_HINT =
+  'The aircraft has not reported this limit yet (asleep, powered off, or not connected). Wake it and press Refresh.';
+
+function formatLimit(value) {
+  return typeof value === 'number' && value >= 0 ? `${value} m` : null;
+}
+
+function flightLimitsLabel(s) {
+  const parts = [
+    `RTH ${formatLimit(s.rthAltitude) ?? 'unavailable'}`,
+    `height ${formatLimit(s.maxFlightHeight) ?? 'unavailable'}`,
+    `distance ${formatLimit(s.maxFlightDistance) ?? 'unavailable'}`,
+  ];
+  return `${parts.join(' \u00b7 ')}${s.distanceLimitEnabled ? '' : ' (distance limit off)'}`;
+}
+
+/** A write DJI has not confirmed yet still shows somewhere useful: the requested value. */
+function limitPlaceholder(field, s) {
+  if (field.key === 'rthAltitude' && typeof s.rthAltitudeEffective === 'number' && s.rthAltitudeEffective >= 0) {
+    return `pending ${s.rthAltitudeEffective} m`;
+  }
+  return 'Unavailable';
+}
+
+function limitHint(field, s) {
+  const status = field.key === 'rthAltitude' && s.rthAltitudeStatus ? ` Aircraft reports: ${s.rthAltitudeStatus}.` : '';
+  return LIMIT_UNAVAILABLE_HINT + status;
+}
+
 function renderSettingsValues(card, name, s) {
   const ro = [
     ['Drone name', s.droneName],
@@ -712,6 +753,7 @@ function renderSettingsValues(card, name, s) {
     ['Video source', s.videoSource],
     ['Streaming mode', s.streamingMode],
     ['WebRTC', `${s.webrtcResolution} @ ${s.webrtcFps}fps`],
+    ['Flight limits', flightLimitsLabel(s)],
     ['Detection', `${s.detectionSource} (${s.detectionsEnabled ? 'on' : 'off'})`],
     ['Edge confidence', s.edgeConfidenceThreshold],
     ['RC stick mode', s.rcControlMode],
@@ -724,14 +766,14 @@ function renderSettingsValues(card, name, s) {
 
   const fields = [
     { key: 'droneName', label: 'Drone name', type: 'text', value: s.droneName },
-    { key: 'videoSource', label: 'Video source', type: 'select', options: ['drone', 'phone', 'mock'], value: s.videoSource },
+    { key: 'videoSource', label: 'Video source', type: 'select', options: ['drone'], value: s.videoSource },
     { key: 'streamingMode', label: 'Streaming protocol', type: 'select', options: ['webrtc', 'rtsp', 'rtmp', 'agora', 'gb28181'], value: s.streamingMode, endpoint: '/streaming/mode', payloadKey: 'mode' },
     { key: 'webrtcResolution', label: 'WebRTC resolution', type: 'select', options: ['auto', '1080p', '720p', '480p'], value: s.webrtcResolution },
     { key: 'webrtcFps', label: 'WebRTC FPS', type: 'select', options: ['5', '10', '15', '20', '25', '30'], value: s.webrtcFps != null ? String(s.webrtcFps) : '' },
     { key: 'mediamtxServer', label: 'MediaMTX server (blank = auto)', type: 'text', value: s.mediamtxServer || '' },
-    { key: 'rthAltitude', label: 'RTH altitude (m)', type: 'number', value: s.rthAltitude },
-    { key: 'maxFlightHeight', label: 'Max flight height (m)', type: 'number', value: s.maxFlightHeight },
-    { key: 'maxFlightDistance', label: 'Max distance from home (m)', type: 'number', value: s.maxFlightDistance },
+    { key: 'rthAltitude', label: 'RTH altitude (m)', type: 'number', value: s.rthAltitude, limit: true },
+    { key: 'maxFlightHeight', label: 'Max flight height (m)', type: 'number', value: s.maxFlightHeight, limit: true },
+    { key: 'maxFlightDistance', label: 'Max distance from home (m)', type: 'number', value: s.maxFlightDistance, limit: true },
     { key: 'distanceLimitEnabled', label: 'Distance limit enabled', type: 'checkbox', value: s.distanceLimitEnabled },
     { key: 'detectionsEnabled', label: 'Detections enabled', type: 'checkbox', value: s.detectionsEnabled },
     { key: 'detectionSource', label: 'Detection source', type: 'select', options: ['none', 'dji_onboard', 'yolo_on_phone'], value: s.detectionSource },
@@ -779,10 +821,21 @@ function renderSettingsValues(card, name, s) {
       if (f.type === 'number') input.step = '1';
     }
     row.appendChild(input);
+    const limitUnavailable = f.limit === true && formatLimit(f.value) === null;
+    if (limitUnavailable) {
+      input.value = '';
+      input.placeholder = limitPlaceholder(f, s);
+      input.disabled = true;
+      input.title = limitHint(f, s);
+    }
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = 'Apply';
     btn.className = 'settingsApply';
+    if (limitUnavailable) {
+      btn.disabled = true;
+      btn.title = limitHint(f, s);
+    }
     btn.addEventListener('click', async () => {
       if (card.busy) return;
       card.busy = true;
@@ -887,8 +940,8 @@ function ensureRosElements() {
   summaryEl.className = 'healthCard rosSummary';
   summaryEl.innerHTML = `<div class="healthHeader"><div><h3>ros-monitor</h3><p data-role="timestamp"></p></div><span class="pill" data-role="statusPill"></span></div><dl class="healthMetrics" data-role="metrics"></dl>`;
 
-  const pubTable = createRosTopicTable('published', 'Published topics', 'Telemetry and state topics published by the selected drone’s DjiNode, rates over a 3 s window.');
-  const subTable = createRosTopicTable('subscribed', 'Subscribed topics (command surface)', 'Command topics the selected drone’s DjiNode consumes. They only show traffic when a command is actually sent.');
+  const pubTable = createRosTopicTable('published', 'Published topics', 'Telemetry and state topics published by the selected drone’s lyrebird_controller node, rates over a 3 s window.');
+  const subTable = createRosTopicTable('subscribed', 'Subscribed topics (command surface)', 'Command topics the selected drone’s lyrebird_controller node consumes. They only show traffic when a command is actually sent.');
 
   const columns = document.createElement('div');
   columns.className = 'rosColumns col5050';
@@ -1693,19 +1746,34 @@ function addChartSample(droneName, values) {
   }
 }
 
+/**
+ * Packets per second over the last window, or null while there is not enough history to say.
+ *
+ * An aircraft that restarted counts its packets from zero again, which would otherwise read as a
+ * negative rate: the samples are dropped in that case and the window refills.
+ */
+function telemetryRateHz(droneName, packets, nowMs) {
+  const samples = telemetryRateSamples.get(droneName) || [];
+  const last = samples[samples.length - 1];
+  if (last && packets < last.packets) samples.length = 0;
+  samples.push({ packets, at: nowMs });
+  // Drop samples only while one at or beyond the window stays behind: keeping the window's own
+  // length is what makes the reading steady, since the poll lands on a fixed cadence.
+  while (samples.length > 2 && nowMs - samples[1].at > TELEMETRY_RATE_WINDOW_MS) samples.shift();
+  telemetryRateSamples.set(droneName, samples);
+  const spanMs = nowMs - samples[0].at;
+  if (spanMs < TELEMETRY_RATE_MIN_SPAN_MS) return null;
+  return Math.max(0, (packets - samples[0].packets) / (spanMs / 1000));
+}
+
 function updateTelemetryChartSamples(state) {
   for (const drone of state.drones) {
     if (drone.ignored) continue;
-    const currentPackets = Number(drone.telemetryPackets || 0);
     const telemetry = drone.lastTelemetry || {};
     const speed = telemetry.speed || {};
     const phone = telemetry.phoneLocation || {};
-    const previous = telemetryRateState.get(drone.name) || { packets: currentPackets, at: Date.now() };
-    const now = Date.now();
-    const seconds = Math.max((now - previous.at) / 1000, 0.001);
-    telemetryRateState.set(drone.name, { packets: currentPackets, at: now });
     addChartSample(drone.name, {
-      telemetryRate: Math.max(0, (currentPackets - previous.packets) / seconds),
+      telemetryRate: telemetryRateHz(drone.name, Number(drone.telemetryPackets || 0), Date.now()),
       inboundFramesInError: drone.mediaMtx?.inboundFramesInError || 0,
       batteryLevel: telemetry.batteryLevel,
       satelliteCount: telemetry.satelliteCount,
@@ -1930,11 +1998,26 @@ function updateModalForDrone(name) {
     modalStreamingSelect.value = telemetry.streaming?.mode?.toLowerCase() || 'webrtc';
   }
   if (modalStreamingPath) {
-    modalStreamingPath.textContent = getConsumptionPath(drone);
+    // Async: the RTSP branch reads this bridge's configured credentials before rendering.
+    getConsumptionPath(drone).then(text => { modalStreamingPath.textContent = text; });
   }
 }
 
-function getConsumptionPath(drone) {
+// This bridge's RTSP credentials (LB_RTSP_USER / LB_RTSP_PASSWORD), fetched once and cached.
+// The endpoint reports the username and only whether a password is set — never the password.
+let bridgeRtspCredentials = null;
+async function getBridgeRtspCredentials() {
+  if (bridgeRtspCredentials) return bridgeRtspCredentials;
+  try {
+    const response = await fetch('/api/rtsp-credentials');
+    if (response.ok) bridgeRtspCredentials = await response.json();
+  } catch (err) {
+    console.warn('RTSP credentials unavailable:', err);
+  }
+  return bridgeRtspCredentials;
+}
+
+async function getConsumptionPath(drone) {
   const telemetry = drone.lastTelemetry || {};
   const mode = telemetry.streaming?.mode?.toLowerCase() || 'webrtc';
   const droneIp = drone.ip || 'PHONE_IP';
@@ -1946,10 +2029,14 @@ function getConsumptionPath(drone) {
       info = `WHIP Ingest (Phone) → MediaMTX relay WHEP (Browser): ${getRelayWhepUrl(drone.streamName)}`;
       break;
     case 'rtsp': {
+      // The phone no longer broadcasts its RTSP password, so the URL shown here uses this
+      // bridge's locally configured credentials (LB_RTSP_USER / LB_RTSP_PASSWORD on the
+      // webapp container) — the same ones MediaMTX pulls with. The password itself is never
+      // displayed; only that one is configured.
       const rtspPort = telemetry.streaming?.rtspPort || 8554;
-      const rtspUser = telemetry.streaming?.rtspUser || 'admin';
-      const rtspPwd  = telemetry.streaming?.rtspPwd  || 'lyrebird';
-      info = `RTSP Server (Phone): rtsp://${rtspUser}:${rtspPwd}@${droneIp}:${rtspPort}/streaming/live/1 → MediaMTX pulling & bridging to WHEP`;
+      const cred = await getBridgeRtspCredentials();
+      const credPart = cred?.user ? (cred.hasPassword ? `${cred.user}:***@` : `${cred.user}@`) : '';
+      info = `RTSP Server (Phone): rtsp://${credPart}${droneIp}:${rtspPort}/streaming/live/1 → MediaMTX pulling & bridging to WHEP`;
       break;
     }
     case 'rtmp':
@@ -1984,12 +2071,6 @@ function closeDroneModal() {
 }
 
 async function loadState() { const response = await fetch('/api/drones'); render(await response.json()); }
-function reconnectAll() {
-  for (const player of players.values()) {
-    if (player.drone.ignored) continue;
-    if (player.drone.mediaMtx?.ready) player.connect();
-  }
-}
 
 function renderTreeNode(label, value, options = {}) {
   const { open = false, hideLabel = false, path = label, state = null } = options;
@@ -2056,8 +2137,6 @@ function escapeHtml(value) {
   return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-document.querySelector('#discoverBtn').addEventListener('click', () => { fetch('/api/discover', { method: 'POST' }).catch(() => {}); });
-document.querySelector('#reconnectBtn').addEventListener('click', reconnectAll);
 modalCloseBtn.addEventListener('click', closeDroneModal);
 
 if (modalStreamingSelect) {
@@ -2085,7 +2164,7 @@ if (modalStreamingSelect) {
       const drone = getDrone(selectedDroneName);
       if (drone) {
         modalStreamingSelect.value = drone.lastTelemetry?.streaming?.mode?.toLowerCase() || 'webrtc';
-        modalStreamingPath.textContent = getConsumptionPath(drone);
+        getConsumptionPath(drone).then(text => { modalStreamingPath.textContent = text; });
       }
     } finally {
       modalStreamingSelect.disabled = false;

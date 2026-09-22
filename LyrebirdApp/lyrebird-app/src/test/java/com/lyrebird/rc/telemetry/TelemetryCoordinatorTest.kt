@@ -11,19 +11,22 @@ class TelemetryCoordinatorTest {
     @Test
     fun realTelemetryJsonBuildsCorrectlyWithDecoupledProperties() {
         val coordinator = TelemetryCoordinator()
-        coordinator.isMockEnabled = false
         coordinator.droneName = "scout_02"
-        coordinator.speed = """{"x":1.1,"y":2.2,"z":3.3}"""
+        coordinator.speed = VelocityNedMps(northMps = 1.1, eastMps = 2.2, downMps = 3.3)
         coordinator.heading = 125.4
-        coordinator.attitude = """{"pitch":4.0,"roll":2.0,"yaw":125.4}"""
-        coordinator.location = """{"latitude":55.123,"longitude":12.456,"altitude":45.2}"""
+        coordinator.attitude = AttitudeDeg(rollDeg = 2.0, pitchDeg = 4.0, yawDeg = 125.4)
+        coordinator.location = GeoPosition(
+            latitudeDeg = 55.123,
+            longitudeDeg = 12.456,
+            altitudeAslM = 45.2,
+        )
         coordinator.altitudeASL = 45.2
         coordinator.altitudeAGL = 20.5
-        coordinator.gimbalAttitude = """{"pitch":-30.0,"roll":0.0,"yaw":125.4}"""
-        coordinator.gimbalJointAttitude = """{"pitch":-30.0,"roll":0.0,"yaw":125.4}"""
+        coordinator.gimbalAttitude = AttitudeDeg(rollDeg = 0.0, pitchDeg = -30.0, yawDeg = 125.4)
+        coordinator.gimbalJointAttitude = AttitudeDeg(rollDeg = 0.0, pitchDeg = -30.0, yawDeg = 125.4)
         coordinator.batteryLevel = 82
         coordinator.satelliteCount = 18
-        coordinator.homeLocation = """{"latitude":55.122,"longitude":12.455}"""
+        coordinator.homeLocation = GeoPoint(latitudeDeg = 55.122, longitudeDeg = 12.455)
         coordinator.distanceToHome = 12.3
         coordinator.waypointReached = true
         coordinator.intermediaryWaypointReached = false
@@ -100,48 +103,5 @@ class TelemetryCoordinatorTest {
         val targets = detections.getJSONArray("targets")
         assertEquals(1, targets.length())
         assertEquals("person", targets.getJSONObject(0).getString("label"))
-    }
-
-    @Test
-    fun mockTelemetryJsonBuildsWithoutDJISDKDependencies() {
-        val coordinator = TelemetryCoordinator()
-        coordinator.isMockEnabled = true
-        coordinator.mockSnapshot = MockTelemetrySnapshot(
-            velocity = """{"x":1.0,"y":2.0,"z":3.0}""",
-            heading = 90.0,
-            attitude = """{"pitch":0.0,"roll":0.0,"yaw":90.0}""",
-            location = """{"latitude":55.0,"longitude":12.0,"altitude":20.0}""",
-            altitudeAGL = 20.0,
-            gimbalAttitude = """{"pitch":-15.0,"roll":0.0,"yaw":90.0}""",
-            batteryPercent = 90,
-            satelliteCount = 15,
-            flightMode = "GPS_NORMAL",
-            isFlying = true,
-            locationLatitude = 55.0,
-            locationLongitude = 12.0
-        )
-        coordinator.droneName = "mock_drone"
-        coordinator.phoneLatitude = 1.0
-        coordinator.phoneLongitude = 2.0
-        coordinator.rebuildTelemetryCache()
-
-        val jsonString = coordinator.getTelemetryJson()
-        val json = JSONObject(jsonString)
-
-        assertEquals("mock_drone", json.getString("droneName"))
-
-        assertEquals(20.0, json.getDouble("altitude"), 0.001)
-        
-        val speedObj = json.getJSONObject("speed")
-        assertEquals(1.0, speedObj.getDouble("x"), 0.001)
-        
-        val phone = json.getJSONObject("phoneLocation")
-        assertEquals(1.0, phone.getDouble("latitude"), 0.001)
-        assertEquals(2.0, phone.getDouble("longitude"), 0.001)
-
-        // Verify some mock telemetry fallback values are generated correctly
-        val detections = json.getJSONObject("detections")
-        assertEquals("none", detections.getString("source"))
-        assertFalse(detections.getBoolean("enabled"))
     }
 }

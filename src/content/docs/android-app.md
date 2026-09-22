@@ -12,13 +12,21 @@ Everything below starts automatically the moment the app launches — there is n
 
 | Service | Port / channel | Started | Purpose |
 |---|---|---|---|
-| HTTP command & status server | TCP 8080 | Always | `POST /send/...` commands, `GET /config` and status endpoints — see [HTTP API](/http-api/) |
-| TCP telemetry stream | TCP 8081 | Always | Newline-delimited JSON, one line per tick, to every connected socket — see [Telemetry](/telemetry/) |
+| HTTP command & status server | TCP 8080 | Always, once this app owns the session | `POST /send/...` commands, `GET /config` and status endpoints — see [HTTP API](/http-api/) |
+| TCP telemetry stream | TCP 8081 | Always, once this app owns the session | Newline-delimited JSON, one line per tick, to every connected socket — see [Telemetry](/telemetry/) |
 | MAVLink 2 endpoint | UDP 14550 | On by default (`lb_mav_0_enabled`) | Full MAVLink 2 vehicle: telemetry, commands, missions, parameters, FTP — see [MAVLink 2](/mavlink/) |
-| UDP discovery responder | UDP 30000 | Always | Answers broadcast discovery requests with the aircraft's name and IP, plus mDNS and subnet-scan fallbacks |
+| UDP discovery responder | UDP 30000 | Always, once this app owns the session | Answers broadcast discovery requests with the aircraft's name and IP, plus mDNS and subnet-scan fallbacks |
 | WHIP video publisher | via MediaMTX | Once a ground station connects | Publishes the DJI camera feed for WHEP playback — see [Ground Station](/groundstation/#groundstation-video-dashboard) |
 
 Two of these are worth calling out specifically because of how they behave when nobody is using them: the MAVLink endpoint never broadcasts its full telemetry stream onto the subnet — only its 1&nbsp;Hz heartbeat does, until a real ground station has been heard from — and the TCP telemetry stream sends nothing at all to sockets nobody has opened. An idle aircraft with both protocols enabled costs the network almost nothing.
+
+### One session owner per device
+
+Two Lyrebird APKs can be installed side by side (one per DJI SDK version), and both would otherwise bind the same ports and answer the same discovery probes, which produces two half-working ground-station links instead of one working one. Each app therefore takes a device-local lease on TCP 3900 before serving: whoever binds it serves, and the other app says so on screen rather than competing. A session that cannot bind either server gives the lease back instead of holding it while serving nothing.
+
+The lease is cooperative and narrow. It is not an aircraft authority — it cannot stop another app from touching the SDK, the RC accessory, or the aircraft — and it keys on the *network* session only.
+
+Services are brought up in the order that keeps the announcement honest: lease, then the servers bind, then mDNS and UDP discovery publish only the ports that came up. Discovery used to start first, so a failed bind left the aircraft advertising a port nobody was listening on.
 
 ## Core capabilities
 
@@ -57,7 +65,7 @@ Separately, and needing no configuration at all, DJI's SDK runs its own RTSP ser
 
 ### Safety and identity
 
-A Safety Computer can seize command authority from the Pilot Computer at any time — over HTTP via the `X-Safety-Token` header, over MAVLink via [packet signing](/mavlink/#how-packet-signing-works) — and only it can hand control back; the takeover is persistent and shown on screen with a red **SAFETY COMPUTER IN CONTROL** banner. See [the two-computer safety model](/http-api/#two-computer-safety-authority). Separately, UDP broadcast auto-discovery (port 30000), mDNS, and subnet scanning mean a ground station never has to be told the aircraft's IP by hand, and every command executed over either wire is written to the on-device flight log (JSONL; see [Logs & Troubleshooting](/operations/#flight-logging) for where).
+A Safety Computer can seize command authority from the Pilot Computer at any time — over HTTP via the `X-Safety-Token` header, over MAVLink via [packet signing](/mavlink/#how-packet-signing-works) — and only it can hand control back; the takeover is persistent (no timeout, and it survives an app restart, keyed by aircraft serial) and shown on screen with a red **SAFETY COMPUTER IN CONTROL** banner. See [the two-computer safety model](/http-api/#two-computer-safety-authority). Separately, UDP broadcast auto-discovery (port 30000), mDNS, and subnet scanning mean a ground station never has to be told the aircraft's IP by hand, and every command executed over either wire is written to the on-device flight log (JSONL; see [Logs & Troubleshooting](/operations/#flight-logging) for where).
 
 ## Supported hardware
 
@@ -109,25 +117,25 @@ git clone https://github.com/SDU-UAS-Center/lyrebird.git
 
 ```bash
 cd Lyrebird/LyrebirdApp/android-sdk-v5-as
-./gradlew :app:assembleCurrentDebug        # the "current" variant
-./gradlew :app:assembleDemoBiomassDebug    # the "demo_biomass" variant
+./gradlew :app:assembleCurrentV5Debug        # the "currentV5" variant
+./gradlew :app:assembleDemoBiomassV5Debug    # the "demoBiomassV5" variant
 ```
 
-The two Gradle product flavors are the same app: `current` is the default, and `demo_biomass` only differs by application-id suffix and (optionally) a separate `AIRCRAFT_API_KEY_DEMO_BIOMASS` key, for running a demo build side by side with a production install on the same device.
+The app builds against DJI MSDK V5 today (`currentV5` is the default). `demoBiomassV5` differs only by application-id suffix and (optionally) a separate `AIRCRAFT_API_KEY_DEMO_BIOMASS` key, for running a demo build side by side with a production install on the same device. The `v4` SDK flavor exists in the build for the planned MSDK-V4 adapter and stays disabled until that adapter lands.
 
 Debug APKs land at:
 
 ```text
-LyrebirdApp/lyrebird-app/build/outputs/apk/current/debug/Lyrebird-debug.apk
-LyrebirdApp/lyrebird-app/build/outputs/apk/demoBiomass/debug/Lyrebird-debug.apk
+LyrebirdApp/lyrebird-app/build/outputs/apk/currentV5/debug/Lyrebird-current-v5-debug.apk
+LyrebirdApp/lyrebird-app/build/outputs/apk/demoBiomassV5/debug/Lyrebird-demoBiomass-v5-debug.apk
 ```
 
 With a device connected over ADB, `auto_install_on_connect.sh` builds, picks the right APK, and installs it in one step:
 
 ```bash
-./auto_install_on_connect.sh current --build
-./auto_install_on_connect.sh demo_biomass --build
-./auto_install_on_connect.sh current --check   # just report which APK would be used
+./auto_install_on_connect.sh currentV5 --build
+./auto_install_on_connect.sh demoBiomassV5 --build
+./auto_install_on_connect.sh currentV5 --check   # just report which APK would be used
 ```
 
 ## Running it on the RC

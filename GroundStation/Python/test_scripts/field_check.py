@@ -47,34 +47,51 @@ _MARK = {PASS: "  ok  ", FAIL: " FAIL ", WARN: " warn ", SKIP: " skip "}
 
 #: Fields the aircraft should be reporting within a few seconds of power-up, with no flight and
 #: no GPS lock required. Anything missing here is a decoder or a publisher fault, not weather.
+#:
+#: The names are the ones the MAVLink source writes, which are the names the app's own telemetry
+#: JSON uses (see transport.apply_mavlink_message): attitude and gimbal readings are nested
+#: objects, and the battery is `batteryLevel`. This list used to hold a flat vocabulary
+#: ("battery", "roll", "isFlying") that neither surface has ever published, so a healthy
+#: aircraft failed this check -- a false alarm that hid the check's real job, which is catching a
+#: mismatched dialect or a publisher that stopped carrying a message.
 CORE_FIELDS = (
-    "battery",
+    "batteryLevel",
     "flightMode",
     "heading",
-    "roll",
-    "pitch",
-    "yaw",
-    "gimbalPitch",
-    "gimbalYaw",
-    "isFlying",
-    "droneName",
-    "ipAddress",
-    "httpPort",
+)
+
+#: Core readings that arrive as nested objects, checked by dotted path.
+CORE_PATHS = (
+    "attitude.roll",
+    "attitude.pitch",
+    "attitude.yaw",
+    "gimbalAttitude.pitch",
+    "gimbalAttitude.yaw",
 )
 
 #: Fields that need something from the world before they can be honest: a GPS fix, a home point,
 #: a battery that has learned its discharge rate. Absent is a state of the aircraft, not a gap in
 #: the interface, so these are reported but never failed.
 CONDITIONAL_FIELDS = (
-    "latitude",
-    "longitude",
+    "location.latitude",
+    "location.longitude",
     "altitude",
     "satelliteCount",
-    "homeLocation",
+    "homeLocation.latitude",
     "distanceToHome",
     "remainingFlightTime",
     "gimbalJointAttitude",
 )
+
+
+def _read(telemetry: dict[str, Any], path: str) -> Any:
+    """Read a dotted path out of the telemetry dictionary, or None when it is absent."""
+    value: Any = telemetry
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
 
 
 class Checks:
@@ -133,21 +150,25 @@ def _listen(args: argparse.Namespace, seconds: float) -> tuple[dict[str, Any], i
 
 def _check_fields(telemetry: dict[str, Any], checks: Checks) -> None:
     """A missing core field is a decoder fault; a missing conditional one is the weather."""
-    # A CRC mismatch means the phone's dialect and this one disagree, which is exactly the
-    # failure that once read a status message twelve bytes out of alignment and reported a
-    # takeoff block reason of "ISION". A rejected frame is a mismatched build, not a bad link.
+    # Two faults look identical here and both matter: a message whose CRC_EXTRA differs is
+    # rejected by the ground station (that is how a status message once read twelve bytes out of
+    # alignment and reported a takeoff block reason of "ISION"), and a publisher that stopped
+    # sending a message leaves the same hole.
     missing = [field for field in CORE_FIELDS if telemetry.get(field) is None]
+    missing += [path for path in CORE_PATHS if _read(telemetry, path) is None]
     if missing:
         checks.record(
             FAIL,
             "core telemetry decodes",
-            f"missing {', '.join(missing)} -- if these are all Lyrebird-specific the phone is "
-            f"on a build whose dialect CRC differs and the frames are being rejected",
+            f"missing {', '.join(missing)} -- check that LYREBIRD_STATUS is accepted (dialect "
+            f"CRC) and that ATTITUDE / BATTERY_STATUS / GIMBAL_DEVICE_ATTITUDE_STATUS are still "
+            f"streaming from the phone",
         )
     else:
-        checks.record(PASS, "core telemetry decodes", f"{len(CORE_FIELDS)} fields populated")
+        total = len(CORE_FIELDS) + len(CORE_PATHS)
+        checks.record(PASS, "core telemetry decodes", f"{total} fields populated")
 
-    present = [field for field in CONDITIONAL_FIELDS if telemetry.get(field) is not None]
+    present = [field for field in CONDITIONAL_FIELDS if _read(telemetry, field) is not None]
     checks.record(
         PASS if present else WARN,
         "conditional fields",
@@ -181,7 +202,7 @@ def _check_config(telemetry: dict[str, Any], checks: Checks) -> None:
 
 
 def _check_position(telemetry: dict[str, Any], checks: Checks) -> None:
-    lat, lon = telemetry.get("latitude"), telemetry.get("longitude")
+    lat, lon = _read(telemetry, "location.latitude"), _read(telemetry, "location.longitude")
     if lat is None or lon is None:
         checks.record(WARN, "position is real", "no position reported yet")
     elif abs(lat) < 1e-7 and abs(lon) < 1e-7:

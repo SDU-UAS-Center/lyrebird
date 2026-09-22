@@ -31,13 +31,14 @@ Lyrebird is an open-source Android ground-station app (Kotlin + DJI Mobile SDK V
 
 ### Python GroundStation
 
+Python is managed by [uv](https://docs.astral.sh/uv/): `uv.lock` is committed, `.python-version` pins 3.14.7 and uv fetches that interpreter itself. The shared client must keep importing on 3.10, because the `ros:humble` containers run it there — CI tests both interpreters from the one lock.
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e GroundStation/Python                # shared client; pulls in requests
-pip install -r GroundStation/ROS/requirements.txt   # only if working on ROS bits
-pip install pymavlink                               # only for mavlink_listen.py
-pytest GroundStation/tests -q
-python3 -m compileall -q GroundStation/Python GroundStation/ROS
+uv sync                                          # client + dev tools, from the lock
+uv run --locked pytest GroundStation/tests -q
+uv run --locked python -m compileall -q GroundStation/Python GroundStation/ROS
+uv sync --group ros                              # only if working on ROS bits
+uv run --locked --group mavlink lyrebird-mavlink-listen   # only for mavlink_listen.py
 ```
 
 ### Android
@@ -45,10 +46,10 @@ python3 -m compileall -q GroundStation/Python GroundStation/ROS
 ```bash
 cd LyrebirdApp/android-sdk-v5-as
 cp local.properties.example local.properties   # set sdk.dir and AIRCRAFT_API_KEY
-./gradlew :app:compileDebugKotlin            # fast validation of Kotlin changes
-./gradlew :app:assembleCurrentDebug          # current variant
-./gradlew :app:assembleDemoBiomassDebug      # demo/biomass variant
-./auto_install_on_connect.sh current --build    # build+install to a connected device
+./gradlew :app:compileCurrentV5DebugKotlin   # fast validation of Kotlin changes
+./gradlew :app:assembleCurrentV5Debug        # current/v5 variant
+./gradlew :app:assembleDemoBiomassV5Debug    # demo/biomass v5 variant
+./auto_install_on_connect.sh currentV5 --build # build+install to a connected device
 ```
 
 ### Video test stack
@@ -92,15 +93,18 @@ npm run build    # production build into dist/ (validate doc edits with this)
 | `GroundStation/video_test/` | MediaMTX config + webapp for the video dashboard |
 | `GroundStation/qgc/` | QGroundControl MAVLink Actions config — Takeoff/Land/RTL Fly View buttons (`lyrebird-actions.json`) |
 | `scripts/check_radon_complexity.py` | Complexity gate used by pre-commit/CI |
+| `scripts/check_main_sdk_free.py` | Enforces the `src/main` SDK-neutral boundary (pre-commit/CI) |
+| `scripts/check_process_ownership.py` | Enforces that the process runtimes stay screen-free (pre-commit/CI) |
 | `GroundStation/video_test/compose.yaml` | MediaMTX + dashboard compose file |
 | `src/content/docs/` | Starlight documentation content |
 | `astro.config.mjs` | Starlight site config: sidebar, edit links, base path |
+| `pyproject.toml` + `uv.lock` | Python toolchain: the uv workspace (`GroundStation/Python`) and the dependency groups CI, pre-commit and the container images install from |
 | `.github/workflows/ci.yml` | GroundStation Python gates plus Lyrebird-owned Android Spotless/compile/unit tests on PRs and `main` |
 | `.github/workflows/docs.yml` | Builds the Starlight site and deploys it to GitHub Pages on `main` |
 
 ## Configuration Notes
 
-- `pyproject.toml` is the source of truth for Ruff (line length 100, Python 3.10 target), pytest paths (`GroundStation/Python` + `GroundStation/video_test/webapp`), mypy scope, and bandit scope.
+- `pyproject.toml` is the source of truth for Ruff (line length 100, Python 3.10 target — the ROS 2 container's interpreter), pytest paths (`GroundStation/Python` + `GroundStation/video_test/webapp`), mypy scope, bandit scope, and the uv workspace plus dependency groups. `uv.lock` is committed; `.python-version` pins the 3.14.7 that developers and the images run.
 - Android SDK/API key live in `local.properties` (never committed).
 - MediaMTX behavior is defined in `GroundStation/video_test/mediamtx.yml`.
 
@@ -111,24 +115,28 @@ Treat a failing local hook as part of finishing the change — CI will fail the 
 pull requests and pushes to `main`.
 
 ```bash
-pre-commit install
-pre-commit run --all-files
+uv run --locked pre-commit install
+uv run --locked pre-commit run --all-files
 ```
 
-Hooks configured in `.pre-commit-config.yaml` (mirrored by CI jobs of the same name):
+Hooks configured in `.pre-commit-config.yaml` (mirrored by CI jobs of the same name). The Python
+hooks run through `uv run --locked`, so they use the dependency groups in `pyproject.toml` instead
+of their own sandboxes:
 
 - **Ruff lint + format** — scoped to `GroundStation/**.py` (`ruff check --fix` locally, `ruff check` / `ruff format --check` in CI)
-- **Radon complexity** — `python scripts/check_radon_complexity.py`, B-or-better blocks (blocks with cyclomatic complexity ≥ 11 fail)
+- **Radon complexity** — `uv run --locked --only-group metrics python scripts/check_radon_complexity.py`, B-or-better blocks (blocks with cyclomatic complexity ≥ 11 fail)
 - **Mypy** — gradual typing over `GroundStation/Python/lyrebird_groundstation` + `lyrebird_dji_helpers.py`
 - **Bandit** — `bandit -r GroundStation -ll --skip B101`
-- **GroundStation tests** — `python -m pytest GroundStation/tests -q` (manual stage locally; always run in CI)
+- **GroundStation tests** — `uv run --locked --group test python -m pytest GroundStation/tests -q` (manual stage locally; CI runs it on 3.14.7 and on the ROS container's 3.10)
 - **Android Spotless** — `./gradlew :app:spotlessKotlinCheck` on Lyrebird-owned Kotlin (`LyrebirdApp/lyrebird-app/**/*.kt`)
-- **Android compile + unit tests** — `./gradlew :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest` (manual stage locally; always run in CI, with `qualityLyrebird` Detekt/Lint reports)
+- **Android compile + unit tests** — `./gradlew :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest` (manual stage locally; always run in CI, with `qualityLyrebird` Detekt/Lint reports)
+- **Main SDK-free** — `python3 scripts/check_main_sdk_free.py`, `src/main` carries no DJI or flavor-only reference in its sources, shared manifest or shared resources
+- **Process ownership** — `python3 scripts/check_process_ownership.py`, the process runtimes stay screen-free (see below)
 
 Run the manual test hooks with:
 
 ```bash
-pre-commit run groundstation-tests android-tests --hook-stage manual
+uv run --locked pre-commit run groundstation-tests android-tests --hook-stage manual
 ```
 
 Vendor DJI/UXSDK quality stays out of the required gate (`qualityDji`); do not fail CI on inherited sample code.
@@ -136,9 +144,14 @@ Vendor DJI/UXSDK quality stays out of the required gate (`qualityDji`); do not f
 ## Code Conventions
 
 - All code, comments, and docs in English; Python type hints expected.
-- Imports at module scope, no conditional-import flags; add new packages to the relevant `requirements.txt`.
+- Imports at module scope, no conditional-import flags; add new packages to the relevant dependency group in the root `pyproject.toml` and re-run `uv lock` — CI and the container images install from that lock, not from a `requirements.txt`.
 - Follow existing patterns when adding GroundStation helpers, ROS nodes, or app pages; register new Android pages in `data/AircraftFragmentPageInfoFactory.kt` and the nav graph.
 - Keep generated/runtime artifacts out of Git.
+- **The ground-station runtimes are process-scoped, never screen-scoped.** HTTP, MAVLink, telemetry, discovery, streaming, the payload and flight command paths, the obstacle guard and the settings backup all run on the aircraft's process and must keep working with no Flight Deck attached: an RC whose screen is closed, or whose activity is being recreated, keeps serving. Concretely:
+  - SDK-facing runtimes attach from `ProcessAppRuntime` (network session at process start; telemetry, streaming and backup on the SDK's `onRegisterSuccess` — a DJI key cannot be created before that).
+  - What a screen contributes goes behind a `*Ui` contract (`CommandSurfaceUi`, `StreamingRuntimeUi`, `ObstacleGuardUi`), attached weakly and identity-guarded, implemented only by `FlightDeckActivity`; `src/v5/java/com/lyrebird/rc/server/` must not mention an activity at all (`scripts/check_process_ownership.py` enforces both).
+  - Configuration a runtime needs comes from preferences, the aircraft, or the device — not from an attached screen (`V5StreamingSettings` is the model). If a value would have to come from a screen, the design is wrong, not the check.
+  - Vendor widgets that command the aircraft are **operator controls**, in the same class as the RC's own buttons: the authority seam governs what a *remote* pilot may command, not what the person holding the controller may, so they stay. Lyrebird's job is then to stay in step — the flight-state machine and the controller's status follow the aircraft's own telemetry, so a take-off from one of them is still logged, still starts the detection runtime, and still makes a later mission wait out the climb (see `V5FlightStateEffects` and `DroneController.onTelemetryTakeoff`).
 - Safety-critical changes (authority takeover, virtual-stick, control loops, RTH) deserve extra tests and explicit review; never weaken the takeover semantics.
 
 ## Commit Attribution

@@ -31,7 +31,16 @@ def launch_setup(context, *args, **kwargs):
         Node(
             package="lyrebird_controller",
             executable="lyrebird_fleet_auto_discovery",
-            name="fleet_auto_discovery_manager",
+            # No `name=` here on purpose. launch_ros turns a Node(name=...) action into a
+            # process-wide `-r __node:=fleet_auto_discovery_manager` remap, and that rule
+            # matches *every* node the process creates -- including each discovered drone's
+            # DjiNode, which would then be named after the manager instead of
+            # lyrebird_controller_<drone>. The graph would show one name repeated per
+            # namespace, ros_monitor's lyrebird_controller_* scan would find nothing, and the
+            # dashboard would report zero bridged drones while the bridge works fine.
+            # The manager node names itself fleet_auto_discovery_manager by default (see
+            # FleetAutoDiscoveryManager.__init__), which is the same name this argument used
+            # to pin down, so omitting it changes nothing for the manager itself.
             output="screen",
             parameters=parameters,
             remappings=remappings,

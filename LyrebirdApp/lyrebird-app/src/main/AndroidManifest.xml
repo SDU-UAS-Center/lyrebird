@@ -23,6 +23,10 @@
          ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION declarations above. -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Required by WifiManager.createWifiLock: without it the low-latency Wi-Fi lock the
+         streamer takes before publishing is silently refused and the radio free to enter
+         power save mid-stream. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.BATTERY_STATS" />
@@ -42,8 +46,11 @@
         android:name="android.hardware.usb.accessory"
         android:required="true"/>
 
+    <!-- The application class and every activity are flavor-owned: each SDK flavor declares the
+         ones it compiles in its own manifest (src/v5/AndroidManifest.xml), beside the classes
+         they name. What remains here is shared device plumbing: permissions, the file provider
+         and the vendor string meta-data. -->
     <application
-        android:name="com.lyrebird.rc.DJIAircraftApplication"
         android:allowBackup="true"
         android:icon="${APP_ICON}"
         android:label="@string/app_name_aircraft"
@@ -71,54 +78,5 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"/>
         </provider>
-
-        <activity
-            android:name="com.lyrebird.rc.DJIAircraftMainActivity"
-            android:theme="@style/LyrebirdHomeTheme"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
-        <activity android:name=".UsbAttachActivity"
-            android:theme="@style/translucent_theme"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
-            </intent-filter>
-
-            <meta-data
-                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
-                android:resource="@xml/accessory_filter" />
-        </activity>
-
-        <activity android:name="dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity"
-            android:theme="@style/full_screen_theme"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="false"/>
-
-        <activity android:name=".FlightDeckActivity"
-            android:theme="@style/full_screen_theme"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="false"/>
-
-        <activity android:name="dji.v5.ux.sample.showcase.widgetlist.WidgetsActivity"
-            android:theme="@style/full_screen_theme"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="false"/>
-
-        <activity android:name="com.lyrebird.rc.AircraftTestingToolsActivity"
-            android:theme="@style/full_screen_theme"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="false"/>
     </application>
 </manifest>

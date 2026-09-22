@@ -1,28 +1,16 @@
 package com.lyrebird.rc
 
 import android.os.Handler
-import com.lyrebird.rc.models.MediaVM
-import com.lyrebird.rc.models.PayloadWidgetVM
-import dji.sdk.keyvalue.key.DJIKey
-import dji.sdk.keyvalue.value.common.EmptyMsg
-import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import android.util.Log
 import android.widget.Switch
 import com.lyrebird.rc.controller.ControlAuthority
-import com.lyrebird.rc.controller.DroneController
-import com.lyrebird.rc.controller.Payload
-import com.lyrebird.rc.logger.LyrebirdFlightLogger
+import com.lyrebird.rc.mavlink.CommandResult
 import com.lyrebird.rc.mavlink.GimbalRotation
 import com.lyrebird.rc.mavlink.GimbalRotationMode
 import com.lyrebird.rc.mavlink.MavlinkCommandOutcome
 import com.lyrebird.rc.mavlink.MavlinkCommandSink
+import com.lyrebird.rc.server.SessionServer
 import com.lyrebird.rc.util.NetworkUtils
-import dji.sdk.keyvalue.value.camera.LaserMeasureState
-import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
-import dji.v5.et.action
-import dji.v5.et.get
-import dji.v5.et.set
-import dji.v5.ux.detection.DetectedTarget
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -49,18 +37,31 @@ internal const val AUTONOMOUS_COMMAND_REJECTED =
 internal interface LyrebirdCommandHost {
     val mainHandler: Handler
     val droneName: String
-    val mediaVM: MediaVM
-    val payloadWidgetVM: PayloadWidgetVM
-    val gimbalKey: DJIKey.ActionKey<GimbalAngleRotation, EmptyMsg>
-    val zoomKey: DJIKey<Double>
-    val startRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg>
-    val stopRecording: DJIKey.ActionKey<EmptyMsg, EmptyMsg>
-    val isAutoSensingActive: Boolean
-    val currentDetectedTargets: List<DetectedTarget>
-    var lrfTargetLocation: LocationCoordinate3D?
+    val media: LyrebirdMediaPort
+    val detection: LyrebirdDetectionPort
+    val flight: LyrebirdFlightPort
+
+    /**
+     * The aircraft's own settings (firmware limits, RC mode and pairing).
+     *
+     * Separate from [flight] because they are a different kind of command: [flight] flies the
+     * aircraft through the control loops, while these are key reads and writes with refusal rules
+     * of their own (see [LyrebirdAircraftSettingsPort]). Both are served by the process, so a
+     * ground station can configure and fly an RC whose screen has gone away.
+     */
+    val aircraftSettings: LyrebirdAircraftSettingsPort
 
     /** Full settings snapshot (app prefs + DJI flight limits) as JSON, for GET /config/settings. */
     fun readSettingsJson(): String
+
+    /**
+     * The active video mode's outbound name, for GET /config.
+     *
+     * Read from the mode rather than written as a constant: the command surface knows which mode
+     * is selected, and a ground station comparing this with the MAVLink config message or the
+     * mDNS advert has to see the same answer on all three.
+     */
+    val streamingModeName: String
 
     /** Set the drone name pref; returns false when the name is rejected. */
     fun setDroneName(name: String): Boolean
@@ -93,6 +94,10 @@ internal interface LyrebirdCommandHost {
     fun classifyCommandSource(presentedToken: String?): ControlAuthority.Source
     fun readThermalMaxTempNow(): Double?
 
+    fun readLrfMeasurement(): LrfMeasurement
+
+    fun setLrfTarget(target: com.lyrebird.rc.telemetry.GeoPoint3D?)
+
     /** Whether the connected payload has a thermal camera (spot temp + thermal shutter work). */
     fun hasThermalCamera(): Boolean
 
@@ -104,25 +109,44 @@ internal class LyrebirdHttpCommandHandler(
     private val host: LyrebirdCommandHost,
     private val commandSink: MavlinkCommandSink
 ) {
+        /**
+         * The answer for an aircraft-settings write: the route's own success line when the
+         * aircraft took the setting, otherwise what the aircraft said.
+         *
+         * Every settings route used to print its success line unconditionally, so a write the
+         * aircraft never received — in standby, off the link, or with no screen to reach it —
+         * read to the ground station as if it had landed.
+         */
+        private fun settingResult(
+            result: CommandResult,
+            success: String,
+        ): String =
+            if (result.outcome == MavlinkCommandOutcome.ACCEPTED) {
+                success
+            } else {
+                result.detail ?: "REJECTED: ${result.outcome.name.lowercase()}"
+            }
+
         private val postRoutes: Map<String, (String) -> String> = mapOf(
             "/send/takeoff" to {
-                DroneController.startTakeOff()
-                "Takeoff command sent."
+                settingResult(host.flight.takeoff(), "Takeoff command sent.")
             },
             "/send/land" to {
-                DroneController.startLanding()
-                "Landing command sent."
+                settingResult(host.flight.land(), "Landing command sent.")
             },
             "/send/RTH" to {
-                DroneController.startReturnToHome()
-                "Return to home command sent."
+                settingResult(host.flight.returnToHome(), "Return to home command sent.")
             },
             "/send/stick" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("stick")) {
+                if (host.flight.stick(
+                        LyrebirdHttpCommandParser.parseStick(postData).let {
+                            StickCommand(it.leftX, it.leftY, it.rightX, it.rightY)
+                        },
+                    ).outcome == MavlinkCommandOutcome.DENIED
+                ) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
                     val command = LyrebirdHttpCommandParser.parseStick(postData)
-                    DroneController.setStick(command.leftX, command.leftY, command.rightX, command.rightY)
                     "Received: leftX: ${command.leftX}, leftY: ${command.leftY}, " +
                         "rightX: ${command.rightX}, rightY: ${command.rightY}"
                 }
@@ -158,42 +182,44 @@ internal class LyrebirdHttpCommandHandler(
                 "Received: roll: ${command.roll}, pitch: ${command.pitch}, yaw: ${command.yaw}"
             },
             "/send/gotoWaypointHoldHeading" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoWaypointHoldHeading")) {
-                    AUTONOMOUS_COMMAND_REJECTED
-                } else {
-                    when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
+                when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
                         is LyrebirdHttpCommandParser.ParseResult.Invalid -> command.message
                         is LyrebirdHttpCommandParser.ParseResult.Valid -> {
                             val wp = command.value
-                            val seq = DroneController.flyToWaypointHoldHeading(
-                                wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed
-                            )
-                            "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
-                                "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
-                                "Yaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            val result = host.flight.waypoint(wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed, false)
+                            val seq = result.pending?.seq ?: 0L
+                            // A refusal is still a seq: report it as refused so a retry loop
+                            // stops iffing on "accepted, just flying" and waiting forever.
+                            if (result.outcome == MavlinkCommandOutcome.DENIED) {
+                                "WAYPOINT_REFUSED seq=$seq reason=${result.detail} " +
+                                    "Latitude=${wp.latitude}, Longitude=${wp.longitude}"
+                            } else {
+                                "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
+                                    "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
+                                    "Yaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            }
                         }
-                    }
                 }
             },
             // Nose-follows-path. During travel the heading is forced to bearing(current -> waypoint);
             // the yaw field is the FINAL arrival heading the drone rotates to in place once it
             // arrives. Use /send/gotoWaypointHoldHeading to keep the nose on yaw while translating.
             "/send/gotoWaypointNoseForward" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoWaypointNoseForward")) {
-                    AUTONOMOUS_COMMAND_REJECTED
-                } else {
-                    when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
+                when (val command = LyrebirdHttpCommandParser.parseWaypointPid(postData)) {
                         is LyrebirdHttpCommandParser.ParseResult.Invalid -> command.message
                         is LyrebirdHttpCommandParser.ParseResult.Valid -> {
                             val wp = command.value
-                            val seq = DroneController.flyToWaypointNoseForward(
-                                wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed
-                            )
-                            "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
-                                "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
-                                "FinalYaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            val result = host.flight.waypoint(wp.latitude, wp.longitude, wp.altitude, wp.yaw, wp.maxSpeed, true)
+                            val seq = result.pending?.seq ?: 0L
+                            if (result.outcome == MavlinkCommandOutcome.DENIED) {
+                                "WAYPOINT_REFUSED seq=$seq reason=${result.detail} " +
+                                    "Latitude=${wp.latitude}, Longitude=${wp.longitude}"
+                            } else {
+                                "WAYPOINT_ACCEPTED seq=$seq Latitude=${wp.latitude}, " +
+                                    "Longitude=${wp.longitude}, Altitude=${wp.altitude}, " +
+                                    "FinalYaw=${wp.yaw}, MaxSpeed=${wp.maxSpeed}"
+                            }
                         }
-                    }
                 }
             },
             "/send/gimbal/rel_pitch" to { postData ->
@@ -230,60 +256,42 @@ internal class LyrebirdHttpCommandHandler(
             // target point are populated only when the laser locks (state == NORMAL, which needs a
             // GPS fix); other states return null alongside the raw state.
             "/send/lrf/measure" to { _ ->
-                val info = Payload.takeFreshLrfReading()
-                val state = info?.laserMeasureState
-                val locked = state == LaserMeasureState.NORMAL
-                val distance = if (locked) info?.distance else null
-                val target = if (locked) {
-                    info?.location3D?.takeIf {
-                        it.latitude != 0.0 || it.longitude != 0.0 || it.altitude != 0.0
-                    }
-                } else {
-                    null
-                }
-                if (locked && target != null) {
-                    // Surfaced on the telemetry stream as lrfTarget.
-                    host.lrfTargetLocation = target
-                }
+                val measurement = host.readLrfMeasurement()
+                val target = measurement.target
+                if (target != null) host.setLrfTarget(target)
                 val targetJson = if (target == null) {
                     "null"
                 } else {
-                    "[${target.latitude}, ${target.longitude}, ${target.altitude}]"
+                    "[${target.latitudeDeg}, ${target.longitudeDeg}, ${target.altitudeM}]"
                 }
-                val stateJson = if (state == null) "null" else "\"$state\""
-                "{\"distance\": ${distance ?: "null"}, \"target\": $targetJson, \"state\": $stateJson}"
+                val stateJson = measurement.state?.let { "\"$it\"" } ?: "null"
+                "{\"distance\": ${measurement.distanceMeters ?: "null"}, \"target\": $targetJson, \"state\": $stateJson}"
             },
             // The detected control profile carries the payload index and the drop widget indices
             // (RIGHT + Unlock 3 / All_Down 5 on the M300 SkyPort payload, PORT_4 on the M400, null
-            // where no droppable payload exists). dropPayload pulses unlock then release.
+            // where no droppable payload exists). dropPayload pulses unlock then release; the
+            // profile-dependent prose rides on the command result so this route table stays
+            // unaware of which aircraft is connected.
             "/send/drop" to { _ ->
-                val profile = DroneControlProfiles.activeProfile()
-                val indexType = profile.payloadIndexType
-                when {
-                    indexType == null ->
-                        "REJECTED: ${profile.displayName} has no payload drop port configured."
-                    Payload.dropPayload(
-                        host.payloadWidgetVM, indexType,
-                        profile.dropArmSwitchIndex, profile.dropReleaseButtonIndex
-                    ) -> "Payload dropped on $indexType"
-                    else -> "Payload drop failed"
-                }
+                commandSink.dropPayload().detail ?: "Payload drop failed"
             },
             "/send/gotoYaw" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoYaw")) {
+                val yaw = postData.split(",")[0].toDouble()
+                val result = host.flight.gotoYaw(yaw)
+                if (result.outcome == MavlinkCommandOutcome.DENIED) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
-                    val yaw = postData.split(",")[0].toDouble()
-                    val seq = DroneController.gotoYaw(yaw)
+                    val seq = result.pending?.seq ?: 0L
                     "YAW_ACCEPTED seq=$seq Yaw=$yaw"
                 }
             },
             "/send/gotoAltitude" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("gotoAltitude")) {
+                val targetAltitude = postData.split(",")[0].toDouble()
+                val result = host.flight.gotoAltitude(targetAltitude)
+                if (result.outcome == MavlinkCommandOutcome.DENIED) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
-                    val targetAltitude = postData.split(",")[0].toDouble()
-                    val seq = DroneController.gotoAltitude(targetAltitude)
+                    val seq = result.pending?.seq ?: 0L
                     "ALTITUDE_ACCEPTED seq=$seq Altitude: $targetAltitude"
                 }
             },
@@ -295,19 +303,17 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/abortMission" to {
-                DroneController.setStick(0.0f, 0.0f, 0.0f, 0.0f)
-                DroneController.disableVirtualStick()
+                host.flight.abortMission()
                 "Received: abortMission"
             },
             "/send/abortAll" to {
-                DroneController.abortAllMissions()
+                host.flight.abortAll()
                 "Received: abortAll"
             },
             "/send/enableVirtualStick" to {
-                if (DroneController.shouldRejectAutonomousCommand("enableVirtualStick")) {
+                if (host.flight.enableVirtualStick().outcome == MavlinkCommandOutcome.DENIED) {
                     AUTONOMOUS_COMMAND_REJECTED
                 } else {
-                    DroneController.enableVirtualStick()
                     "Received: enableVirtualStick"
                 }
             },
@@ -324,32 +330,32 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/navigateTrajectoryDJINative" to { postData ->
-                if (DroneController.shouldRejectAutonomousCommand("navigateTrajectoryDJINative")) {
-                    AUTONOMOUS_COMMAND_REJECTED
-                } else {
-                    when (val command = LyrebirdHttpCommandParser.parseNativeTrajectory(postData)) {
+                when (val command = LyrebirdHttpCommandParser.parseNativeTrajectory(postData)) {
                         is LyrebirdHttpCommandParser.ParseResult.Invalid -> command.message
                         is LyrebirdHttpCommandParser.ParseResult.Valid -> {
                             val trajectory = command.value
-                            DroneController.navigateTrajectoryNative(
+                            val result = host.flight.nativeTrajectory(
                                 trajectory.waypoints,
                                 trajectory.speed
                             )
-                            "DJI native mission requested with ${trajectory.waypoints.size} waypoints " +
-                                "at ${trajectory.speed}m/s"
+                            if (result.outcome == MavlinkCommandOutcome.DENIED) AUTONOMOUS_COMMAND_REJECTED else {
+                                "DJI native mission requested with ${trajectory.waypoints.size} waypoints " +
+                                    "at ${trajectory.speed}m/s"
+                            }
                         }
-                    }
                 }
             },
             "/send/abort/DJIMission" to {
-                DroneController.endMission()
+                host.flight.abortNativeMission()
                 "Mission stop requested"
             },
             "/send/setRTHAltitude" to { postData ->
                 val altitude = postData.toIntOrNull()
                 if (altitude != null) {
-                    DroneController.setRTHAltitude(altitude)
-                    "RTH altitude set to $altitude m"
+                    settingResult(
+                        host.aircraftSettings.setRthAltitude(altitude),
+                        "RTH altitude set to $altitude m",
+                    )
                 } else {
                     "Invalid altitude value"
                 }
@@ -357,8 +363,10 @@ internal class LyrebirdHttpCommandHandler(
             "/send/setMaxFlightHeight" to { postData ->
                 val height = postData.toIntOrNull()
                 if (height != null) {
-                    DroneController.setMaxFlightHeight(height)
-                    "Max flight height set to $height m"
+                    settingResult(
+                        host.aircraftSettings.setMaxFlightHeight(height),
+                        "Max flight height set to $height m",
+                    )
                 } else {
                     "Invalid height value"
                 }
@@ -366,40 +374,40 @@ internal class LyrebirdHttpCommandHandler(
             "/send/setMaxFlightDistance" to { postData ->
                 val distance = postData.toIntOrNull()
                 if (distance != null) {
-                    DroneController.setMaxFlightDistance(distance)
-                    "Max flight distance set to $distance m"
+                    settingResult(
+                        host.aircraftSettings.setMaxFlightDistance(distance),
+                        "Max flight distance set to $distance m",
+                    )
                 } else {
                     "Invalid distance value"
                 }
             },
             "/send/setDistanceLimitEnabled" to { postData ->
                 when (postData.trim().lowercase()) {
-                    "true", "1", "on", "enable" -> {
-                        DroneController.setDistanceLimitEnabled(true)
-                        "Distance limit enabled"
-                    }
-                    "false", "0", "off", "disable" -> {
-                        DroneController.setDistanceLimitEnabled(false)
-                        "Distance limit disabled"
-                    }
+                    "true", "1", "on", "enable" ->
+                        settingResult(
+                            host.aircraftSettings.setDistanceLimitEnabled(true),
+                            "Distance limit enabled",
+                        )
+                    "false", "0", "off", "disable" ->
+                        settingResult(
+                            host.aircraftSettings.setDistanceLimitEnabled(false),
+                            "Distance limit disabled",
+                        )
                     else -> "Invalid value (use true/false)"
                 }
             },
             "/send/setRcControlMode" to { postData ->
-                val mode = postData.trim().lowercase()
-                if (DroneController.setRcControlMode(mode)) {
-                    "RC control mode set to $mode"
-                } else {
-                    "Invalid control mode (jp|usa|ch|custom)"
-                }
+                settingResult(
+                    host.aircraftSettings.setRcControlMode(postData),
+                    "RC control mode set to ${postData.trim().lowercase()}",
+                )
             },
             "/send/rcPairing/start" to {
-                DroneController.requestRcPairing()
-                "RC pairing requested"
+                settingResult(host.aircraftSettings.requestRcPairing(), "RC pairing requested")
             },
             "/send/rcPairing/stop" to {
-                DroneController.stopRcPairing()
-                "RC pairing stopped"
+                settingResult(host.aircraftSettings.stopRcPairing(), "RC pairing stopped")
             },
             "/send/setDroneName" to { postData ->
                 if (host.setDroneName(postData)) {
@@ -491,12 +499,12 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/deactivateManualOverride" to {
-                DroneController.deactivateManualOverride()
+                host.flight.deactivateManualOverride()
                 host.mainHandler.post { host.updateManualOverrideUI() }
                 "Manual override deactivated. Autonomous commands are now allowed."
             },
             "/get/isManualOverrideActive" to {
-                if (DroneController.isManualOverrideActive) "true" else "false"
+                if (host.flight.isManualOverrideActive()) "true" else "false"
             },
             "/send/autoSensing/start" to {
                 host.mainHandler.post {
@@ -513,10 +521,21 @@ internal class LyrebirdHttpCommandHandler(
                 "AutoSensing stop requested"
             },
             "/get/autoSensing/status" to {
-                """{"active":${host.isAutoSensingActive},"targetCount":${host.currentDetectedTargets.size}}"""
+                """{"active":${host.detection.isAutoSensingActive},"targetCount":${host.detection.currentTargets().size}}"""
             },
             "/get/autoSensing/targets" to {
-                DetectedTarget.listToJsonArray(host.currentDetectedTargets).toString()
+                org.json.JSONArray().apply {
+                    host.detection.currentTargets().forEach { target ->
+                        put(org.json.JSONObject().apply {
+                            put("type", target.type)
+                            put("left", target.left)
+                            put("top", target.top)
+                            put("right", target.right)
+                            put("bottom", target.bottom)
+                            target.confidence?.let { put("confidence", it) }
+                        })
+                    }
+                }.toString()
             },
             "/send/streaming/mode" to { postData ->
                 val modeStr = postData.trim().lowercase()
@@ -576,37 +595,65 @@ internal class SimpleHttpServer(
     private val port: Int,
     private val host: LyrebirdCommandHost,
     private val commandSink: MavlinkCommandSink
-) {
+) : SessionServer {
+        override val label = "commands"
         private var serverSocket: ServerSocket? = null
         private val executor = Executors.newFixedThreadPool(10)
         private val commandHandler = LyrebirdHttpCommandHandler(host, commandSink)
+
+        /**
+         * Flight-log hook for accepted commands: receives the request uri and body. Installed by
+         * the flavor composition (the V5 flight logger lives outside the shared source set);
+         * null keeps command logging off.
+         */
+        @Volatile
+        internal var commandLogger: ((uri: String, postData: String) -> Unit)? = null
+
         @Volatile
         private var isRunning = false
 
-        fun start() {
-            if (isRunning) return
-            thread {
-                try {
-                    serverSocket = ServerSocket(port)
-                    isRunning = true
-                    Log.i("SimpleHttpServer", "Server started on port $port")
-                    while (isRunning && !serverSocket!!.isClosed) {
-                        try {
-                            val clientSocket = serverSocket!!.accept()
-                            executor.submit { handleRequest(clientSocket) }
-                        } catch (e: IOException) {
-                            if (isRunning) {
-                                Log.e("SimpleHttpServer", "Error accepting connection: ${e.message}", e)
-                            }
+        /**
+         * Whether the telemetry server is answering, for `/config`.
+         *
+         * The ports are fixed by contract, so they are always named; this is what keeps the
+         * answer honest in the partial-startup case, where the port was taken and the session
+         * skipped the listener. The session installs it; unset means "nothing known", which
+         * reports true so the field never invents a failure.
+         */
+        @Volatile
+        internal var telemetryServing: (() -> Boolean)? = null
+
+        override fun start(): Boolean {
+            if (isRunning) return true
+
+            // Bind here, on the caller's thread, so the caller learns whether the port was taken
+            // before it decides what to advertise. The old order bound on a background thread and
+            // logged the failure after the aircraft had already announced itself as serving.
+            val listening =
+                runCatching { ServerSocket(port) }.getOrElse { error ->
+                    Log.e("SimpleHttpServer", "Could not bind port $port: ${error.message}")
+                    return false
+                }
+            serverSocket = listening
+            isRunning = true
+            Log.i("SimpleHttpServer", "Server started on port $port")
+
+            thread(name = "SimpleHttpServer-$port") {
+                while (isRunning && !listening.isClosed) {
+                    try {
+                        val clientSocket = listening.accept()
+                        executor.submit { handleRequest(clientSocket) }
+                    } catch (e: IOException) {
+                        if (isRunning) {
+                            Log.e("SimpleHttpServer", "Error accepting connection: ${e.message}", e)
                         }
                     }
-                } catch (e: IOException) {
-                    Log.e("SimpleHttpServer", "Server error: ${e.message}", e)
                 }
             }
+            return true
         }
 
-        fun stop() {
+        override fun stop() {
             isRunning = false
             runCatching {
                 serverSocket?.close()
@@ -689,7 +736,7 @@ internal class SimpleHttpServer(
             if (request.method != "POST") return null
             if (request.uri !in jsonEndpoints) return null
 
-            LyrebirdFlightLogger.logCommand(request.uri, request.postData)
+            commandLogger?.invoke(request.uri, request.postData)
             // Authorise BEFORE acting: these endpoints trip a shutter or drive the payload, so a
             // rejected request must not reach the camera.
             if (!ControlAuthority.authorizeControlCommand(request.source)) {
@@ -698,9 +745,9 @@ internal class SimpleHttpServer(
             return when (request.uri) {
                 "/send/capture" -> {
                     // Airframe-agnostic photo path: one shutter, whichever lens it came from.
-                    val file = Payload.capturePhoto(host.mediaVM)
-                    if (file != null) {
-                        "{\"captured\":true,\"file\":\"${file.fileName}\"}"
+                    val fileName = host.media.capturePhotoFileName()
+                    if (fileName != null) {
+                        "{\"captured\":true,\"file\":\"$fileName\"}"
                     } else {
                         "{\"error\":\"Failed to capture photo\"}"
                     }
@@ -710,8 +757,8 @@ internal class SimpleHttpServer(
                     "{\"thermalMaxTemp\":${maxTemp ?: "null"}}"
                 }
                 "/send/captureThermalImage" ->
-                    Payload.captureThermal(host.mediaVM) ?: "{\"error\":\"Failed to capture thermal image\"}"
-                else -> Payload.listAllMedia(host.mediaVM)
+                    host.media.captureThermalJson() ?: "{\"error\":\"Failed to capture thermal image\"}"
+                else -> host.media.listMediaJson()
             }
         }
 
@@ -732,17 +779,15 @@ internal class SimpleHttpServer(
                 // the live media list (the card's own index). Returns binary image/jpeg written
                 // straight to the socket, bypassing the text-response path below.
                 if (request.method == "POST" && request.uri == "/send/downloadMediaByName") {
-                    LyrebirdFlightLogger.logCommand(request.uri, request.postData)
+                    commandLogger?.invoke(request.uri, request.postData)
                     val outputStream = clientSocket.getOutputStream()
                     val fileName = request.postData.trim()
                     when {
                         !ControlAuthority.authorizeControlCommand(request.source) ->
-                            Payload.sendErrorResponse(
-                                outputStream, "REJECTED: Safety Computer is in control."
-                            )
+                            host.media.sendErrorResponse("REJECTED: Safety Computer is in control.", outputStream)
                         fileName.isEmpty() ->
-                            Payload.sendErrorResponse(outputStream, "Expected body '<fileName>'")
-                        else -> Payload.sendMediaFileByName(host.mediaVM, fileName, outputStream)
+                            host.media.sendErrorResponse("Expected body '<fileName>'", outputStream)
+                        else -> host.media.sendMediaFile(fileName, outputStream)
                     }
                     clientSocket.close()
                     return
@@ -794,8 +839,10 @@ internal class SimpleHttpServer(
             return when (uri) {
                 "/config" -> {
                     val deviceIp = NetworkUtils.getDeviceIpAddress() ?: "unknown"
+                    val serving = telemetryServing?.invoke() ?: true
                     """{"droneName":"${host.droneName}","ipAddress":"$deviceIp","httpPort":$HTTP_PORT,""" +
-                        """"telemetryPort":$TELEMETRY_PORT,"videoMode":"whip",""" +
+                        """"telemetryPort":$TELEMETRY_PORT,"telemetryServing":$serving,""" +
+                        """"videoMode":"${host.streamingModeName}",""" +
                         """"hasThermal":${host.hasThermalCamera()}}"""
                 }
                 "/config/settings" -> host.readSettingsJson()

@@ -3,11 +3,11 @@ package com.lyrebird.rc.controller
 internal object ControlLoopContinuation {
     enum class Decision(
         val shouldContinue: Boolean,
-        val shouldDisableControlLoop: Boolean
+        val shouldDisableControlLoop: Boolean,
     ) {
         Continue(shouldContinue = true, shouldDisableControlLoop = false),
         Stop(shouldContinue = false, shouldDisableControlLoop = false),
-        StopAndDisable(shouldContinue = false, shouldDisableControlLoop = true)
+        StopAndDisable(shouldContinue = false, shouldDisableControlLoop = true),
     }
 
     data class State(
@@ -17,11 +17,11 @@ internal object ControlLoopContinuation {
         val manualOverrideActive: Boolean,
         val timeSinceStartMs: Long,
         val virtualStickEnableGracePeriodMs: Long,
-        val virtualStickEnabled: Boolean
+        val virtualStickEnabled: Boolean,
     )
 
-    fun decide(state: State): Decision {
-        return when {
+    fun decide(state: State): Decision =
+        when {
             !state.controlLoopEnabled || state.loopId != state.currentControlLoopId -> Decision.Stop
             state.manualOverrideActive -> Decision.StopAndDisable
             // enableVirtualStick() is async, so allow the control loop to start before checking SDK state.
@@ -30,5 +30,4 @@ internal object ControlLoopContinuation {
             !state.virtualStickEnabled -> Decision.StopAndDisable
             else -> Decision.Continue
         }
-    }
 }

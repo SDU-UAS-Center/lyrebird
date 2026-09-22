@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ splash screen for the home activity.
+
+  Without this, the platform builds the splash out of the launcher icon on a background it picks
+  itself. The icon here is a dedicated drawable, not the launcher bitmap: Android draws it on a
+  288 dp canvas and masks everything outside a 192 dp circle, so the mark (which is drawn for a
+  white surface) sits on its own white disc, at the documented size, on the app's own background.
+-->
+<resources>
+    <style name="LyrebirdHomeTheme" parent="LyrebirdHomeTheme.Base">
+        <item name="android:windowSplashScreenBackground">@color/lyrebird_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/lyrebird_splash_icon</item>
+    </style>
+</resources>

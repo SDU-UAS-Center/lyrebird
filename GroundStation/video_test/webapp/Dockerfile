@@ -1,30 +1,51 @@
-FROM ros:humble-ros-base
+# The video grid dashboard: a plain Python service (stdlib HTTP server, the shared
+# GroundStation client, pymavlink for the MAVLink comparison panel). It uses no ROS
+# API, so it runs on the same Python the rest of the repository targets instead of on
+# a ROS base image several hundred megabytes larger.
+ARG PYTHON_IMAGE=python:3.14.7-slim-trixie
 
-RUN apt-get update && apt-get install -y iproute2 python3-pip && rm -rf /var/lib/apt/lists/*
+FROM ${PYTHON_IMAGE} AS python-deps
 
-# Ubuntu 22.04 ships pip 22, which cannot build PEP 621 projects and installs
-# an empty "UNKNOWN" distribution; upgrade before installing anything local.
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
+
+# A compiler, for a dependency with no wheel yet on this interpreter. It stays in
+# this stage: only the finished virtualenv is copied into the image.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/lyrebird
+
+# pyproject.toml + uv.lock are the only dependency source: the dashboard installs the
+# shared GroundStation client and its MAVLink decoder from the same lock the tests and
+# CI use, rather than from a second hand-maintained list of versions. uv is mounted for
+# the build and never reaches the final image.
+COPY pyproject.toml uv.lock ./
+COPY GroundStation/Python/ GroundStation/Python/
+RUN --mount=from=ghcr.io/astral-sh/uv:0.12.17,source=/uv,target=/bin/uv \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-default-groups --group mavlink --no-editable
+
+FROM ${PYTHON_IMAGE}
+
+ENV PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    PORT=8090
 
 WORKDIR /app
+COPY --from=python-deps /opt/venv /opt/venv
 
-# pymavlink backs the MAVLink comparison panel. Pinned to the version the GroundStation client
-# is tested against, so the webapp decodes exactly what the ground station does.
-RUN pip3 install --no-cache-dir "pymavlink>=2.4.49" "requests>=2.31"
+# The shared client sits inside that virtualenv as a real distribution, so the MAVLink
+# panel reads both wires through the same code the rest of the ground station uses
+# rather than a second implementation that could drift from it.
+COPY GroundStation/video_test/webapp/server.py ./server.py
+COPY GroundStation/video_test/webapp/mavlink_debug.py ./mavlink_debug.py
+COPY GroundStation/video_test/webapp/video_events.py ./video_events.py
+COPY GroundStation/video_test/webapp/public ./public
 
-# The shared GroundStation client, so the panel reads both wires through the same code the rest
-# of the ground station uses rather than a second implementation that could drift from it.
-# Installed as a distribution rather than copied onto sys.path by directory position.
-# (A multi-source COPY would flatten the lyrebird_groundstation directory — copy the whole
-# Python tree so the package keeps its layout.)
-COPY Python/ ./Python/
-RUN pip3 install --no-cache-dir /app/Python
+EXPOSE 8090
 
-COPY video_test/webapp/server.py ./server.py
-COPY video_test/webapp/mavlink_debug.py ./mavlink_debug.py
-COPY video_test/webapp/video_events.py ./video_events.py
-COPY video_test/webapp/public ./public
-
-ENV PORT=8090
-
-CMD ["python3", "server.py"]
+CMD ["python", "server.py"]

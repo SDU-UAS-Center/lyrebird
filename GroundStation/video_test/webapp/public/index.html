@@ -48,8 +48,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
       </div>
-      <button id="discoverBtn" type="button">Discover</button>
-      <button id="reconnectBtn" type="button">Reconnect Video</button>
     </div>
   </header>
 
@@ -102,7 +100,7 @@
           </div>
         </div>
         <section id="grid" class="grid"></section>
-        <section id="emptyState" class="emptyState">No Lyrebird phones detected yet. Start the app on a phone, keep it on the same network, then press Discover.</section>
+        <section id="emptyState" class="emptyState">No Lyrebird phones yet. Start the app on a phone and keep it on the same network as this host &mdash; the dashboard rescans by itself and a tile appears as soon as one answers.</section>
       </section>
     </section>
     <section id="healthPanel" class="tabPanel" data-panel="health">
@@ -187,7 +185,7 @@
         <div class="settingsIntro panelBand">
           <div>
             <h2>Remote Settings</h2>
-            <p>Read and change each drone's DJI settings (RTH altitude, max height/distance, RC stick mode, RC pairing) and app settings over HTTP.</p>
+            <p>Read and change each drone's DJI settings (RTH altitude, max height/distance, RC stick mode, RC pairing) and app settings over HTTP. A flight limit reads <em>Unavailable</em> until the aircraft reports one &mdash; the phone sends <code>-1</code> while the aircraft is asleep, powered off, or not connected.</p>
           </div>
         </div>
         <div id="settingsGrid" class="settingsGrid"></div>
@@ -223,7 +221,7 @@
         <div class="rosIntro panelBand">
           <div>
             <h2>ROS 2 Bridge Status</h2>
-            <p>Topic liveness and metrics reported by the <code>ros-monitor</code> container: which DjiNode topics are publishing, their rates, last values, and whether the phone HTTP surface is reachable.</p>
+            <p>Topic liveness and metrics reported by the <code>ros-monitor</code> container: which topics each drone's <code>lyrebird_controller</code> node is publishing, their rates, last values, and whether the phone HTTP surface is reachable.</p>
           </div>
         </div>
         <div id="rosStatus" class="rosStatus"><p class="emptyState">No ROS monitor report yet. Start the <code>ros-monitor</code> container and the phone app, then wait a few seconds.</p></div>
@@ -320,18 +318,18 @@
     <div class="guideContent">
       <section class="guideSection">
         <h3>About Lyrebird</h3>
-        <p>Lyrebird is an open-source Android app (Kotlin, DJI Mobile SDK V5) that runs on a DJI Remote Controller, or a phone tethered to one, and exposes drone telemetry, HTTP control, and WebRTC video over the local Wi-Fi network &mdash; no DJI SDK integration required on the ground station side. Multiple Lyrebird instances can run on the same LAN for multi-drone setups.</p>
-        <p>This page is the video-and-connection testing tool for the GroundStation stack: it discovers Lyrebird phones on the network, watches their telemetry socket, tracks MediaMTX video-path readiness, and plays back each drone's live stream over WHIP/WHEP &mdash; so video and connection health can be validated with or without an actual drone attached.</p>
+        <p>Lyrebird is an open-source Android app (Kotlin, DJI Mobile SDK V5) that runs on a DJI Remote Controller, or a phone tethered to one, and turns it into a networked aircraft server: MAVLink&nbsp;2 and HTTP side by side, TCP telemetry, and WHIP/WHEP video over the local Wi-Fi &mdash; no DJI SDK integration required on the ground station side. Several Lyrebird instances can run on one LAN for multi-drone work.</p>
+        <p>This page is the video-and-connection lab for that stack: it discovers Lyrebird phones on the network by itself, watches their telemetry socket, tracks each MediaMTX video path, and plays the live stream back over WHEP &mdash; so video and link health can be judged from one screen.</p>
+        <p>Nothing aircraft-side is simulated: with no drone powered on, tiles still show discovery, telemetry and sender state, but there is no picture until the aircraft camera is publishing.</p>
       </section>
       <section class="guideSection">
         <h3>Setup</h3>
         <ol>
-          <li>Connect the host and phones to the same Lyrebird Wi-Fi network.</li>
-          <li>On each phone, enable wireless ADB if needed, then run <code>adb connect PHONE_IP:5555</code> from the host.</li>
-          <li>Launch the Lyrebird app and set a unique drone name such as <code>mini1</code>, <code>mini2</code>, or the aircraft label you want to test.</li>
-          <li>Start this stack with <code>docker compose -f GroundStation/video_test/compose.yaml up -d --build</code> and open this page.</li>
-          <li>Use <strong>Discover</strong> to re-scan. A tile appears for each detected phone; telemetry should turn green before the video path becomes ready.</li>
-          <li>For drone-free video testing, enable mock video in the Lyrebird Default Layout on each phone &mdash; it publishes a bundled clip through the normal WHIP path.</li>
+          <li>Put the phones and this host on the same Wi-Fi network as the aircraft/RC.</li>
+          <li>To install or update the app on a phone, pair it over wireless debugging: <code>adb pair PHONE_IP:PAIR_PORT CODE</code>, then <code>adb connect PHONE_IP:DEBUG_PORT</code> (both ports are shown on the phone's Wireless-debugging screen). <code>LyrebirdApp/android-sdk-v5-as/auto_install_on_connect.sh --build</code> builds and installs to whatever is attached.</li>
+          <li>Launch the Lyrebird app and give each aircraft a unique drone name (<code>mini1</code>, <code>mini2</code>&hellip;). That name is the identity every consumer uses: UDP discovery, the mDNS service, the MAVLink vehicle id and the WHIP/WHEP path.</li>
+          <li>Start the stack with <code>docker compose -f GroundStation/video_test/compose.yaml up -d --build</code> and open this page.</li>
+          <li>Watch it settle: a tile appears for each phone that answers, telemetry turns green, and the video path becomes ready once the phone's WHIP publish reaches MediaMTX. Discovery and video reconnects are automatic.</li>
         </ol>
       </section>
       <section class="guideSection">
@@ -342,10 +340,10 @@
           <div><dt>Video Charts</dt><dd>Receiver-side WebRTC time series: decoded FPS, bitrate, packet loss, jitter, freezes, jitter-buffer behavior.</dd></div>
           <div><dt>Telemetry</dt><dd>The full nested JSON telemetry tree per drone &mdash; flight state, phone health, streaming config.</dd></div>
           <div><dt>Telemetry Charts</dt><dd>Telemetry-derived time series: battery, satellites, altitude, distance to home, speed, Wi-Fi RSSI.</dd></div>
-          <div><dt>Settings</dt><dd>Read and change each drone's DJI and app settings (RTH altitude, max height/distance, RC pairing, video source) over HTTP.</dd></div>
+          <div><dt>Settings</dt><dd>Read and change each drone's DJI and app settings (RTH altitude, max height/distance, RC pairing, streaming) over HTTP. DJI flight limits show <em>Unavailable</em> while the aircraft has not reported them.</dd></div>
           <div><dt>HTTP</dt><dd>The full catalog of phone <code>/send/</code> endpoints (flight control, virtual stick, camera/gimbal, waypoints, sensing) for manual testing.</dd></div>
           <div><dt>MAVLink</dt><dd>The same drone read over MAVLink and over HTTP at once, field by field, so a value that disagrees between the two wires is visible rather than inferred.</dd></div>
-          <div><dt>ROS</dt><dd>Liveness and rates for every topic the <code>ros-monitor</code> container sees from <code>DjiNode</code>, plus phone HTTP reachability.</dd></div>
+          <div><dt>ROS</dt><dd>Liveness and rates for every topic the <code>ros-monitor</code> container sees from each drone's <code>lyrebird_controller</code> node, plus phone HTTP reachability.</dd></div>
         </dl>
       </section>
       <section class="guideSection">
@@ -360,6 +358,6 @@
   </dialog>
 
   <script async src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=22"></script>
+  <script src="/app.js?v=23"></script>
 </body>
 </html>

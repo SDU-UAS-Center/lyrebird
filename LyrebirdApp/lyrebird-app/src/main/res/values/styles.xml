@@ -33,7 +33,12 @@
         <item name="android:fontFamily">@font/dm_sans</item>
     </style>
 
-    <style name="LyrebirdHomeTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <!--
+      The home screen theme. Base holds what every platform version shares; the API 31+ variant
+      (values-v31) adds the attributes that configure the splash screen, so the launch state can
+      be set on purpose instead of being derived from the launcher icon alone.
+    -->
+    <style name="LyrebirdHomeTheme.Base" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
@@ -41,6 +46,8 @@
         <item name="android:colorAccent">@color/lyrebird_teal</item>
         <item name="android:fontFamily">@font/dm_sans</item>
     </style>
+
+    <style name="LyrebirdHomeTheme" parent="LyrebirdHomeTheme.Base" />
 
     <style name="LyrebirdCockpitTile">
         <item name="android:background">@drawable/lyrebird_settings_row</item>

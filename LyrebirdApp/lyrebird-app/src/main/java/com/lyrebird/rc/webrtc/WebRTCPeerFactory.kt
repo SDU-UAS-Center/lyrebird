@@ -2,7 +2,6 @@ package com.lyrebird.rc.webrtc
 
 import android.content.Context
 import android.util.Log
-import dji.sdk.keyvalue.value.common.ComponentIndexType
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
@@ -27,6 +26,22 @@ object WebRTCPeerFactory {
      */
     @Volatile internal var activeConsumerWatcher: MediaMtxConsumerWatcher? = null
 
+    /**
+     * Builds the experimental surface-H264 encoder for an opaque camera handle, installed by the
+     * flavor that owns that encoder. When it is absent - another flavor, or the host JVM tests -
+     * the experimental setting falls back to the default encoder with a warning.
+     */
+    @Volatile
+    internal var surfaceEncoderFactory:
+        ((cameraHandle: Any?, width: Int, height: Int, bitrateBps: Int, fps: Int) -> VideoEncoderFactory)? = null
+
+    /**
+     * Driver cadence of the experimental surface-H264 path: the frames its synthetic driver
+     * produces carry no pixels (the surface encoder feeds itself); they only pace encode()
+     * calls, so this must match the surface capturer's own driver rate.
+     */
+    internal const val SURFACE_ENCODER_DRIVER_FPS = 30
+
     fun getEglBase(): EglBase {
         synchronized(factoryLock) {
             if (eglBase == null) {
@@ -36,14 +51,18 @@ object WebRTCPeerFactory {
         }
     }
 
+    /**
+     * @param cameraHandle opaque flavor camera handle (its camera index), consumed only by
+     *   [surfaceEncoderFactory]; null when the caller has none.
+     */
     fun getFactory(
         context: Context,
-        cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
-        options: WebRTCMediaOptions = WebRTCMediaOptions()
+        cameraHandle: Any? = null,
+        options: WebRTCMediaOptions = WebRTCMediaOptions(),
     ): PeerConnectionFactory {
         synchronized(factoryLock) {
             if (factory == null) {
-                initializeFactory(context, cameraIndex, options)
+                initializeFactory(context, cameraHandle, options)
             }
             return factory!!
         }
@@ -61,22 +80,26 @@ object WebRTCPeerFactory {
 
     private fun initializeFactory(
         context: Context,
-        cameraIndex: ComponentIndexType,
-        options: WebRTCMediaOptions
+        cameraHandle: Any?,
+        options: WebRTCMediaOptions,
     ) {
-        val initOptions = PeerConnectionFactory.InitializationOptions.builder(context)
-            .setEnableInternalTracer(true)
-            .setFieldTrials("WebRTC-H264HighProfile/Enabled/")
-            .createInitializationOptions()
+        val initOptions =
+            PeerConnectionFactory.InitializationOptions
+                .builder(context)
+                .setEnableInternalTracer(true)
+                .setFieldTrials("WebRTC-H264HighProfile/Enabled/")
+                .createInitializationOptions()
         PeerConnectionFactory.initialize(initOptions)
 
         val rootEglBase = getEglBase()
 
-        factory = PeerConnectionFactory.builder()
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(rootEglBase.eglBaseContext))
-            .setVideoEncoderFactory(createVideoEncoderFactory(context, rootEglBase, cameraIndex, options))
-            .setOptions(PeerConnectionFactory.Options())
-            .createPeerConnectionFactory()
+        factory =
+            PeerConnectionFactory
+                .builder()
+                .setVideoDecoderFactory(DefaultVideoDecoderFactory(rootEglBase.eglBaseContext))
+                .setVideoEncoderFactory(createVideoEncoderFactory(context, rootEglBase, cameraHandle, options))
+                .setOptions(PeerConnectionFactory.Options())
+                .createPeerConnectionFactory()
 
         Log.d(TAG, "PeerConnectionFactory initialized")
     }
@@ -84,23 +107,22 @@ object WebRTCPeerFactory {
     private fun createVideoEncoderFactory(
         context: Context,
         rootEglBase: EglBase,
-        cameraIndex: ComponentIndexType,
-        options: WebRTCMediaOptions
+        cameraHandle: Any?,
+        options: WebRTCMediaOptions,
     ): VideoEncoderFactory {
-        val useSurfaceEncoder = context
-            .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
-            .getBoolean(PREF_USE_DJI_SURFACE_H264_ENCODER, false)
-        if (useSurfaceEncoder) {
+        val useSurfaceEncoder =
+            context
+                .getSharedPreferences("LyrebirdPrefs", Context.MODE_PRIVATE)
+                .getBoolean(PREF_USE_DJI_SURFACE_H264_ENCODER, false)
+        val surfaceEncoder = surfaceEncoderFactory
+        if (useSurfaceEncoder && surfaceEncoder != null) {
             val width = if (options.usesSourceResolution) 1920 else options.videoResolutionWidth
             val height = if (options.usesSourceResolution) 1080 else options.videoResolutionHeight
-            Log.w(TAG, "Using experimental DJI surface H264 encoder: ${width}x${height}@${options.fps}")
-            return DjiSurfaceH264EncoderFactory(
-                cameraIndex = cameraIndex,
-                width = width,
-                height = height,
-                bitrateBps = options.senderBitrateBps(),
-                fps = options.fps
-            )
+            Log.w(TAG, "Using experimental DJI surface H264 encoder: ${width}x$height@${options.fps}")
+            return surfaceEncoder(cameraHandle, width, height, options.senderBitrateBps(), options.fps)
+        }
+        if (useSurfaceEncoder) {
+            Log.w(TAG, "Surface H264 encoder requested but no provider is installed; using the default encoder")
         }
 
         // Wrapped so the stream emits periodic keyframes. libwebrtc sets a 20-second H.264
@@ -109,7 +131,7 @@ object WebRTCPeerFactory {
         return PeriodicKeyframeEncoderFactory(
             DefaultVideoEncoderFactory(rootEglBase.eglBaseContext, false, true),
             keyframeIntervalMs = resolveKeyframeIntervalMs(context),
-            shouldForce = { activeConsumerWatcher?.shouldForceKeyframe ?: true }
+            shouldForce = { activeConsumerWatcher?.shouldForceKeyframe ?: true },
         )
     }
 

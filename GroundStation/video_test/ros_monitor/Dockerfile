@@ -4,22 +4,33 @@
 FROM ros:humble-ros-base
 
 ENV PYTHONUNBUFFERED=1
+# uv installs the Python side; these keep its output small and reproducible.
+ENV UV_LINK_MODE=copy
+ENV UV_PYTHON_DOWNLOADS=never
 
-RUN apt-get update \
+# python3-pip stays: colcon installs the ament_python packages below through it.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends python3-pip python3-colcon-common-extensions \
     && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu 22.04 ships pip 22, which cannot build PEP 621 projects and installs
-# an empty "UNKNOWN" distribution; upgrade before installing anything local.
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+WORKDIR /opt/lyrebird
 
-COPY GroundStation/video_test/ros_monitor/requirements.txt /opt/lyrebird/requirements.txt
-RUN pip3 install --no-cache-dir -r /opt/lyrebird/requirements.txt
-
-# Shared GroundStation client used by the ROS controller and the monitor.
-# Installed as a distribution, so both import it from site-packages.
-COPY GroundStation/Python /opt/lyrebird/groundstation
-RUN pip3 install --no-cache-dir /opt/lyrebird/groundstation
+# pyproject.toml + uv.lock are the dependency source: the ros-monitor group is numpy
+# for the controller node plus pymavlink, because this container's DjiNodes register
+# with the shared MAVLink router. `uv pip` rather than a sync, since ROS's own Python
+# modules are apt-managed and a sync would remove them. The client keeps its
+# repository-relative path so uv resolves the workspace member the lock was written for.
+COPY pyproject.toml uv.lock ./
+COPY GroundStation/Python/ GroundStation/Python/
+RUN --mount=from=ghcr.io/astral-sh/uv:0.12.17,source=/uv,target=/bin/uv \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv export --quiet --locked --no-emit-project --no-emit-workspace \
+        --only-group ros-monitor --output-file /tmp/locked.txt \
+    && uv pip install --system --break-system-packages --no-cache --requirements /tmp/locked.txt \
+    && uv pip install --system --break-system-packages --no-cache ./GroundStation/Python \
+    && rm -f /tmp/locked.txt
 
 # lyrebird_msgs (the PX4-DDS-style message definitions) and the ROS
 # lyrebird_controller node (publishes telemetry + fmu/out/settings), built as

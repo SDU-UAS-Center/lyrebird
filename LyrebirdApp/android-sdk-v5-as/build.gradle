@@ -37,27 +37,53 @@ allprojects {
 }
 
 def sampleJavaSource = file('../lyrebird-app/src/main/java')
+def v5JavaSource = file('../lyrebird-app/src/v5/java')
 def uxsdkJavaSource = file('../android-sdk-v5-uxsdk/src/main/java')
 def detektTaskClass = buildscript.classLoader.loadClass('io.gitlab.arturbosch.detekt.Detekt')
 
 def lyrebirdSourceIncludes = [
         'com/lyrebird/rc/controller/**/*.kt',
         'com/lyrebird/rc/edge/**/*.kt',
+    'com/lyrebird/rc/fleet/**/*.kt',
         'com/lyrebird/rc/formation/**/*.kt',
         'com/lyrebird/rc/logger/**/*.kt',
+    'com/lyrebird/rc/mavlink/**/*.kt',
+    'com/lyrebird/rc/perception/**/*.kt',
+    'com/lyrebird/rc/platform/**/*.kt',
         'com/lyrebird/rc/server/**/*.kt',
+    'com/lyrebird/rc/settings/**/*.kt',
+    'com/lyrebird/rc/telemetry/**/*.kt',
         'com/lyrebird/rc/webrtc/**/*.kt',
         'com/lyrebird/rc/DroneControlProfiles.kt',
         'com/lyrebird/rc/TestToolsVM.kt',
         'com/lyrebird/rc/FlightDeckActivity.kt',
+        'com/lyrebird/rc/StreamingMode.kt',
 ]
+
+def lyrebirdSpotlessSources = files(
+    fileTree(dir: sampleJavaSource, includes: lyrebirdSourceIncludes),
+    fileTree(dir: v5JavaSource, includes: lyrebirdSourceIncludes),
+)
 
 project(':app') {
     apply plugin: 'com.diffplug.spotless'
 
     spotless {
         kotlin {
-            target lyrebirdSourceIncludes
+            target lyrebirdSpotlessSources
+            ktlint('1.5.0')
+        }
+    }
+}
+
+// The shared core is entirely Lyrebird-owned, so it needs no include list at all: every Kotlin
+// file in it is gated, and a new package cannot be added without being covered.
+project(':lyrebird-core') {
+    apply plugin: 'com.diffplug.spotless'
+
+    spotless {
+        kotlin {
+            target 'src/main/java/**/*.kt', 'src/test/java/**/*.kt'
             ktlint('1.5.0')
         }
     }
@@ -87,7 +113,7 @@ tasks.register('detektLyrebird', detektTaskClass) {
     allRules = false
     ignoreFailures = true
     config.setFrom(files('config/detekt/detekt.yml'))
-    setSource(files(sampleJavaSource))
+    setSource(files(sampleJavaSource, v5JavaSource))
     include lyrebirdSourceIncludes
     reports {
         html.outputLocation.set(new File("$buildDir/reports/detekt/lyrebird.html"))
@@ -118,7 +144,7 @@ tasks.register('detektDji', detektTaskClass) {
 tasks.register('qualityLyrebird') {
     group = 'verification'
     description = 'Run ktlint formatting checks, Detekt, and Android Lint for Lyrebird app code.'
-    dependsOn ':app:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentDebug'
+    dependsOn ':app:spotlessKotlinCheck', ':lyrebird-core:spotlessKotlinCheck', 'detektLyrebird', ':app:lintCurrentV5Debug'
 }
 
 tasks.register('qualityDji') {

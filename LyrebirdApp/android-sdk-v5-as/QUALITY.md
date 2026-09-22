@@ -7,11 +7,11 @@ Run these commands from `LyrebirdApp/android-sdk-v5-as`.
 These are the required local/CI gates (pre-commit `android-spotless` / `android-tests`, and the `android-quality` GitHub Actions job):
 
 ```sh
-./gradlew :app:spotlessKotlinCheck :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest
+./gradlew :app:spotlessKotlinCheck :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest
 ./gradlew qualityLyrebird
 ```
 
-`qualityLyrebird` runs Spotless, Detekt on Lyrebird-owned Kotlin, and `:app:lintCurrentDebug`. Spotless is intentionally scoped to Lyrebird-owned Kotlin files so vendor code is not reformatted. Detekt/Lint currently report without failing the build (`ignoreFailures` / `abortOnError false`); Spotless, compile, and unit tests are the hard gates.
+`qualityLyrebird` runs Spotless, Detekt on Lyrebird-owned Kotlin, and `:app:lintCurrentV5Debug`. Spotless is intentionally scoped to Lyrebird-owned Kotlin files so vendor code is not reformatted. Detekt/Lint currently report without failing the build (`ignoreFailures` / `abortOnError false`); Spotless, compile, and unit tests are the hard gates.
 
 ## DJI/vendor code
 

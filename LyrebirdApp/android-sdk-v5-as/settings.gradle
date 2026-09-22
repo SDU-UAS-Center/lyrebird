@@ -3,5 +3,10 @@ rootProject.name = 'LyrebirdApp'
 include ':app'
 project(':app').projectDir = new File(rootProject.projectDir, '../lyrebird-app')
 
+// Shared, SDK-free code that both hardware generations build on. It must not depend on either
+// DJI SDK generation, nor on the app module.
+include ':lyrebird-core'
+project(':lyrebird-core').projectDir = new File(rootProject.projectDir, '../lyrebird-core')
+
 include ':uxsdk' // uxsdk module
 project(':uxsdk').projectDir = new File(rootProject.projectDir, '../android-sdk-v5-uxsdk')

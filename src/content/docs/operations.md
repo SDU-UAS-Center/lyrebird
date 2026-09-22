@@ -29,6 +29,28 @@ DJI SDK TXT flight records are copied to `Lyrebird/DJI_FlightRecords/` on app la
 - Press **Enable Virtual Stick** in the app or call `/send/enableVirtualStick`.
 - Check `isManualOverrideActive` in telemetry; call `/send/deactivateManualOverride` if needed.
 
+**App shows "No drone detected" while a DJI app sees the aircraft:**
+
+The RC connects to Android as a **USB accessory**, and only one app can hold it open at a time.
+Opening DJI Fly (or any other DJI app) takes it: Lyrebird's SDK still registers, but no product
+appears, so the aircraft link reads as dead — and the DJI app seeing the drone makes it look like
+Lyrebird's fault.
+
+- Close the other DJI app yourself — swipe it out of Recents, or use **App info → Force stop**.
+  The home screen notices this state and says so; its button is **Re-open app**, which is the half
+  it can do reliably (a fresh process re-attaches the SDK to the freed accessory).
+- Order matters: close the other app **first**, then press Re-open. Re-opening while it still holds
+  the accessory changes nothing, and the app says so again rather than pretending to have fixed it.
+- Android will not kill a foreground app, and some OEM builds (OnePlus/ColorOS seen on the bench)
+  restart DJI Fly in the background — it re-took the RC mid-session even after both approaches.
+  On bench phones, disable DJI Fly's auto-start or keep it uninstalled.
+- When Android asks which app should open the RC, choose Lyrebird and **Always**, so the chooser
+  does not hand it to DJI Fly next time.
+- Re-plugging the RC's USB-C cable also re-attaches the accessory.
+- Over MAVLink this state is visible from the ground station as heartbeats with nothing else:
+  `python GroundStation/Python/test_scripts/field_check.py <RC_IP>` reports telemetry arriving
+  but no `batteryLevel`/`attitude`.
+
 **Video not connecting:**
 
 - Start the video-test stack with `docker compose -f GroundStation/video_test/compose.yaml up -d --build`.
@@ -42,9 +64,9 @@ DJI SDK TXT flight records are copied to `Lyrebird/DJI_FlightRecords/` on app la
 
 ```bash
 cd LyrebirdApp/android-sdk-v5-as
-./gradlew :app:compileCurrentDebugKotlin
-./gradlew :app:assembleCurrentDebug
-./gradlew :app:assembleDemoBiomassDebug
+./gradlew :app:compileCurrentV5DebugKotlin
+./gradlew :app:assembleCurrentV5Debug
+./gradlew :app:assembleDemoBiomassV5Debug
 ```
 
 ## Project structure

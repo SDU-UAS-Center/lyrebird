@@ -66,62 +66,6 @@
                     tools:layout_editor_absoluteY="0dp" />
             </dji.v5.ux.core.widget.fpv.FPVWidget>
 
-            <TextureView
-                android:id="@+id/mock_video_preview"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:visibility="gone"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
-
-            <TextureView
-                android:id="@+id/phone_camera_preview"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:visibility="gone"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
-
-            <TextView
-                android:id="@+id/phone_camera_preview_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="16dp"
-                android:background="@drawable/uxsdk_background_black_rectangle"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="4dp"
-                android:text="PHONE CAMERA PREVIEW"
-                android:textColor="#FFFFD166"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:visibility="gone"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent"
-                tools:ignore="HardcodedText" />
-
-            <TextView
-                android:id="@+id/mock_video_preview_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="16dp"
-                android:background="@drawable/uxsdk_background_black_rectangle"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="4dp"
-                android:text="MOCK VIDEO PREVIEW"
-                android:textColor="#FFFFD166"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:visibility="gone"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent"
-                tools:ignore="HardcodedText" />
-
             <!-- Detection bounding-box overlay (on top of FPV, below interaction) -->
             <dji.v5.ux.detection.DetectionOverlayView
                 android:id="@+id/detection_overlay"
@@ -183,25 +127,6 @@
             app:uxsdk_itemsSpacing="14dp" />
 
         <Switch
-            android:id="@+id/sw_mock_video"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:layout_marginBottom="4dp"
-            android:background="@drawable/uxsdk_background_black_rectangle"
-            android:checked="false"
-            android:visibility="gone"
-            android:padding="4dp"
-            android:switchMinWidth="40dp"
-            android:text="MOCK VIDEO"
-            android:textColor="#FFFFD166"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            app:layout_constraintBottom_toTopOf="@+id/sw_auto_sensing"
-            app:layout_constraintStart_toStartOf="parent"
-            tools:ignore="HardcodedText,UseSwitchCompatOrMaterialXml" />
-
-        <Switch
             android:id="@+id/sw_edge_detection"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -216,7 +141,7 @@
             android:textColor="#FFDDDDDD"
             android:textSize="11sp"
             android:textStyle="bold"
-            app:layout_constraintBottom_toTopOf="@+id/sw_mock_video"
+            app:layout_constraintBottom_toTopOf="@+id/sw_auto_sensing"
             app:layout_constraintStart_toStartOf="parent"
             tools:ignore="HardcodedText,UseSwitchCompatOrMaterialXml" />
 
@@ -259,11 +184,14 @@
             android:layout_marginBottom="4dp"
             tools:ignore="HardcodedText" />
 
+        <!-- The app sets this from the aircraft's name (see FlightDeckActivity.updateDroneNameDisplay);
+             the default is deliberately not name-shaped, so a screen that has not resolved one yet
+             cannot look like an aircraft called lb_unknown. -->
         <TextView
             android:id="@+id/text_drone_name"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="lb_unknown"
+            android:text="…"
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:textStyle="bold"
@@ -516,6 +444,22 @@
             app:layout_constraintTop_toBottomOf="@+id/widget_focus_exposure_switch"
             app:layout_constraintVertical_bias="0.05" />
 
+        <!--
+            Vendor flight controls: DJI's own take-off and return-to-home widgets.
+
+            Audit note (B5): both command the flight controller directly through their own models
+            (FlightControllerKey.KeyStartTakeOff / KeyStartGoHome) rather than through
+            Lyrebird's command paths, and they are kept deliberately. They are operator controls:
+            a person standing at the aircraft tapping its screen, in the same class as the RC's
+            own buttons, and the authority seam (ControlAuthority) governs what a *remote* pilot
+            may command, never what the person holding the controller may. Removing the
+            return-to-home widget would also remove the only on-screen way to cancel a return.
+            What Lyrebird owes them instead is to stay in step: the flight-state machine follows
+            the aircraft's own telemetry, so a take-off from either widget still starts the flight
+            log, the detection runtime and the airborne latch (see V5FlightStateEffects), and
+            DroneController's status now follows telemetry too, so a mission started after one of
+            these take-offs still waits out the climb.
+        -->
         <dji.v5.ux.flight.takeoff.TakeOffWidget
             android:id="@+id/widget_take_off"
             android:layout_width="0dp"
@@ -588,6 +532,46 @@
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:uxsdk_djiMap_mapType="normal" />
+
+        <!--
+            Holder for the fleet strip: other Lyrebird aircraft on this network, one line each,
+            laid out to the LEFT of the map that plots them and top-aligned with it, so it grows
+            downwards beside the map instead of over the video or on top of the map itself. Hidden
+            entirely while this device is alone, so a single-aircraft flight looks exactly as it did
+            before.
+
+            The strip itself is added at runtime by the app rather than named here. This layout
+            belongs to the :uxsdk module, whose data-binding classes are generated against the
+            uxsdk classpath alone; naming an app class in it makes that generated code reference a
+            package the module cannot see. A plain container keeps the module boundary intact.
+        -->
+        <FrameLayout
+            android:id="@+id/fleet_strip_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            app:layout_constraintEnd_toStartOf="@+id/widget_map"
+            app:layout_constraintTop_toTopOf="@+id/widget_map" />
+
+        <!--
+            Tap catcher for the small map: while the map is compact this transparent view sits over
+            it, so a tap anywhere on the map opens it. The map itself cannot be relied on to report
+            the tap - it hands touches to its own gesture handling and to its markers, and a tap
+            that lands on the aircraft marker never reaches a map-click listener at all.
+
+            Gone while the map is expanded, so panning and zooming work normally there.
+        -->
+        <View
+            android:id="@+id/map_tap_catcher"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@android:color/transparent"
+            android:clickable="true"
+            android:focusable="false"
+            app:layout_constraintBottom_toBottomOf="@+id/widget_map"
+            app:layout_constraintEnd_toEndOf="@+id/widget_map"
+            app:layout_constraintStart_toStartOf="@+id/widget_map"
+            app:layout_constraintTop_toTopOf="@+id/widget_map" />
 
         <ToggleButton
             android:id="@+id/button_map_expand"

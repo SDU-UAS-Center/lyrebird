@@ -20,6 +20,10 @@ More refer to the release notes." </string>
 
     <string name="app_name_all">MSDK ALL</string>
     <string name="app_name_aircraft">Lyrebird</string>
+    <string name="runtime_notification_channel">Ground station runtime</string>
+    <string name="runtime_notification_title">Lyrebird is connected</string>
+    <string name="runtime_notification_text">Fleet, command, and telemetry services are active</string>
+    <string name="runtime_notification_stop">Stop serving</string>
     <string name="app_name_handheld">MSDK Handheld</string>
 
     <string name="lyrebird_brand_label">LYREBIRD</string>
@@ -72,7 +76,7 @@ More refer to the release notes." </string>
     <string name="trajectory_recording_title">Circular Trajectory &amp; Replay</string>
     <string name="aircraft_location_label">Aircraft Location:</string>
     <string name="aircraft_location_default">Lat: 0.000000, Lng: 0.000000</string>
-    <string name="aircraft_location_format">Lat: %.6f, Lng: %.6f</string>
+    <string name="aircraft_location_format">Lat: %1$.6f, Lng: %2$.6f</string>
 
     <string name="recording_controls">Trajectory Generation</string>
     <string name="status_stopped">Status: Ready</string>
@@ -559,4 +563,50 @@ More refer to the release notes." </string>
 
     <string name="wayline_progress_format">WaylineID: %1$d, Current: %2$d</string>
     <string name="action_group_format">Action Group: %1$d, Action ID: %2$d</string>
+
+    <!-- Permissions: one modal that shows every permission, what it is for and its state. -->
+    <string name="permissions_button">Permissions</string>
+    <string name="permissions_button_missing">Permissions (%1$d off)</string>
+    <string name="permissions_title">Permissions</string>
+    <string name="permissions_intro">All of these are optional: a missing one switches off only the part of the app that names it, and nothing else changes. Tap a row to grant it.</string>
+    <string name="permission_close">Close</string>
+    <string name="permission_grant_missing">Grant missing</string>
+    <string name="permission_state_granted">Granted ✓</string>
+    <string name="permission_state_missing">Tap to grant</string>
+    <string name="permission_state_denied">Denied — open settings</string>
+    <string name="permission_name_location">Location</string>
+    <string name="permission_name_nearby_wifi">Nearby Wi-Fi devices</string>
+    <string name="permission_name_files">Files</string>
+    <string name="permission_name_microphone">Microphone</string>
+    <string name="permission_why_location">Sends the RC\'s own position and its Wi-Fi network in the telemetry a ground station reads.</string>
+    <string name="permission_why_nearby_wifi">Reads which Wi-Fi network the RC is on (Android 13 and newer).</string>
+    <string name="permission_why_files">Stores flight logs, settings backups and downloaded media in Documents/Lyrebird so they survive an uninstall and can be copied off the device.</string>
+    <string name="permission_why_microphone">Only for the few aircraft with a megaphone: it records your voice and plays it through the speaker.</string>
+
+    <!-- Two Lyrebird apps on one device: the one that did not get the session stays honest. -->
+    <string name="session_blocked_title">Another Lyrebird app is using this device</string>
+    <string name="session_blocked_message">This app did not start its DJI link: the other Lyrebird app owns the device session. Close the other app, then reopen this one to serve or fly.</string>
+    <string name="session_blocked_status">Paused — another Lyrebird app owns the session</string>
+
+    <!-- Megaphone: the one feature that uses the microphone, and it says so where it asks. -->
+    <string name="megaphone_mic_title">Megaphone needs the microphone</string>
+    <string name="megaphone_mic_message">The megaphone records your voice and plays it through the aircraft\'s speaker. Nothing else in the app uses the microphone.</string>
+    <string name="megaphone_mic_denied">Without the microphone the megaphone cannot record</string>
+    <string name="permission_rationale_continue">Continue</string>
+    <string name="permission_rationale_later">Not now</string>
+
+    <!--
+      Home screen drone notice: the title block itself reports what the SDK sees (looking for a
+      drone, drone detected, or no drone) instead of a modal over the launcher. Each state has
+      its own title colour; only the missing-drone one carries the re-open pill, and that pill
+      shares its row with the status line.
+    -->
+    <string name="drone_status_detecting">Looking for a drone</string>
+    <string name="drone_status_detected">Drone detected</string>
+    <string name="drone_status_opening">Opening Flight Deck automatically — press anywhere to cancel.</string>
+    <string name="drone_status_open_cancelled">Automatic open cancelled — press Flight Deck when ready.</string>
+    <string name="drone_status_absent">No drone detected</string>
+    <string name="drone_status_absent_hint">Check the aircraft and the RC cable, close any DJI app, then re-open.</string>
+    <string name="drone_status_absent_rc_busy">The RC is connected but another DJI app (DJI Fly) is using it. Close it, then re-open.</string>
+    <string name="drone_status_reopen">Re-open app</string>
 </resources>

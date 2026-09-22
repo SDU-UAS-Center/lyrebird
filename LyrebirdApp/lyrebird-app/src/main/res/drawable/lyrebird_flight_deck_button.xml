@@ -1,24 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Flight Deck button reads as a card: the themed surface inside, a border in the logo's rusty
+  orange (the plumage blue carries the label, see lyrebird_flight_deck_text), and an orange fill
+  while it is pressed.
+-->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_enabled="false">
         <shape>
             <solid android:color="@color/lyrebird_surface_alt" />
-            <corners android:radius="6dp" />
+            <corners android:radius="12dp" />
             <stroke
-                android:width="1dp"
-                android:color="@color/lyrebird_teal" />
+                android:width="2dp"
+                android:color="@color/lyrebird_border" />
         </shape>
     </item>
     <item android:state_pressed="true">
         <shape>
             <solid android:color="@color/lyrebird_orange" />
-            <corners android:radius="6dp" />
+            <corners android:radius="12dp" />
+            <stroke
+                android:width="2dp"
+                android:color="@color/lyrebird_orange" />
         </shape>
     </item>
     <item>
         <shape>
-            <solid android:color="@color/lyrebird_teal" />
-            <corners android:radius="6dp" />
+            <solid android:color="@color/lyrebird_surface" />
+            <corners android:radius="12dp" />
+            <stroke
+                android:width="2dp"
+                android:color="@color/lyrebird_orange" />
         </shape>
     </item>
 </selector>

@@ -1,6 +1,8 @@
 package com.lyrebird.rc.webrtc
 
-class AdaptiveFrameRatePolicy(initialDesiredFps: Int) {
+class AdaptiveFrameRatePolicy(
+    initialDesiredFps: Int,
+) {
     companion object {
         private const val SATURATION_PROCESSING_RATIO = 0.75
         private const val SATURATION_WINDOWS_TO_THROTTLE = 2
@@ -22,7 +24,7 @@ class AdaptiveFrameRatePolicy(initialDesiredFps: Int) {
         val frameRateToApply: Int? = null,
         val reason: String? = null,
         val lifecycleEvent: String? = null,
-        val lifecycleDetail: String? = null
+        val lifecycleDetail: String? = null,
     )
 
     fun reset(newDesiredFps: Int = desiredFps) {
@@ -58,7 +60,7 @@ class AdaptiveFrameRatePolicy(initialDesiredFps: Int) {
     private fun handleSaturatedWindow(
         metrics: WebRTCStreamMetrics,
         frameBudgetMs: Double,
-        processingSaturated: Boolean
+        processingSaturated: Boolean,
     ): Decision {
         saturationWindows += 1
         stableWindows = 0
@@ -70,19 +72,21 @@ class AdaptiveFrameRatePolicy(initialDesiredFps: Int) {
             if (nextFps < effectiveFps) {
                 effectiveFps = nextFps
                 saturationWindows = 0
-                decision = Decision(
-                    frameRateToApply = effectiveFps,
-                    reason = "processing saturation",
-                    lifecycleEvent = "adaptive_fps_lowered",
-                    lifecycleDetail = buildString {
-                        append("fps ${metrics.targetFps} -> $effectiveFps")
-                        append(" proc=${metrics.averageFrameProcessingMs.format1()}ms")
-                        append(" budget=${frameBudgetMs.format1()}ms")
-                        append(" out=${metrics.outputFps.format1()}")
-                        append(" in=${metrics.inputFps.format1()}")
-                        append(" err=${metrics.processingErrors}")
-                    }
-                )
+                decision =
+                    Decision(
+                        frameRateToApply = effectiveFps,
+                        reason = "processing saturation",
+                        lifecycleEvent = "adaptive_fps_lowered",
+                        lifecycleDetail =
+                            buildString {
+                                append("fps ${metrics.targetFps} -> $effectiveFps")
+                                append(" proc=${metrics.averageFrameProcessingMs.format1()}ms")
+                                append(" budget=${frameBudgetMs.format1()}ms")
+                                append(" out=${metrics.outputFps.format1()}")
+                                append(" in=${metrics.inputFps.format1()}")
+                                append(" err=${metrics.processingErrors}")
+                            },
+                    )
             }
         }
 
@@ -106,17 +110,19 @@ class AdaptiveFrameRatePolicy(initialDesiredFps: Int) {
             if (nextFps > effectiveFps) {
                 effectiveFps = nextFps
                 stableWindows = 0
-                decision = Decision(
-                    frameRateToApply = effectiveFps,
-                    reason = "saturation recovered",
-                    lifecycleEvent = "adaptive_fps_raised",
-                    lifecycleDetail = buildString {
-                        append("fps ${metrics.targetFps} -> $effectiveFps")
-                        append(" proc=${metrics.averageFrameProcessingMs.format1()}ms")
-                        append(" out=${metrics.outputFps.format1()}")
-                        append(" in=${metrics.inputFps.format1()}")
-                    }
-                )
+                decision =
+                    Decision(
+                        frameRateToApply = effectiveFps,
+                        reason = "saturation recovered",
+                        lifecycleEvent = "adaptive_fps_raised",
+                        lifecycleDetail =
+                            buildString {
+                                append("fps ${metrics.targetFps} -> $effectiveFps")
+                                append(" proc=${metrics.averageFrameProcessingMs.format1()}ms")
+                                append(" out=${metrics.outputFps.format1()}")
+                                append(" in=${metrics.inputFps.format1()}")
+                            },
+                    )
             }
         }
 
@@ -138,7 +144,10 @@ class AdaptiveFrameRatePolicy(initialDesiredFps: Int) {
         }
     }
 
-    private fun nextHigherAdaptiveFps(current: Int, desired: Int): Int {
+    private fun nextHigherAdaptiveFps(
+        current: Int,
+        desired: Int,
+    ): Int {
         val currentIndex = ADAPTIVE_FPS_STEPS.indexOfFirst { it == current }
         return if (currentIndex > 0) {
             ADAPTIVE_FPS_STEPS[currentIndex - 1].coerceAtMost(desired)

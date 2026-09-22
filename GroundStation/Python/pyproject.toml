@@ -7,6 +7,9 @@ name = "lyrebird-groundstation"
 version = "0.1.0"
 description = "Shared Python client for the Lyrebird drone ground station"
 license = { text = "MIT" }
+# 3.10 is the floor, not a preference: the ros:humble containers import this
+# package with their own interpreter. Development and CI run 3.14.7 (see the root
+# pyproject's uv workspace), and the suite is run on both.
 requires-python = ">=3.10"
 dependencies = ["requests>=2.28"]
 

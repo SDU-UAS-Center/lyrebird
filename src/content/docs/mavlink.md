@@ -137,8 +137,7 @@ configuration. If the aircraft sends only to Lyrebird, QGroundControl will not s
 ## Verify without QGroundControl
 
 ```bash
-pip install pymavlink
-lyrebird-mavlink-listen --summary 5
+uv run --locked --group mavlink lyrebird-mavlink-listen --summary 5
 ```
 
 It prints the first instance of each message with decoded values, then a rate summary, and reports malformed frames loudly as `BAD_DATA`. It never transmits.

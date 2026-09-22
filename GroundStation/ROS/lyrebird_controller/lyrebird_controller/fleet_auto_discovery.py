@@ -213,7 +213,10 @@ class FleetAutoDiscoveryManager(Node):
                 ip_rc=ip,
                 # Matches auto_discovery_native.launch.py's naming (see ros_monitor.py), which
                 # this manager replaces -- so tooling that watches for lyrebird_controller_*
-                # nodes keeps working unchanged.
+                # nodes keeps working unchanged. This only holds as long as the launch file
+                # that starts this process does not set Node(name=...): that becomes a
+                # process-wide __node remap and would rename every node created here (see
+                # _warn_if_renamed).
                 node_name=f"lyrebird_controller_{namespace}",
                 namespace=namespace,
                 mavlink_port=self._mavlink_port_base,
@@ -222,6 +225,7 @@ class FleetAutoDiscoveryManager(Node):
                 mavlink_router=self._mavlink_router,
                 mavlink_vehicle_name=name,
             )
+            self._warn_if_renamed(node, namespace)
             if not node.connection_ready:
                 node.destroy_node()
                 self.get_logger().warning(f"Could not connect to discovered drone at {ip}")
@@ -234,6 +238,27 @@ class FleetAutoDiscoveryManager(Node):
             if name:
                 self._drones[name] = namespace
             self.on_drone_discovered(namespace, node, ip, name)
+
+    def _warn_if_renamed(self, node, namespace):
+        """Report a drone node that got renamed by a process-wide node-name remap.
+
+        `launch_ros` implements a Node(name=...) action as a `-r __node:=<name>` argument, and
+        such a rule matches every node the process creates, not just the one the launch file
+        meant. The drone nodes then all carry the manager's name, so anything scanning the ROS
+        graph for lyrebird_controller_<drone> (the video-test dashboard's ros_monitor, for one)
+        finds nothing and reports no drones even though the bridge is up. Nothing else fails
+        visibly, which is why this is reported rather than silently tolerated.
+        """
+        expected_name = f"lyrebird_controller_{namespace}"
+        actual_name = node.get_name()
+        if actual_name != expected_name:
+            self.get_logger().error(
+                f"Drone node was created as '{actual_name}' instead of '{expected_name}': this "
+                "process was started with a node-name remap that overrides every node it "
+                "creates. Remove name= from this manager's launch action (see "
+                "fleet_auto_discovery.launch.py) so per-drone nodes keep their names; graph "
+                "watchers match on them."
+            )
 
     def _apply_settings(self, node, name, rth_slot):
         """Push fleet_settings to a newly connected drone, with rth_altitude_range (if

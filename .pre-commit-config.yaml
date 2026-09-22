@@ -1,12 +1,15 @@
 # Pre-commit hooks for GroundStation Python and Lyrebird-owned Android quality.
-# Install locally: pre-commit install
-# Run manually:    pre-commit run --all-files
-# Run tests:       pre-commit run groundstation-tests android-tests --hook-stage manual
+# Install locally: uv run --locked pre-commit install
+# Run manually:    uv run --locked pre-commit run --all-files
+# Run tests:       uv run --locked pre-commit run groundstation-tests android-tests --hook-stage manual
 # Bypass checks:   git commit --no-verify (use sparingly)
 #
 # Keep these hooks in lockstep with .github/workflows/ci.yml. CI runs the same
 # default-stage checks plus GroundStation pytest and Android compile/unit tests
 # on every pull request and push to main.
+#
+# Python hooks that need dependencies run through uv, so they use the locked
+# environment (uv.lock, Python 3.10) instead of pre-commit's own sandbox.
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -24,9 +27,8 @@ repos:
     hooks:
       - id: radon-complexity
         name: radon complexity - require B-or-better GroundStation blocks
-        entry: python scripts/check_radon_complexity.py
-        language: python
-        additional_dependencies: [radon==6.0.1]
+        entry: uv run --locked --only-group metrics python scripts/check_radon_complexity.py
+        language: system
         pass_filenames: false
         files: ^GroundStation/.*\.py$
 
@@ -53,26 +55,36 @@ repos:
     hooks:
       - id: groundstation-tests
         name: GroundStation Python tests
-        entry: python -m pytest GroundStation/tests -q
-        language: python
-        additional_dependencies:
-          - pytest
-          - pymavlink==2.4.43
-          - requests>=2.28
+        entry: uv run --locked --group test python -m pytest GroundStation/tests -q
+        language: system
         pass_filenames: false
         stages: [manual]
         files: ^GroundStation/.*\.py$
 
       - id: android-spotless
         name: android spotless - Lyrebird-owned Kotlin format
-        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:spotlessKotlinCheck'
+        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck'
         language: system
         pass_filenames: false
-        files: ^LyrebirdApp/lyrebird-app/.*\.kt$
+        files: ^LyrebirdApp/(lyrebird-app|lyrebird-core)/.*\.kt$
       - id: android-tests
         name: android tests - compile + unit tests
-        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :app:compileCurrentDebugKotlin :app:testCurrentDebugUnitTest'
+        entry: bash -c 'cd LyrebirdApp/android-sdk-v5-as && ./gradlew --quiet :lyrebird-core:compileDebugKotlin :lyrebird-core:testDebugUnitTest :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest'
         language: system
         pass_filenames: false
         stages: [manual]
-        files: ^LyrebirdApp/lyrebird-app/.*\.kt$
+        files: ^LyrebirdApp/(lyrebird-app|lyrebird-core)/.*\.kt$
+
+      - id: main-sdk-free
+        name: main sdk-free - shared sources/manifest/resources carry no DJI / flavor-only references
+        entry: python scripts/check_main_sdk_free.py
+        language: python
+        pass_filenames: false
+        files: ^LyrebirdApp/lyrebird-app/src/(main|v5|v4)/.*\.(kt|java|xml)$
+
+      - id: process-ownership
+        name: process ownership - the aircraft runtimes stay screen-free
+        entry: python scripts/check_process_ownership.py
+        language: python
+        pass_filenames: false
+        files: ^LyrebirdApp/lyrebird-app/src/.*\.kt$

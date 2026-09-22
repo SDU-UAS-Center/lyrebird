@@ -11,7 +11,7 @@ class PID(
     private val ki: Double,
     private val kd: Double,
     private val dt: Double,
-    private val outputLimits: Pair<Double?, Double?>
+    private val outputLimits: Pair<Double?, Double?>,
 ) {
     private var integral = 0.0
     private var previousError = 0.0
@@ -26,7 +26,10 @@ class PID(
     /** Update using the fixed nominal timestep supplied at construction. */
     fun update(error: Double): Double = update(error, dt)
 
-    fun update(error: Double, dtSec: Double): Double {
+    fun update(
+        error: Double,
+        dtSec: Double,
+    ): Double {
         // Proportional term
         val p = kp * error
 
@@ -48,11 +51,12 @@ class PID(
         val outputUnclamped = output + ki * integral
 
         // Anti-windup: Only update integral if output is not saturated
-        val i = if (acceptsIntegralTerm(outputUnclamped)) {
-            ki * integral
-        } else {
-            0.0
-        }
+        val i =
+            if (acceptsIntegralTerm(outputUnclamped)) {
+                ki * integral
+            } else {
+                0.0
+            }
 
         // PID output before limits
         output += i

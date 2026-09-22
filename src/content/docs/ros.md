@@ -103,7 +103,7 @@ settings menu edits):
 | `maxFlightHeight` | `120` | Meters AGL flight ceiling. |
 | `maxFlightDistance` | `500` | Meters, max distance from the home point. |
 | `distanceLimitEnabled` | `true` | `true` \| `false` -- whether `maxFlightDistance` is enforced. |
-| `videoSource` | `drone` | `drone` \| `phone` \| `mock` -- `mock` is the built-in Mock MP4 test pattern, useful for testing `streamingMode` end-to-end without a live feed. |
+| `videoSource` | `drone` | `drone` -- the aircraft's camera is the only source; the phone-camera and Mock MP4 test sources were removed. The key is kept because existing clients and the `LB_VIDEO_SRC` parameter read it. |
 | `streamingMode` | `webrtc` | `webrtc` \| `rtmp` \| `rtsp` \| `agora` \| `gb28181` -- `webrtc` means WebRTC via WHIP push (DJI SDK naming, not a separate "whip" mode). |
 | `webrtcResolution` | `auto` | `auto` \| `1080p` \| `720p` \| `480p` (only used when `streamingMode: webrtc`). |
 | `webrtcFps` | `20` | `5` \| `10` \| `15` \| `20` \| `25` \| `30` (only used when `streamingMode: webrtc`). |

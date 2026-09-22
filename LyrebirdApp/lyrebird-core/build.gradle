@@ -1,0 +1,44 @@
+apply plugin: 'com.android.library'
+
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-jvm-default=no-compatibility")
+    }
+}
+
+android {
+    namespace 'com.lyrebird.core'
+    compileSdk = Integer.parseInt(project.ANDROID_COMPILE_SDK_VERSION)
+
+    defaultConfig {
+        minSdk = Integer.parseInt(project.ANDROID_MIN_SDK_VERSION)
+        targetSdk = Integer.parseInt(project.ANDROID_TARGET_SDK_VERSION)
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    lintOptions {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    testOptions {
+        unitTests {
+            // The MAVLink endpoint logs through android.util.Log, whose stub throws by
+            // default in a JVM unit test.
+            returnDefaultValues = true
+        }
+    }
+}
+
+// Deliberately no DJI dependency of any kind: the whole point of this module is that it
+// compiles without either SDK generation on its classpath, so shared code cannot quietly grow
+// a hardware dependency. Adding one here is a design error, not a build detail.
+dependencies {
+    implementation deps.kotlinLib
+    testImplementation deps.junit4
+    testImplementation deps.json
+}
