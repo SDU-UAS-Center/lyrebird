@@ -1,0 +1,11 @@
+# Copy this file to local.properties and adjust the values for your machine.
+# local.properties is intentionally ignored by Git.
+
+# Linux default when the SDK is installed from Android Studio:
+sdk.dir=/home/your-user/Android/Sdk
+
+# Required by DJI Mobile SDK. Use the key registered for this app package/signature.
+AIRCRAFT_API_KEY=Your_DJI_App_Key
+
+# Optional for OpenFreeMap/MapLibre rendering in this project; dummy is enough for SDK init.
+MAPLIBRE_TOKEN=dummy

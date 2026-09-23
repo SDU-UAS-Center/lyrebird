@@ -1,0 +1,7 @@
+# Build context is GroundStation/ (the video-grid webapp and GroundStation
+# images). Keep caches, local build artifacts and field-only tooling out of
+# the images.
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/
+Python/test_scripts

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The process runtime is a real connected-device server, not deferred background work.
+         Keeping it in a typed foreground service prevents Android's cached-app freezer from
+         suspending fleet beacons, HTTP, MAVLink, and telemetry as soon as Flight Deck is hidden. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Everything in this manifest is V5-owned: it declares the flavor's application class and
+         activities so the shared manifest stays SDK-neutral. A second SDK generation contributes
+         its own equivalents here, beside the classes they name. -->
+    <application android:name="com.lyrebird.rc.DJIAircraftApplication">
+        <service
+            android:name="com.lyrebird.rc.server.ProcessRuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="false" />
+
+        <!-- Launcher: the V5 sample shell; Flight Deck opens from it. -->
+        <activity
+            android:name="com.lyrebird.rc.DJIAircraftMainActivity"
+            android:theme="@style/LyrebirdHomeTheme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Lyrebird's own server console; the process runtimes serve without it. -->
+        <activity
+            android:name="com.lyrebird.rc.FlightDeckActivity"
+            android:theme="@style/full_screen_theme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"/>
+
+        <!-- Retained UXSDK sample screens, declared beside the classes they name. -->
+        <activity
+            android:name="dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity"
+            android:theme="@style/full_screen_theme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"/>
+
+        <activity
+            android:name="dji.v5.ux.sample.showcase.widgetlist.WidgetsActivity"
+            android:theme="@style/full_screen_theme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"/>
+
+        <activity
+            android:name="com.lyrebird.rc.AircraftTestingToolsActivity"
+            android:theme="@style/full_screen_theme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"/>
+
+        <!-- The USB accessory broadcast opens the DJI V5 startup path. -->
+        <activity
+            android:name="com.lyrebird.rc.UsbAttachActivity"
+            android:theme="@style/translucent_theme"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+                android:resource="@xml/accessory_filter" />
+        </activity>
+    </application>
+</manifest>

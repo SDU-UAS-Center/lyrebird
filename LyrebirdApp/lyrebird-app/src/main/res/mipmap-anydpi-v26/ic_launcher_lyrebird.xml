@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The launcher icon, and with it the Android 12+ splash screen icon, as an adaptive icon: the
+  system shapes and scales it, so the 512 px artwork stays sharp instead of a 192 px mipmap being
+  blown up. The foreground is the bird alone inside the safe zone; the background is the white
+  tile the artwork was drawn on.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@android:color/white" />
+    <foreground android:drawable="@mipmap/ic_launcher_lyrebird_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_lyrebird_foreground" />
+</adaptive-icon>

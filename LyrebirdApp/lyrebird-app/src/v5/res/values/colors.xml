@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Permissions modal palette. Each state has a foreground and a soft background so the chip and
+  the dot can share one visual language: granted (green), actionable (blue), only fixable in
+  Android settings (amber).
+-->
+<resources>
+    <color name="lyrebird_permission_granted">#1B7F4B</color>
+    <color name="lyrebird_permission_granted_bg">#E4F4EC</color>
+    <color name="lyrebird_permission_actionable">#1B62B8</color>
+    <color name="lyrebird_permission_actionable_bg">#E6EFFA</color>
+    <color name="lyrebird_permission_manual">#A96A12</color>
+    <color name="lyrebird_permission_manual_bg">#FBF0DF</color>
+    <color name="lyrebird_permission_heading">#101828</color>
+    <color name="lyrebird_permission_body">#667085</color>
+    <color name="lyrebird_permission_divider">#14000000</color>
+</resources>

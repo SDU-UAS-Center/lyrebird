@@ -1,0 +1,37 @@
+# Docker build context exclusion for builds that use the repository root as
+# context (the ROS stack image, the ros-monitor image and the video grid
+# dashboard). Keeps the context small and avoids shipping build artifacts,
+# secrets, or the Android and documentation trees into the images.
+.git
+.github
+node_modules
+**/build
+**/outputs
+**/__pycache__
+**/*.pyc
+**/.venv
+**/*.egg-info/
+*.apk
+*.ndjson
+local.properties
+google-services.json
+INTERNAL.md
+private-notes
+LyrebirdApp
+src
+docs
+public
+astro.config.mjs
+package.json
+package-lock.json
+tsconfig.json
+GroundStation/video_test/logs
+GroundStation/tests
+GroundStation/Python/test_scripts
+# The whole GroundStation/ROS tree stays in context: the stack image builds every
+# package in it, and the ros-monitor image copies explicit paths, so the extra
+# ~140 KB costs that image nothing.
+GroundStation/video_test/compose.yaml
+scripts/verify-integration.sh
+README.md
+LICENSE

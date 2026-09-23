@@ -1,0 +1,200 @@
+name: CI
+
+# Keep these jobs in lockstep with .pre-commit-config.yaml.
+# Default-stage hooks run on every commit locally; CI runs the same commands
+# (check-only, no --fix) plus the GroundStation pytest suite and Android
+# compile/unit tests that are manual-stage hooks locally.
+#
+# Every Python job installs through uv dependency groups, so CI runs the same
+# locked environment (uv.lock, .python-version) a developer gets from `uv sync`.
+# uv fetches the interpreter itself; a single lock serves every Python version
+# the jobs need.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  python-ruff-checks:
+    name: Python Ruff checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: true
+
+      - name: Lockfile is up to date
+        run: uv lock --check
+
+      - name: Run Ruff linter
+        run: uv run --locked --only-group lint ruff check GroundStation --output-format=github
+
+      - name: Run Ruff formatter check
+        run: uv run --locked --only-group lint ruff format --check GroundStation
+
+  python-radon-metrics:
+    name: Python Radon metrics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: true
+
+      - name: Enforce cyclomatic complexity threshold
+        run: uv run --locked --only-group metrics python scripts/check_radon_complexity.py
+
+      - name: Print maintainability and size summaries
+        run: |
+          uv run --locked --only-group metrics radon mi -s GroundStation > radon-mi.txt
+          uv run --locked --only-group metrics python - <<'PY'
+          import re
+          from collections import Counter
+          from pathlib import Path
+
+          mi_report = Path("radon-mi.txt").read_text(encoding="utf-8")
+          counts = Counter(re.findall(r" - ([A-C]) \(", mi_report))
+          print("Maintainability Index grade counts:")
+          for grade in "ABC":
+              print(f"  {grade}: {counts.get(grade, 0)}")
+          PY
+          uv run --locked --only-group metrics radon raw -s GroundStation | tail -20
+          uv run --locked --only-group metrics radon hal -j GroundStation > radon-hal.json
+          uv run --locked --only-group metrics python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("radon-hal.json").read_text(encoding="utf-8"))
+          rows = []
+          for path, metrics in data.items():
+              total = metrics.get("total") or metrics
+              if isinstance(total, dict) and "effort" in total:
+                  rows.append((total.get("effort", 0), path))
+
+          print("Top 10 Halstead effort files:")
+          for effort, path in sorted(rows, reverse=True)[:10]:
+              print(f"  {effort:10.0f}  {path}")
+          PY
+
+  python-mypy-checks:
+    name: Python Mypy type checking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: true
+
+      - name: Run Mypy type checker
+        run: uv run --locked --only-group typecheck mypy
+
+  python-bandit-checks:
+    name: Python Bandit security scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: true
+
+      - name: Run Bandit security scanner
+        run: uv run --locked --only-group security bandit -r GroundStation -ll --skip B101
+
+  python-tests:
+    name: Python tests (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.14.7 is what developers run and what the images ship. 3.10 is the
+        # interpreter of the ros:humble containers that import the shared client,
+        # so the floor is exercised for real rather than assumed. One lock and
+        # one command cover both.
+        python: ["3.14.7", "3.10"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: true
+
+      - name: Run GroundStation tests
+        run: uv run --locked --python ${{ matrix.python }} --group test python -m pytest GroundStation/tests -q
+
+  android-quality:
+    name: Android quality checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: LyrebirdApp/android-sdk-v5-as
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        # v4, not v3: v3 installs the `tools` package by default, and that package no longer
+        # exists in the SDK repository, so the step died before any build ran. v4 defaults to
+        # `platform-tools` only.
+        uses: android-actions/setup-android@v4
+
+      - name: Write CI local.properties
+        run: |
+          {
+            echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+            echo "AIRCRAFT_API_KEY=ci-placeholder"
+            echo "MAPLIBRE_TOKEN=dummy"
+          } > local.properties
+
+      - name: Shared sources, manifest and resources are SDK-neutral
+        run: python3 ../../scripts/check_main_sdk_free.py
+
+      - name: Process runtimes are screen-free
+        run: python3 ../../scripts/check_process_ownership.py
+
+      - name: Spotless, compile, and unit tests
+        run: ./gradlew --no-daemon :app:spotlessKotlinCheck :lyrebird-core:spotlessKotlinCheck :lyrebird-core:compileDebugKotlin :lyrebird-core:testDebugUnitTest :app:compileCurrentV5DebugKotlin :app:testCurrentV5DebugUnitTest
+
+      - name: Lyrebird Detekt and Lint reports
+        run: ./gradlew --no-daemon qualityLyrebird
+
+      - name: Upload Android quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-quality-reports
+          if-no-files-found: ignore
+          path: |
+            LyrebirdApp/android-sdk-v5-as/build/reports/detekt/
+            LyrebirdApp/lyrebird-app/build/reports/

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.lyrebird.rc">
+
+    <!-- Sample permission requirement -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+<!--    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />-->
+<!--    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />-->
+<!--    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />-->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Required (on top of ACCESS_FINE_LOCATION) to read the connected Wi-Fi SSID when
+         targeting API 33+; without it WifiInfo/NetworkCapabilities.transportInfo redact the SSID
+         even with location permission granted. Not neverForLocation since we do use the SSID as
+         a location-adjacent signal (which network the phone is on), matching the existing
+         ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION declarations above. -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Required by WifiManager.createWifiLock: without it the low-latency Wi-Fi lock the
+         streamer takes before publishing is silently refused and the radio free to enter
+         power save mid-stream. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.BATTERY_STATS" />
+
+    <!-- 自安装使用 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Google Maps -->
+    <meta-data
+        android:name="com.google.android.geo.API_KEY"
+        android:value="${GMAP_API_KEY}" />
+
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false"/>
+    <uses-feature
+        android:name="android.hardware.usb.accessory"
+        android:required="true"/>
+
+    <!-- The application class and every activity are flavor-owned: each SDK flavor declares the
+         ones it compiles in its own manifest (src/v5/AndroidManifest.xml), beside the classes
+         they name. What remains here is shared device plumbing: permissions, the file provider
+         and the vendor string meta-data. -->
+    <application
+        android:allowBackup="true"
+        android:icon="${APP_ICON}"
+        android:label="@string/app_name_aircraft"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true"
+        tools:replace="android:usesCleartextTraffic"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+
+        <meta-data
+            android:name="com.dji.sdk.API_KEY"
+            android:value="${API_KEY}"/>
+
+        <!-- Maplibre Token-->
+        <meta-data
+            android:name="com.dji.mapkit.maplibre.apikey"
+            android:value="${MAPLIBRE_TOKEN}" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileProvider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"/>
+        </provider>
+    </application>
+</manifest>

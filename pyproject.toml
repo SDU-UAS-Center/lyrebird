@@ -1,0 +1,155 @@
+[project]
+# The repository root coordinates the Python side of the GroundStation: it pins
+# the interpreter, the shared client package (workspace member below) and every
+# tool the gates use. Android builds and the docs site have their own toolchains.
+name = "lyrebird"
+version = "0.0.0"
+# The range is deliberate. Developers and CI run 3.14 (.python-version; uv fetches
+# that build itself), while the shared client still has to import inside the
+# ros:humble container, whose interpreter is 3.10. CI runs the suite on both, so
+# the floor stays honest instead of being assumed.
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "lyrebird-groundstation",
+]
+
+[tool.uv]
+# Nothing at the root is a distributable; GroundStation/Python carries the code.
+package = false
+resolution = "highest"
+required-version = ">=0.12.17,<0.13"
+
+[tool.uv.workspace]
+members = ["GroundStation/Python"]
+
+[tool.uv.sources]
+lyrebird-groundstation = { workspace = true }
+
+[dependency-groups]
+# Named groups so a gate or an image installs exactly what it needs, and nothing
+# else: uv run --locked --only-group lint ruff check GroundStation
+# `dev` is uv's default group, so a plain `uv sync` gives a full local setup.
+hooks = ["pre-commit"]
+lint = ["ruff"]
+metrics = ["radon"]
+security = ["bandit"]
+typecheck = ["mypy", "types-requests"]
+# MAVLink 2 decoding. The client imports pymavlink lazily, so nothing imports it
+# at start-up, but the dashboard's comparison panel, the ROS monitor and the
+# dialect test all use it -- this group is the single source of that version.
+mavlink = ["pymavlink>=2.4.49"]
+# Heavy, and only for the ROS 2 stack image: uv sync --group ros
+ros = ["numpy", "opencv-python"]
+# What the ros-monitor image installs (numpy for the controller node, the
+# MAVLink decoder because its DjiNodes register with the shared router).
+ros-monitor = [
+    "numpy",
+    { include-group = "mavlink" },
+]
+test = [
+    "pytest",
+    { include-group = "mavlink" },
+]
+dev = [
+    { include-group = "hooks" },
+    { include-group = "lint" },
+    { include-group = "metrics" },
+    { include-group = "security" },
+    { include-group = "typecheck" },
+    { include-group = "test" },
+]
+
+[tool.ruff]
+# GroundStation Python style.
+# Format: uv run --locked --only-group lint ruff format GroundStation
+# Lint:   uv run --locked --only-group lint ruff check GroundStation --fix
+line-length = 100
+# py310, not py314: GroundStation/Python is imported by the ros:humble container
+# (Python 3.10), so 3.11+ syntax must fail here rather than at colcon build time.
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "LyrebirdApp",
+    "tmp",
+    "GroundStation/video_test/logs",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "N", "C4", "SIM", "C90", "RUF"]
+ignore = [
+    "E501",
+    "B008",
+    "SIM108",
+    "N812",
+    "N806",
+    "UP007",
+    "UP017",
+    "UP042",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"GroundStation/ROS/**/test/**" = ["B", "N", "E402"]
+"GroundStation/ROS/**/launch/**" = ["E402"]
+# DJIInterface and its subclasses expose a camelCase API that mirrors the DJI SDK's own naming.
+# Renaming would break every caller and, for safety.py, the override contract with the
+# parent class it extends.
+"GroundStation/Python/lyrebird_groundstation/safety.py" = ["N802", "N803"]
+"GroundStation/Python/lyrebird_groundstation/dji_client.py" = ["N802", "N803"]
+"GroundStation/ROS/lyrebird_controller/lyrebird_controller/dji_interface.py" = ["N802", "N803"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+# Run: uv run --locked --group test python -m pytest GroundStation/tests -q
+pythonpath = ["GroundStation/Python", "GroundStation/video_test/webapp"]
+testpaths = ["GroundStation/tests"]
+
+[tool.mypy]
+# Run: uv run --locked --only-group typecheck mypy
+# 3.10 to match the ruff target (and the ROS 2 Humble container): mypy catches
+# stdlib APIs that do not exist on the container's interpreter.
+python_version = "3.10"
+explicit_package_bases = true
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = false
+warn_redundant_casts = false
+warn_unused_ignores = false
+warn_no_return = false
+check_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+no_implicit_optional = false
+exclude = [
+    ".venv",
+    "LyrebirdApp",
+    "tmp",
+    "GroundStation/video_test/logs",
+]
+files = [
+    "GroundStation/Python/lyrebird_groundstation",
+    "GroundStation/Python/lyrebird_dji_helpers.py",
+]
+
+[tool.bandit]
+# Run: uv run --locked --only-group security bandit -r GroundStation -ll --skip B101
+exclude_dirs = [
+    ".venv",
+    "LyrebirdApp",
+    "tmp",
+    "GroundStation/video_test/logs",
+]
+skips = ["B101"]
+severity = "MEDIUM"

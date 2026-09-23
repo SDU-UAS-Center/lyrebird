@@ -1,0 +1,467 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ Copyright (c) 2018-2020 DJI
+  ~
+  ~ Permission is hereby granted, free of charge, to any person obtaining a copy
+  ~ of this software and associated documentation files (the "Software"), to deal
+  ~ in the Software without restriction, including without limitation the rights
+  ~ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  ~ copies of the Software, and to permit persons to whom the Software is
+  ~ furnished to do so, subject to the following conditions:
+  ~
+  ~ The above copyright notice and this permission notice shall be included in all
+  ~ copies or substantial portions of the Software.
+  ~
+  ~ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  ~ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  ~ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  ~ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  ~ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  ~ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  ~ SOFTWARE.
+  ~
+  -->
+
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/lyrebird_background"
+    tools:context="com.lyrebird.rc.DJIMainActivity">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/view_info_panel"
+        android:layout_width="340dp"
+        android:layout_height="match_parent"
+        android:background="@color/lyrebird_background"
+        android:padding="10dp"
+        app:layout_constraintEnd_toStartOf="@+id/msg_panel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:id="@+id/view_base_info"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:background="@drawable/lyrebird_welcome_panel"
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="12dp"
+            app:layout_constraintBottom_toTopOf="@+id/view_case_panel"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHeight_percent="0.66"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/title_brand"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
+                    android:autoSizeMaxTextSize="96sp"
+                    android:autoSizeMinTextSize="24sp"
+                    android:autoSizeTextType="uniform"
+                    android:ellipsize="none"
+                    android:fontFamily="@font/pixelify_sans"
+                    android:gravity="top"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="0.14"
+                    android:maxLines="1"
+                    android:text="@string/lyrebird_brand_label"
+                    android:textColor="@color/lyrebird_teal"
+                    android:textStyle="bold" />
+
+                <!--
+                  Drone notice, driven by DJIAircraftMainActivity.showDroneNotice: the brand above
+                  changes colour, this row carries the state line and — when there is something to
+                  do about it — the re-open pill, and the line under it is the hint.
+
+                  The brand needs a definite height for the autosized title, and that height is
+                  taller than its glyphs, so the row is pulled back up over the leftover space to
+                  stay with the title instead of floating below it.
+                -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="-8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/title_drone_status"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/dm_sans"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        android:text="@string/drone_status_absent"
+                        android:textColor="@color/lyrebird_danger"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+
+                    <TextView
+                        android:id="@+id/home_reopen_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/drone_status_button_bg"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:fontFamily="@font/dm_sans"
+                        android:foreground="?selectableItemBackground"
+                        android:paddingStart="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="6dp"
+                        android:text="@string/drone_status_reopen"
+                        android:textColor="@color/lyrebird_danger"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/title_drone_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="@font/dm_sans"
+                    android:lineSpacingExtra="2dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="@string/drone_status_absent_hint"
+                    android:textColor="@color/lyrebird_danger"
+                    android:textSize="10sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/text_view_version"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/dm_sans"
+                        android:gravity="start|center_vertical"
+                        android:maxLines="1"
+                        android:paddingStart="4dp"
+                        android:textColor="@color/lyrebird_text"
+                        android:textSize="10sp"
+                        tools:text="@string/sdk_version" />
+
+                    <TextView
+                        android:id="@+id/text_view_new_version_badge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="4dp"
+                        android:fontFamily="@font/dm_sans"
+                        android:gravity="end|center_vertical"
+                        android:maxLines="1"
+                        android:text="@string/new_sdk_version_available"
+                        android:textColor="@color/lyrebird_orange"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/text_view_package_product_category"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/dm_sans"
+                    android:gravity="start|center_vertical"
+                    android:maxLines="1"
+                    android:paddingStart="4dp"
+                    android:text="@string/package_product_category"
+                    android:textColor="@color/lyrebird_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/text_view_registered"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/dm_sans"
+                    android:gravity="start|center_vertical"
+                    android:maxLines="1"
+                    android:paddingStart="4dp"
+                    android:text="@string/unregistered"
+                    android:textColor="@color/lyrebird_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/text_view_product_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/dm_sans"
+                    android:gravity="start|center_vertical"
+                    android:maxLines="1"
+                    android:paddingStart="4dp"
+                    android:text="@string/product_name"
+                    android:textColor="@color/lyrebird_text"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/text_view_serial_number"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/dm_sans"
+                    android:gravity="start|center_vertical"
+                    android:maxLines="1"
+                    android:paddingStart="4dp"
+                    android:textColor="@color/lyrebird_text"
+                    android:textSize="10sp"
+                    android:visibility="gone"
+                    tools:text="DJI Serial: 1234567890"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/text_view_is_debug"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/dm_sans"
+                    android:gravity="start|center_vertical"
+                    android:maxLines="1"
+                    android:paddingStart="4dp"
+                    android:text="@string/is_sdk_debug"
+                    android:textColor="@color/lyrebird_text"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/view_case_panel"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:paddingBottom="6dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/view_base_info"
+            app:layout_constraintBottom_toBottomOf="parent"
+            android:background="@color/lyrebird_background">
+
+            <!--
+              These three share the panel's leftover height, which is not much: the labels drop
+              the button style's vertical padding and font padding and then auto-size, so they
+              fill the row they get instead of being cut off at the top and bottom.
+            -->
+            <Button
+                    android:id="@+id/permissions_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:foreground="?selectableItemBackground"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:autoSizeMaxTextSize="20sp"
+                    android:autoSizeMinTextSize="11sp"
+                    android:autoSizeStepGranularity="1sp"
+                    android:autoSizeTextType="uniform"
+                    android:background="@drawable/lyrebird_welcome_button"
+                    android:enabled="true"
+                    android:fontFamily="@font/space_grotesk"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="6dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="0dp"
+                    android:text="@string/permissions_button"
+                    android:textColor="@color/lyrebird_button_text" />
+
+            <Button
+                    android:id="@+id/widget_list_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:foreground="?selectableItemBackground"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:autoSizeMaxTextSize="20sp"
+                    android:autoSizeMinTextSize="11sp"
+                    android:autoSizeStepGranularity="1sp"
+                    android:autoSizeTextType="uniform"
+                    android:background="@drawable/lyrebird_welcome_button"
+                    android:enabled="false"
+                    android:fontFamily="@font/space_grotesk"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="6dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="0dp"
+                    android:text="@string/widget_list"
+                    android:textColor="@color/lyrebird_button_text" />
+
+            <Button
+                    android:id="@+id/testing_tool_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:foreground="?selectableItemBackground"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:autoSizeMaxTextSize="20sp"
+                    android:autoSizeMinTextSize="11sp"
+                    android:autoSizeStepGranularity="1sp"
+                    android:autoSizeTextType="uniform"
+                    android:background="@drawable/lyrebird_welcome_button"
+                    android:enabled="true"
+                    android:fontFamily="@font/space_grotesk"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="6dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="0dp"
+                    android:text="@string/testing_tools"
+                    android:textColor="@color/lyrebird_button_text" />
+        </LinearLayout>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <View
+        android:id="@+id/msg_panel"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/lyrebird_welcome_panel"
+        app:layout_constraintBottom_toBottomOf="@+id/view_info_panel"
+        app:layout_constraintLeft_toRightOf="@+id/view_info_panel"
+        app:layout_constraintRight_toRightOf="parent"
+        app:layout_constraintTop_toTopOf="@+id/view_info_panel" />
+
+    <LinearLayout
+        android:id="@+id/layout_lyrebird_stats"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="@+id/msg_panel"
+        app:layout_constraintStart_toStartOf="@+id/msg_panel"
+        app:layout_constraintTop_toTopOf="@+id/msg_panel" />
+
+    <TextView
+        android:id="@+id/text_view_lyrebird_git_info"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginEnd="8dp"
+        android:gravity="start"
+        android:lineSpacingExtra="2dp"
+        android:fontFamily="@font/dm_sans"
+        android:textColor="@color/lyrebird_muted"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="@+id/msg_panel"
+        app:layout_constraintStart_toStartOf="@+id/msg_panel"
+        app:layout_constraintTop_toBottomOf="@+id/layout_lyrebird_stats"
+        tools:text="Built 2026-05-20 10:33 UTC\nGit c90e63ce4cb5 · clean\nv1.0 (1)" />
+
+    <LinearLayout
+        android:id="@+id/flight_deck_button"
+        android:layout_width="0dp"
+        android:layout_height="108dp"
+        android:layout_marginStart="18dp"
+        android:layout_marginEnd="18dp"
+        android:layout_marginBottom="18dp"
+        android:background="@drawable/lyrebird_flight_deck_button"
+        android:clickable="true"
+        android:enabled="false"
+        android:focusable="true"
+        android:foreground="?selectableItemBackground"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toBottomOf="@+id/msg_panel"
+        app:layout_constraintEnd_toEndOf="@+id/msg_panel"
+        app:layout_constraintStart_toStartOf="@+id/msg_panel">
+
+        <!--
+          The logo is the 512 px artwork from GroundStation/video_test/webapp/public/assets
+          (drawable-nodpi/lyrebird_logo.png), not the launcher bitmap: at this size the 192 px
+          mipmap showed its pixels. The white tile behind it is inset by the card's stroke width,
+          otherwise it sits on the border and the card loses its left edge.
+        -->
+        <ImageView
+            android:layout_width="96dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="2dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="2dp"
+            android:background="@drawable/lyrebird_flight_deck_logo_tile"
+            android:contentDescription="@string/app_name_aircraft"
+            android:padding="6dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/lyrebird_logo" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:autoSizeMaxTextSize="46sp"
+            android:autoSizeMinTextSize="16sp"
+            android:autoSizeStepGranularity="1sp"
+            android:autoSizeTextType="uniform"
+            android:fontFamily="@font/pixelify_sans"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:letterSpacing="0.08"
+            android:text="@string/flight_deck"
+            android:textAllCaps="true"
+            android:textColor="@color/lyrebird_flight_deck_text"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/text_core_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        tools:text="test test"
+        android:textColor="@color/lyrebird_teal"
+        android:textSize="9dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:ignore="SpUsage" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

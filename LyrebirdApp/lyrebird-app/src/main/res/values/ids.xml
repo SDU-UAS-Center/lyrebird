@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Ids for views Lyrebird creates in code rather than in a layout file.
+
+    The fleet strip is built by FlightDeckActivity and added to the placeholder the Flight Deck
+    layout reserves above the map. That layout lives in the :uxsdk module, which cannot reference
+    app classes at compile time, so the view cannot be declared there and needs its id here.
+-->
+<resources>
+    <item name="fleet_strip" type="id" />
+</resources>
