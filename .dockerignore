@@ -28,10 +28,9 @@ tsconfig.json
 GroundStation/video_test/logs
 GroundStation/tests
 GroundStation/Python/test_scripts
-GroundStation/ROS/lyrebird_videofeed
-GroundStation/ROS/lyrebird_bringup
-# ...except the launch file the ros-monitor image reuses for auto-discovery.
-!GroundStation/ROS/lyrebird_bringup/launch/fleet_auto_discovery.launch.py
+# The whole GroundStation/ROS tree stays in context: the stack image builds every
+# package in it, and the ros-monitor image copies explicit paths, so the extra
+# ~140 KB costs that image nothing.
 GroundStation/video_test/compose.yaml
 scripts/verify-integration.sh
 README.md

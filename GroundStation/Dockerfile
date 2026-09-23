@@ -1,7 +1,16 @@
-# ros:humble-ros-base rather than the plain ros:humble tag: on Humble those two tags
-# are the same image today (same manifest digests), but naming the variant means a
-# future tag move cannot silently pull something heavier than this stack needs.
-FROM ros:humble-ros-base
+# ROS 2 Lyrical (the current LTS) is the default base. The legacy Humble stack stays
+# supported from this same Dockerfile:  docker build --build-arg ROS_DISTRO=humble ...
+#
+# The -ros-base variant is named explicitly rather than the bare distro tag: those two
+# tags are the same image today (same manifest digests), but naming the variant means
+# a future tag move cannot silently pull something heavier than this stack needs.
+ARG ROS_DISTRO=lyrical
+FROM ros:${ROS_DISTRO}-ros-base
+
+# Re-declared so the build steps below see it, and promoted to the container
+# environment for the entrypoint.
+ARG ROS_DISTRO
+ENV ROS_DISTRO=${ROS_DISTRO}
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -22,10 +31,10 @@ WORKDIR /ros2_ws
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-    ros-humble-rmw-cyclonedds-cpp \
-    ros-humble-cv-bridge \
-    ros-humble-vision-opencv \
-    ros-humble-image-transport \
+    ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    ros-${ROS_DISTRO}-cv-bridge \
+    ros-${ROS_DISTRO}-vision-opencv \
+    ros-${ROS_DISTRO}-image-transport \
     python3-pip \
     libgl1 \
     libglib2.0-0 \
@@ -45,22 +54,23 @@ COPY GroundStation/Python/ GroundStation/Python/
 # ROS packages
 COPY GroundStation/ROS /ros2_ws/src/
 
-# ROS Python modules are apt-managed, so the exact locked group is installed with
+# ROS Python modules are apt-managed, so the exact locked groups are installed with
 # `uv pip` into system Python rather than synced (a sync would remove them). uv is
-# mounted for the build only.
+# mounted for the build only. The mavlink group joins the ros group because the
+# fleet auto-discovery manager's transport router imports pymavlink in start().
 RUN --mount=from=ghcr.io/astral-sh/uv:0.12.17,source=/uv,target=/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
     uv export --quiet --locked --no-emit-project --no-emit-workspace \
-        --only-group ros --output-file /tmp/locked.txt \
+        --only-group ros --only-group mavlink --output-file /tmp/locked.txt \
     && uv pip install --system --break-system-packages --no-cache --requirements /tmp/locked.txt \
     && uv pip install --system --break-system-packages --no-cache ./GroundStation/Python \
     && rm -f /tmp/locked.txt
 
 # Build the ROS workspace (from /ros2_ws: the install space the entrypoint sources)
-RUN /bin/bash -c "source /opt/ros/humble/setup.bash && cd /ros2_ws && colcon build --symlink-install"
+RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && cd /ros2_ws && colcon build --symlink-install"
 
 # Source the workspace in bashrc
-RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
 RUN echo "source /ros2_ws/install/setup.bash" >> ~/.bashrc
 
 # Set working directory

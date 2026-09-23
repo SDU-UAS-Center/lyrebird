@@ -235,7 +235,7 @@ docker build -t lyrebird-ros .
 docker run --rm --network=host lyrebird-ros
 ```
 
-The image is based on `ros:humble` with CycloneDDS, `cv-bridge`, `vision-opencv`, `image-transport`, plus all Python dependencies.
+The image is based on `ros:lyrical-ros-base` (ROS 2 Lyrical, the current LTS) with CycloneDDS, `cv-bridge`, `vision-opencv`, `image-transport`, plus all Python dependencies. The legacy Humble variant builds from the same Dockerfile with `docker build --build-arg ROS_DISTRO=humble -t lyrebird-ros .`.
 
 **Manual multi-drone launch:**
 

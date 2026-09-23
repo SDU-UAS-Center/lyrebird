@@ -1,9 +1,11 @@
 #!/bin/bash
-source /opt/ros/humble/setup.bash
+# ROS_DISTRO is baked into the image (Dockerfile ARG/ENV): lyrical by default, humble
+# for the alternative build.
+source "/opt/ros/${ROS_DISTRO}/setup.bash"
 source /ros2_ws/install/setup.bash
 
 echo "========================================================"
-echo "   Lyrebird Ground Station (ROS 2 Humble)"
+echo "   Lyrebird Ground Station (ROS 2 ${ROS_DISTRO})"
 echo "========================================================"
 echo "The container is starting."
 echo ""
