@@ -22,10 +22,10 @@ git clone https://github.com/SDU-UAS-Center/lyrebird.git
 2. Create `local.properties` from the template and set the Android SDK path for your machine:
 
    ```bash
-   cd Lyrebird/LyrebirdApp/android-sdk-v5-as
+   cd lyrebird/LyrebirdApp/android-sdk-v5-as
    cp local.properties.example local.properties
    ```
-
+   
    Example for a default Linux Android Studio install:
 
    ```properties
