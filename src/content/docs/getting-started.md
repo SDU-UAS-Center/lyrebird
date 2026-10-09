@@ -24,21 +24,43 @@ git clone https://github.com/SDU-UAS-Center/lyrebird.git
    ```bash
    cd lyrebird/LyrebirdApp/android-sdk-v5-as
    cp local.properties.example local.properties
+   nano local.properties
    ```
-   
-   Example for a default Linux Android Studio install:
+
+   Set `sdk.dir` to your Android SDK path. Example for a default Linux Android Studio install:
 
    ```properties
    sdk.dir=/home/your-user/Android/Sdk
    ```
 
-3. Add your DJI API key to `local.properties`:
+3. Get your DJI API key. Sign in at [developer.dji.com](https://developer.dji.com/), open **Developer Center → Apps**, and create a new app with these properties:
 
-   ```properties
-   AIRCRAFT_API_KEY="Your_App_Key"
+   | Field | Value |
+   | --- | --- |
+   | SDK Type | Mobile SDK |
+   | App Name | Lyrebird (or any name you like) |
+   | Software Platform | Android |
+   | Package Name | `com.lyrebird.rc` |
+   | Category | Research (or whatever fits your use) |
+   | Description | Any short description |
+
+   The **Package Name** must be exactly `com.lyrebird.rc` — it has to match the app's `applicationId`, or the DJI SDK will reject the key at registration. After the app is created (DJI may ask you to activate it from a confirmation email first), open it from the Apps list and copy the **App Key**:
+
+   ![DJI Developer Center app information page, with the App Key hidden](../../../docs/images/dji_app_info_key_hidden.png)
+
+4. Add your DJI API key to `local.properties`:
+
+   ```bash
+   nano local.properties
    ```
 
-4. Build and deploy to your RC or Android phone (enable Developer Mode + USB Debugging first).
+   Replace the placeholder on the `AIRCRAFT_API_KEY` line with the App Key you copied:
+
+   ```properties
+   AIRCRAFT_API_KEY=Your_App_Key
+   ```
+
+5. Build and deploy to your RC or Android phone (enable Developer Mode + USB Debugging first).
 
 ## Command-line build
 
