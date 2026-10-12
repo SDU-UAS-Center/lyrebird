@@ -64,8 +64,38 @@ git clone https://github.com/SDU-UAS-Center/lyrebird.git
 
 ## Command-line build
 
+If you prefer the terminal to Android Studio, all commands below run from `LyrebirdApp/android-sdk-v5-as`:
+
 ```bash
 cd LyrebirdApp/android-sdk-v5-as
+```
+
+### Build, install and launch in one step
+
+Plug in your RC or Android phone over USB (with USB debugging enabled), then run:
+
+```bash
+./auto_install_on_connect.sh --build
+```
+
+The script builds the debug APK, waits for the device to show up in ADB (Android Debug Bridge) installs the app and starts it. Drop `--build` to reinstall the APK you already built (it still builds one if none exists).
+
+The first time you connect, unlock the RC's screen and accept the **Allow USB debugging** prompt. Otherwise `adb devices` lists it as `unauthorized` and the script won't install.
+
+### Several devices attached
+
+With more than one RC or phone connected, the script stops and lists them instead of guessing which one to install on. Pick one by serial (from `adb devices`), or install on all of them:
+
+```bash
+./auto_install_on_connect.sh --build --serial <serial>
+./auto_install_on_connect.sh --build --all
+```
+
+### Build only
+
+To build the APK without installing it:
+
+```bash
 ./gradlew :app:assembleCurrentV5Debug
 ```
 
@@ -75,17 +105,10 @@ The debug APK is written to:
 LyrebirdApp/lyrebird-app/build/outputs/apk/currentV5/debug/Lyrebird-current-v5-debug.apk
 ```
 
-To build/install `currentV5` when an Android device is connected over ADB:
+To check which APK the install script will use, and whether it has been built yet:
 
 ```bash
-cd LyrebirdApp/android-sdk-v5-as
-./auto_install_on_connect.sh currentV5 --build
-```
-
-To only check which APK will be used:
-
-```bash
-./auto_install_on_connect.sh currentV5 --check
+./auto_install_on_connect.sh --check
 ```
 
 ## Start the server
