@@ -72,15 +72,37 @@ cd LyrebirdApp/android-sdk-v5-as
 
 ### Build, install and launch in one step
 
-Plug in your RC or Android phone over USB (with USB debugging enabled), then run:
+Make sure USB debugging is enabled on the RC or phone and plug it in over USB. Add `adb` to your `PATH` and check that the device shows up:
+
+```bash
+echo 'export PATH=$PATH:$HOME/Android/Sdk/platform-tools' >> ~/.bashrc
+source ~/.bashrc
+adb devices
+```
+
+On Linux, if `adb devices` shows `no permissions`, run these two commands, then log out and back in:
+
+```bash
+sudo apt install android-sdk-platform-tools-common
+sudo usermod -aG plugdev $USER
+```
+
+Then build, install and launch:
 
 ```bash
 ./auto_install_on_connect.sh --build
 ```
 
-The script builds the debug APK, waits for the device to show up in ADB (Android Debug Bridge) installs the app and starts it. Drop `--build` to reinstall the APK you already built (it still builds one if none exists).
+The script builds the debug APK, waits for the device to show up in ADB (Android Debug Bridge), installs the app and starts it. Drop `--build` to reinstall the APK you already built (it still builds one if none exists).
 
 The first time you connect, unlock the RC's screen and accept the **Allow USB debugging** prompt. Otherwise `adb devices` lists it as `unauthorized` and the script won't install.
+
+If the app was previously installed with a different DJI API key, uninstall it first, then rebuild and install:
+
+```bash
+adb uninstall com.lyrebird.rc
+./auto_install_on_connect.sh --build
+```
 
 ### Several devices attached
 
