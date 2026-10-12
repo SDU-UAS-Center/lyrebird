@@ -144,6 +144,8 @@ It prints the first instance of each message with decoded values, then a rate su
 
 **Connect QGroundControl:** it listens on UDP 14550 by default and adds a link on receiving traffic. If the RC and the ground station share a LAN, enabling `lb_mav_0_enabled` is all that is required — see [above](#why-it-looks-like-px4-to-qgroundcontrol) for why QGC's action buttons and mission controls light up with no plugin.
 
+**Use QGroundControl 5.2 or newer.** Tested with 5.2.0. With QGC 5.0.8, parameter loading stalled for a long time and takeoff from Fly View got no response.
+
 ## Field testing
 
 The [Field Test](/field-test/) page is the procedure for verifying all of this against a real aircraft. The ground half runs itself:
