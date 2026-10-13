@@ -152,7 +152,7 @@ Both interfaces are enabled by default — pick whichever fits, or run both side
 
 ### MAVLink 2 (QGroundControl, MAVSDK, pymavlink — UDP 14550)
 
-Point QGroundControl at the RC's IP address and it connects automatically — Fly View and Plan view both light up with no plugin and no configuration file. Use QGroundControl 5.2 or newer: with 5.0.8, parameter loading stalled and takeoff got no response. To check the link without QGroundControl:
+Point QGroundControl at the RC's IP address and it connects automatically — Fly View and Plan view both light up with no plugin and no configuration file. Tested with QGroundControl 5.0.8 and 5.2.0 — see [Using QGroundControl](/mavlink/#using-qgroundcontrol) for flying, video, gimbal and camera. To check the link without QGroundControl:
 
 ```bash
 uv run --locked --group mavlink lyrebird-mavlink-listen --summary 5

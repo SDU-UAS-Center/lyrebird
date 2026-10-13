@@ -31,7 +31,7 @@ Flight commands are gated twice: `lb_mav_0_allow_flight` must be on, and the com
 | **Command** | Take-off (with altitude), land, return, reposition, yaw, altitude, stick input, arm/disarm, camera, gimbal, payload release |
 | **Mission** | Upload and download handshake, `MISSION_START`, progress and arrival reports. Per-waypoint hold time, acceptance radius, pass-through, heading, speed, camera/gimbal actions and region of interest are all honoured by one of two executors — see [Missions](/missions/) |
 | **Parameter** | `PARAM_SET` for numeric settings; `PARAM_EXT_SET` for string settings such as the drone name, video source and MediaMTX address |
-| **Camera / Gimbal** | Camera information, settings, capture status, video stream information; gimbal attitude and pitch/yaw control |
+| **Camera / Gimbal** | Camera information, settings, capture status, video stream information, video recording start/stop; gimbal v2 manager (information, status, control hand-over) with gimbal attitude and pitch/yaw control |
 | **File transfer** | Read-only MAVLink FTP for listing and reading the SD card |
 | **Signing** | MAVLink 2 packet signing identifies the Safety Computer, mirroring `X-Safety-Token` on the HTTP surface |
 
@@ -95,6 +95,13 @@ exhausted` in its log). The reply reports PX4 firmware `1.15.0`: leaving the ver
 QGC show two dialogs on every single connection — a compatibility notice and a "not running latest
 stable firmware" warning — for no reason other than an absent version number.
 
+**A protocol version, so QGC stays on MAVLink 2.** QGroundControl 5.0 asks for `PROTOCOL_VERSION`
+during connect and, when a vehicle can't report one, assumes it speaks MAVLink 1 and switches its own
+framing. The endpoint reads only MAVLink 2, so from that moment every request went unanswered:
+parameters stalled and commands, takeoff included, got no reply. It now answers with version 2.0 as
+its minimum, current and maximum — it really doesn't read MAVLink 1, so it says so. QGC 5.2 no longer
+asks.
+
 **Capabilities are only claimed once they exist.** The same message reports a capability bitmask;
 today that is only `MAVLINK2` and `FTP`, matching the read-only MAVLink FTP server Lyrebird actually
 serves. Claiming `MISSION_INT` or any other capability before the code behind it exists would be the
@@ -107,6 +114,13 @@ DJI genuinely does not provide is reported using MAVLink's own "unknown" convent
 ## Two conventions worth knowing
 
 **Heading, per waypoint.** `NAV_WAYPOINT.param4` is `NaN` for "use the vehicle's own heading mode" and a value for "hold this heading". That is exactly the difference between Lyrebird's two waypoint controllers, so one plan can mix them, and `DO_REPOSITION` reads it the same way. No custom mission item was needed.
+
+**Altitude, relative to take-off.** DJI reports the aircraft's height above its take-off point, and
+that is what the position messages carry: the aircraft reads about 0 m on the ground and home sits at
+0 m. QGroundControl's altitude arithmetic (take-off height, Go to location, Change altitude) therefore
+works out as heights above take-off throughout. Plan items are read the same way and their altitude
+frame is not consulted, so keep a plan's altitude mode at QGroundControl's default, *Relative to
+launch* — an AMSL or terrain-following altitude would be flown as a height above take-off.
 
 **Arrival, per waypoint.** `param1` (hold time), `param2` (acceptance radius) and `param3` (pass through) come from the plan, because only the plan knows which leg is the last one. A leg marked pass-through is flown through; the final one settles.
 
@@ -142,9 +156,22 @@ uv run --locked --group mavlink lyrebird-mavlink-listen --summary 5
 
 It prints the first instance of each message with decoded values, then a rate summary, and reports malformed frames loudly as `BAD_DATA`. It never transmits.
 
-**Connect QGroundControl:** it listens on UDP 14550 by default and adds a link on receiving traffic. If the RC and the ground station share a LAN, enabling `lb_mav_0_enabled` is all that is required — see [above](#why-it-looks-like-px4-to-qgroundcontrol) for why QGC's action buttons and mission controls light up with no plugin.
+## Using QGroundControl
 
-**Use QGroundControl 5.2 or newer.** Tested with 5.2.0. With QGC 5.0.8, parameter loading stalled for a long time and takeoff from Fly View got no response.
+**Connect.** QGroundControl listens on UDP 14550 by default and adds a link on receiving traffic. If the RC and the ground station share a LAN, enabling `lb_mav_0_enabled` is all that is required — see [above](#why-it-looks-like-px4-to-qgroundcontrol) for why QGC's action buttons and mission controls light up with no plugin. Tested with QGroundControl 5.0.8 and 5.2.0; both load the parameters and finish connecting within a couple of seconds.
+
+**Fly.** Take-off, Change altitude, Go to location, Pause, Land and Return in Fly View have been flown from QGroundControl 5.2 against a DJI Mini 4 Pro. Heights are above the take-off point (see [Altitude](#two-conventions-worth-knowing)). The RC sticks always take over from an automated action.
+
+**Video.** QGroundControl plays RTSP, not WebRTC, so its video comes through MediaMTX: the aircraft publishes to MediaMTX over WHIP, MediaMTX republishes the same stream on RTSP, and the aircraft advertises that address in `VIDEO_STREAM_INFORMATION` — QGC picks it up on its own, with nothing to configure. The [video dashboard](/groundstation/#groundstation-video-dashboard) stack has to be running for this, because it is what tells the aircraft where to publish. QGC reads the address once per connection: after renaming the drone (the name is the stream path), restart QGroundControl so it picks up the new one. The dashboard follows a rename by itself.
+
+**Gimbal.** The camera component acts as a MAVLink gimbal manager, so a gimbal indicator appears in QGC's top toolbar with **Tilt 90** and **Center**. For finer aiming, open the indicator's expanded panel and switch **On-Screen Control** on:
+
+- *Click and drag off* — click a point in the video and the camera aims there. The angle comes from the **Horizontal/Vertical FOV** settings in the same panel, so set them to your camera's field of view for accurate aiming.
+- *Click and drag on* — press, hold and drag on the video; the gimbal moves while you drag, faster the further you go.
+
+QGC takes control of the gimbal (`DO_GIMBAL_MANAGER_CONFIGURE`) before it sends a setpoint, and the aircraft reports it in control. Other ground stations can still move the gimbal without doing so. A gimbal that cannot yaw (a Mini) simply holds its yaw: if DJI refuses a rotation only because of its yaw, the pitch is applied on its own.
+
+**Camera.** Start and stop recording from QGC's camera controls. Because the aircraft reports its camera in video mode, QGC's photo button saves a still from the video stream on the ground station rather than triggering the aircraft's shutter; for a photo on the aircraft, use the dashboard's **Photo** button or `/send/capture` on the [HTTP API](/http-api/).
 
 ## Field testing
 
