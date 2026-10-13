@@ -318,13 +318,13 @@ internal class LyrebirdHttpCommandHandler(
                 }
             },
             "/send/camera/startRecording" to {
-                when (commandSink.startVideoRecording().outcome) {
+                when (commandSink.startVideoRecording().settled().outcome) {
                     MavlinkCommandOutcome.ACCEPTED -> "Received: camera start recording"
                     else -> "FAILED: camera start recording"
                 }
             },
             "/send/camera/stopRecording" to {
-                when (commandSink.stopVideoRecording().outcome) {
+                when (commandSink.stopVideoRecording().settled().outcome) {
                     MavlinkCommandOutcome.ACCEPTED -> "Received: camera stop recording"
                     else -> "FAILED: camera stop recording"
                 }
@@ -858,4 +858,19 @@ internal class SimpleHttpServer(
         ): String {
             return commandHandler.handlePostRequest(uri, postData, source)
         }
-    }
+}
+
+/** How long an HTTP request waits for a command that finishes on a worker. */
+private const val SETTLE_TIMEOUT_S = 15L
+
+/**
+ * The final result of a command that finishes on a worker (see [CommandResult.completion]).
+ *
+ * MAVLink answers IN_PROGRESS and sends the outcome later; an HTTP request runs on its own thread,
+ * so it simply waits, and keeps reporting a start that DJI refused as failed.
+ */
+private fun CommandResult.settled(): CommandResult =
+    completion?.let { pending ->
+        runCatching { pending.get(SETTLE_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS) }
+            .getOrElse { CommandResult(MavlinkCommandOutcome.FAILED) }
+    } ?: this

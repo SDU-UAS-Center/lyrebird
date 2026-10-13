@@ -653,12 +653,13 @@ class MavlinkTelemetryEndpoint(
             }
 
         val pending = result.pending
+        val completion = result.completion
         val ack =
             MavlinkMessages.commandAck(
-                // A command that has been accepted but has not arrived yet is acknowledged as
-                // IN_PROGRESS; the final ack follows from watchCompletion when it does.
+                // A command that has been accepted but has not finished yet is acknowledged as
+                // IN_PROGRESS; the final ack follows from watchCompletion / watchResult when it does.
                 command = command.command,
-                result = if (pending != null) Mav.RESULT_IN_PROGRESS else result.mavResult,
+                result = if (pending != null || completion != null) Mav.RESULT_IN_PROGRESS else result.mavResult,
                 targetSystem = command.senderSystem,
                 targetComponent = command.senderComponent,
                 resultValue = result.resultValue,
@@ -667,6 +668,48 @@ class MavlinkTelemetryEndpoint(
         // match it to its request.
         sendOnce(MavlinkMsgId.COMMAND_ACK, ack, fromCamera = forCamera)
         if (pending != null) watchCompletion(command, pending)
+        if (completion != null) watchResult(command, completion, forCamera)
+    }
+
+    /**
+     * Send the final ack for a command whose result arrives on a worker, repeating IN_PROGRESS
+     * until then.
+     *
+     * Every ack comes from the component that was addressed: QGroundControl's camera control only
+     * accepts acks from the camera component, so a recording acknowledged by the autopilot would be
+     * as unanswered as one not acknowledged at all. A result that never arrives is reported failed
+     * rather than left hanging.
+     */
+    private fun watchResult(
+        command: MavlinkCommand,
+        completion: java.util.concurrent.CompletableFuture<CommandResult>,
+        fromCamera: Boolean,
+    ) {
+        fun ack(result: Int) =
+            sendOnce(
+                MavlinkMsgId.COMMAND_ACK,
+                MavlinkMessages.commandAck(
+                    command = command.command,
+                    result = result,
+                    targetSystem = command.senderSystem,
+                    targetComponent = command.senderComponent,
+                ),
+                fromCamera = fromCamera,
+            )
+        thread(name = "MavlinkResultWatch", isDaemon = true) {
+            val deadline = System.currentTimeMillis() + RESULT_TIMEOUT_MS
+            while (running && !completion.isDone && System.currentTimeMillis() < deadline) {
+                runCatching {
+                    completion.get(COMMAND_IN_PROGRESS_REPEAT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                }
+                if (!completion.isDone) ack(Mav.RESULT_IN_PROGRESS)
+            }
+            // An exceptional or missing result is a failure, never a silent success.
+            val result = runCatching { completion.getNow(null) }.getOrNull()
+            val outcome = result?.mavResult ?: Mav.RESULT_FAILED
+            Log.i(TAG, "Command ${command.command} finished: ${result?.outcome ?: "no result"}")
+            ack(outcome)
+        }
     }
 
     /**
@@ -1692,11 +1735,15 @@ class MavlinkTelemetryEndpoint(
         /**
          * How often a still-running command repeats its IN_PROGRESS acknowledgement.
          *
-         * Comfortably inside QGroundControl's roughly three-second patience, and slow enough that
+         * Inside QGroundControl 5.2's 1.2 s ack timeout with room for Wi-Fi jitter — 5.0.8 allowed
+         * 3 s, which is what the 1 s this used to be was tuned against — and still slow enough that
          * a five-minute leg costs a few hundred small frames rather than competing with telemetry
          * for the link.
          */
-        private const val COMMAND_IN_PROGRESS_REPEAT_MS = 1_000L
+        private const val COMMAND_IN_PROGRESS_REPEAT_MS = 500L
+
+        /** How long a worker-completed command may take before it is reported failed. */
+        private const val RESULT_TIMEOUT_MS = 15_000L
 
         /**
          * Tangential speed for an orbit whose command did not name one.

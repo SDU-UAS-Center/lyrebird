@@ -185,6 +185,16 @@ data class CommandResult(
      * result_param2 is an int32 — the scaling is what keeps a fractional reading intact.
      */
     val resultValue: Int = 0,
+    /**
+     * Set when the command was accepted and its real outcome arrives later, for a payload action
+     * that blocks on the aircraft (starting a recording takes DJI ~1.6 s).
+     *
+     * The endpoint acknowledges IN_PROGRESS at once and the completed result as the final ack,
+     * so the receive thread never waits on the aircraft and a ground station with a short ack
+     * timeout (QGroundControl 5.2: 1.2 s) hears back in time. The decision to run — authority,
+     * logging — is still made synchronously; only the wait moves to a worker.
+     */
+    val completion: java.util.concurrent.CompletableFuture<CommandResult>? = null,
 ) {
     val mavResult: Int get() = outcome.mavResult
 }
