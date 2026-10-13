@@ -1031,6 +1031,57 @@ def test_a_real_gimbal_frame_recovers_the_joint_yaw_in_degrees():
     assert telemetry["gimbalAttitude"]["yaw"] == pytest.approx(0.0, abs=1e-3)
 
 
+def test_an_earth_frame_report_recovers_the_joint_yaw_from_the_vehicle_yaw():
+    """Current aircraft builds: flags carry YAW_IN_EARTH_FRAME and delta_yaw is the vehicle's yaw.
+
+    The gimbal points at 120 degrees and the aircraft faces 90, so the gimbal sits 30 degrees right
+    of the nose. Built with pymavlink exactly as the aircraft sends it.
+    """
+    from pymavlink.dialects.v20 import common as mavlink_common
+
+    class Sink:
+        buf = b""
+
+        def write(self, data):
+            self.buf += data
+
+    sink = Sink()
+    mavlink_common.MAVLink(sink, srcSystem=7, srcComponent=100).gimbal_device_attitude_status_send(
+        0,
+        0,
+        0,
+        4 | 8 | 64,  # flags: ROLL_LOCK | PITCH_LOCK | YAW_IN_EARTH_FRAME
+        _euler_to_quat(0.0, 0.0, math.radians(120.0)),
+        float("nan"),
+        float("nan"),
+        float("nan"),
+        0,
+        math.radians(90.0),  # delta_yaw: the vehicle's yaw
+        float("nan"),
+        1,  # gimbal_device_id
+    )
+    parser = mavlink_common.MAVLink(None)
+    (msg,) = parser.parse_buffer(sink.buf)
+    telemetry = {}
+    apply_mavlink_message(telemetry, msg)
+    assert telemetry["gimbalAttitude"]["yaw"] == pytest.approx(120.0, abs=1e-3)
+    assert telemetry["_gimbalJointYaw"] == pytest.approx(30.0, abs=1e-3)
+
+
+def test_an_earth_frame_joint_yaw_wraps_across_north():
+    telemetry = {}
+    apply_mavlink_message(
+        telemetry,
+        FakeMessage(
+            "GIMBAL_DEVICE_ATTITUDE_STATUS",
+            q=_euler_to_quat(0.0, 0.0, math.radians(-170.0)),
+            flags=64,
+            delta_yaw=math.radians(170.0),
+        ),
+    )
+    assert telemetry["_gimbalJointYaw"] == pytest.approx(20.0, abs=1e-3)
+
+
 def test_the_reported_joint_angles_beat_the_derived_ones():
     """When the aircraft reports its own joint angles, they win.
 

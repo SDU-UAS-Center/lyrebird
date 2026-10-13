@@ -779,11 +779,24 @@ class MavlinkTelemetryEndpoint(
                     // the gimbal does not have is a no-op on the aircraft, so there is no capability
                     // check to make. A command that sets nothing (QGC's rate-zero button release)
                     // is accepted without touching the gimbal.
-                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
-                        GimbalManager
-                            .rotationFor(command.param1, command.param2, command.param3, command.param4)
-                            ?.let(sink::setGimbal)
-                            ?: CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW -> {
+                        val result =
+                            GimbalManager
+                                .rotationFor(
+                                    command.param1,
+                                    command.param2,
+                                    command.param3,
+                                    command.param4,
+                                    flags = command.param5.toInt(),
+                                    vehicleYawDeg =
+                                        GimbalManager.vehicleYawDeg(
+                                            runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot()),
+                                        ),
+                                )?.let(sink::setGimbal)
+                                ?: CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                        sendGimbalAttitudeNow()
+                        result
+                    }
 
                     // param2 is the zoom value for MAV_ZOOM_TYPE_RANGE / _CONTINUOUS.
                     Mav.CMD_SET_CAMERA_ZOOM -> sink.setCameraZoom(command.param2)
@@ -1403,6 +1416,24 @@ class MavlinkTelemetryEndpoint(
 
     @Volatile
     private var gimbalControl = GimbalControl()
+
+    /**
+     * An attitude report straight after a setpoint, on top of the 5 Hz stream.
+     *
+     * QGroundControl zeroes its stored gimbal pitch after every pitch/yaw it sends and only
+     * learns it again from the next report. Its click-and-drag sends a target of "stored pitch +
+     * step" every 100 ms, so at 5 Hz every other target was computed from zero and the gimbal was
+     * told to jump back and forth. One report per setpoint keeps the stored pitch real between
+     * ticks, and costs nothing while nobody is aiming.
+     */
+    private fun sendGimbalAttitudeNow() {
+        val snapshot = runCatching { snapshotProvider() }.getOrNull() ?: return
+        sendOnce(
+            MavlinkMsgId.GIMBAL_DEVICE_ATTITUDE_STATUS,
+            MavlinkMessages.gimbalDeviceAttitudeStatus(snapshot, timeBootMs()),
+            fromCamera = true,
+        )
+    }
 
     /**
      * Record who controls the gimbal and report it straight away, rather than at the next 1 Hz

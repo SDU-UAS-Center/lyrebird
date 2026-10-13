@@ -524,15 +524,19 @@ object MavlinkMessages {
      * gimbals reads the pointing direction from here rather than from anything Lyrebird-specific.
      *
      * DJI reports two gimbal attitudes — one in the world frame and one relative to the aircraft.
-     * The quaternion carries the world-frame attitude, and `delta_yaw` carries the difference,
-     * which is exactly the field MAVLink defines for "yaw relative to the vehicle".
+     * The quaternion carries the world-frame attitude, so the flags say YAW_IN_EARTH_FRAME, and
+     * `delta_yaw` is what the spec defines it as: the yaw relating the earth and vehicle frames
+     * (q_earth = q_delta_yaw * q_vehicle), i.e. the vehicle's yaw. It is computed as world yaw
+     * minus joint yaw, so a receiver recovers DJI's joint yaw exactly as quaternion yaw minus
+     * `delta_yaw`.
      *
-     * The wire specifies `delta_yaw` in radians, not degrees. Sending the joint angle as degrees
-     * is a units bug that is invisible while the aircraft is still — the joint yaw sits near zero
-     * and a zero is a zero in either unit — and shows up the moment the aircraft moves and the
-     * gimbal compensates: a receiver converts the field from radians, so a 30-degree joint yaw
-     * sent as 30.0 reads back as 1719 degrees. The field was shipped this way once; the
-     * regression test pins the radians encoding.
+     * This replaces an encoding that sent flag 16 believing it meant "yaw in vehicle frame" — it
+     * is YAW_LOCK — with the joint yaw in `delta_yaw`. QGroundControl then took the gimbal for
+     * yaw-locked, aimed in compass terms, and DJI refused every resulting rotation as yaw out of
+     * range, pitch included.
+     *
+     * `delta_yaw` is radians, not degrees: a degrees value decodes cleanly and means the wrong
+     * thing, invisibly while the aircraft is still. The regression test pins the radians encoding.
      */
     fun gimbalDeviceAttitudeStatus(
         snapshot: MavlinkSnapshot,
@@ -556,10 +560,10 @@ object MavlinkMessages {
             .f32(Float.NaN)
             .f32(Float.NaN)
             .u32(0) // failure_flags: nothing wrong
-            .u16(GIMBAL_FLAGS_YAW_IN_VEHICLE_FRAME)
+            .u16(GIMBAL_DEVICE_ATTITUDE_FLAGS)
             .u8(0) // target_system: broadcast
             .u8(0) // target_component
-            .f32((snapshot.gimbalJointYawDeg * DEG_TO_RAD).toFloat()) // delta_yaw, radians per spec
+            .f32((GimbalManager.vehicleYawDeg(snapshot) * DEG_TO_RAD).toFloat()) // delta_yaw, radians per spec
             .f32(Float.NaN) // delta_yaw_velocity
             // 1, not 0: manager and device are the same component, and the gimbal v2 spec numbers
             // such a gimbal 1-6. With 0, QGC looks for a gimbal named after component 100 and
@@ -1099,8 +1103,11 @@ object MavlinkMessages {
     /** PARAM_EXT_SET / _VALUE / _ACK carry the value as a fixed 128-byte field. */
     private const val PARAM_EXT_VALUE_LENGTH = 128
 
-    /** GIMBAL_DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME: delta_yaw is relative to the aircraft. */
-    private const val GIMBAL_FLAGS_YAW_IN_VEHICLE_FRAME = 16
+    /**
+     * GIMBAL_DEVICE_FLAGS ROLL_LOCK (4) | PITCH_LOCK (8) | YAW_IN_EARTH_FRAME (64): stabilised to
+     * the horizon, yaw following the aircraft (no YAW_LOCK), quaternion in the earth frame.
+     */
+    private const val GIMBAL_DEVICE_ATTITUDE_FLAGS = 4 or 8 or 64
 
     /** GIMBAL_MANAGER_FLAGS_ROLL_LOCK / _PITCH_LOCK: stabilised to the horizon. */
     private const val GIMBAL_MANAGER_FLAGS_ROLL_LOCK = 4L

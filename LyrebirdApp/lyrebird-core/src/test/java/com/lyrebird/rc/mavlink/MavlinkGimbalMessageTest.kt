@@ -9,29 +9,38 @@ import java.nio.ByteOrder
  * GIMBAL_DEVICE_ATTITUDE_STATUS encoding, checked against the wire contract rather than a golden
  * blob.
  *
- * The one field this pins is `delta_yaw`, which the MAVLink definition specifies in radians.
- * Sending degrees there is invisible while the aircraft is still — the gimbal's yaw relative to
- * the body sits near zero, and a zero is a zero in either unit — and appears the moment the
- * aircraft moves and the gimbal compensates: a receiver converts the field from radians, so 30
- * degrees sent as 30.0 comes back as 1719 degrees and the two wires disagree in the MAVLink tab.
+ * Two things are pinned. `delta_yaw` is radians: degrees decode cleanly and mean the wrong thing,
+ * invisibly while the aircraft is still. And the frame: the quaternion is earth-frame, so the flags
+ * say YAW_IN_EARTH_FRAME and `delta_yaw` is the vehicle's yaw (world yaw minus joint yaw), from
+ * which a receiver recovers the joint yaw as quaternion yaw minus `delta_yaw`.
  */
 class MavlinkGimbalMessageTest {
+    private fun buffer(snapshot: MavlinkSnapshot) =
+        ByteBuffer
+            .wrap(MavlinkMessages.gimbalDeviceAttitudeStatus(snapshot, timeBootMs = 1234L))
+            .order(ByteOrder.LITTLE_ENDIAN)
+
     @Test
-    fun deltaYawIsEncodedInRadians() {
-        val payload =
-            MavlinkMessages.gimbalDeviceAttitudeStatus(
-                MavlinkSnapshot(gimbalJointYawDeg = 30.0),
-                timeBootMs = 1234L,
-            )
+    fun deltaYawIsTheVehicleYawInRadians() {
+        // Gimbal pointing at 120 degrees, turned 30 degrees right of the nose: the aircraft faces 90.
         // Base fields end at byte 40: time_boot_ms(u32), q(float[4]), angular rates(3*f32),
         // failure_flags(u32), flags(u16), target_system(u8), target_component(u8); delta_yaw is
         // the first extension field.
-        val deltaYaw = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN).getFloat(40)
-        assertEquals(
-            "delta_yaw is specified in radians, not degrees",
-            Math.PI / 6.0,
-            deltaYaw.toDouble(),
-            1e-6,
-        )
+        val deltaYaw = buffer(MavlinkSnapshot(gimbalYawDeg = 120.0, gimbalJointYawDeg = 30.0)).getFloat(40)
+        assertEquals("delta_yaw is the vehicle yaw, in radians", Math.PI / 2.0, deltaYaw.toDouble(), 1e-6)
+    }
+
+    @Test
+    fun deltaYawWrapsAcrossNorth() {
+        val deltaYaw = buffer(MavlinkSnapshot(gimbalYawDeg = -170.0, gimbalJointYawDeg = 20.0)).getFloat(40)
+        assertEquals(Math.toRadians(170.0), deltaYaw.toDouble(), 1e-6)
+    }
+
+    @Test
+    fun flagsSayEarthFrameAndNotYawLock() {
+        // flags(u16) sits at byte 36. 16 is YAW_LOCK, which was sent here once believing it meant
+        // "vehicle frame"; QGC then aimed in compass terms and every rotation was refused.
+        val flags = buffer(MavlinkSnapshot()).getShort(36).toInt()
+        assertEquals(4 or 8 or 64, flags)
     }
 }

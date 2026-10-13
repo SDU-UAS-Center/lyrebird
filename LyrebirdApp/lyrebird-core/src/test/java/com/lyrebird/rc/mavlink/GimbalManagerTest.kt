@@ -63,6 +63,34 @@ class GimbalManagerTest {
     }
 
     @Test
+    fun `a vehicle-frame yaw is passed through`() {
+        // QGC's sendPitchBodyYaw: ROLL_LOCK | PITCH_LOCK | YAW_IN_VEHICLE_FRAME.
+        val rotation = GimbalManager.rotationFor(-20f, 5f, Float.NaN, Float.NaN, flags = 44, vehicleYawDeg = -95.0)!!
+        assertEquals(5.0, rotation.yawDeg, 1e-6)
+    }
+
+    @Test
+    fun `an earth-frame yaw becomes relative to the aircraft`() {
+        // QGC's sendPitchAbsoluteYaw: a compass bearing of -95 with the aircraft facing -95 is
+        // straight ahead, not a 95-degree turn — which is what DJI refused on a Mini.
+        val rotation = GimbalManager.rotationFor(-20f, -95f, Float.NaN, Float.NaN, flags = 4 or 8 or 16 or 64, vehicleYawDeg = -95.0)!!
+        assertEquals(0.0, rotation.yawDeg, 1e-6)
+        assertEquals(-20.0, rotation.pitchDeg, 1e-6)
+    }
+
+    @Test
+    fun `legacy yaw lock without a frame flag means the earth frame`() {
+        val rotation = GimbalManager.rotationFor(0f, 170f, Float.NaN, Float.NaN, flags = 16, vehicleYawDeg = -170.0)!!
+        assertEquals(-20.0, rotation.yawDeg, 1e-6)
+    }
+
+    @Test
+    fun `the vehicle yaw is the gimbal's world yaw minus its joint yaw`() {
+        assertEquals(90.0, GimbalManager.vehicleYawDeg(MavlinkSnapshot(gimbalYawDeg = 120.0, gimbalJointYawDeg = 30.0)), 1e-9)
+        assertEquals(170.0, GimbalManager.vehicleYawDeg(MavlinkSnapshot(gimbalYawDeg = -170.0, gimbalJointYawDeg = 20.0)), 1e-9)
+    }
+
+    @Test
     fun `a rate becomes one relative step of half a second`() {
         // QGC's pitch buttons: angles NaN, 20 deg/s, repeated every 500 ms while held.
         val rotation = GimbalManager.rotationFor(Float.NaN, Float.NaN, -20f, 0f)!!

@@ -305,8 +305,23 @@ def _from_gimbal_attitude(telemetry: dict[str, Any], msg: Any) -> bool:
     telemetry["_gimbalQuaternion"] = quaternion
     delta_yaw = getattr(msg, "delta_yaw", None)
     if delta_yaw is not None and not math.isnan(delta_yaw):
-        telemetry["_gimbalJointYaw"] = math.degrees(delta_yaw)
+        if (getattr(msg, "flags", 0) or 0) & _GIMBAL_YAW_IN_EARTH_FRAME:
+            # As the spec defines it: delta_yaw is the vehicle's yaw, and the quaternion is in the
+            # earth frame, so the yaw relative to the aircraft is the difference.
+            telemetry["_gimbalJointYaw"] = _wrap_degrees(yaw - math.degrees(delta_yaw))
+        else:
+            # Aircraft builds before the earth-frame flag sent the joint yaw itself here.
+            telemetry["_gimbalJointYaw"] = math.degrees(delta_yaw)
     return True
+
+
+#: GIMBAL_DEVICE_FLAGS_YAW_IN_EARTH_FRAME.
+_GIMBAL_YAW_IN_EARTH_FRAME = 64
+
+
+def _wrap_degrees(angle: float) -> float:
+    """Wrap to [-180, 180)."""
+    return (angle + 180.0) % 360.0 - 180.0
 
 
 def _from_distance_sensor(telemetry: dict[str, Any], msg: Any) -> bool:

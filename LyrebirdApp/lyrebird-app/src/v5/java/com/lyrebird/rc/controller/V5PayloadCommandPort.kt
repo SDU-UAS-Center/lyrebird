@@ -87,12 +87,28 @@ internal class V5PayloadCommandPort(
     companion object {
         private const val VIDEO_SOURCE_LABEL = "drone"
         private const val GIMBAL_TAG = "LyrebirdGimbal"
+        private const val YAW_OUT_OF_RANGE = "YAW_OUT_OF_RANGE"
     }
 
     override fun rotateGimbal(rotation: GimbalRotation) {
         // Logged both ways: the rotation used to be fire-and-forget, so a gimbal that did not move
         // could not be told apart from a command that never arrived or one DJI refused.
         Log.i(GIMBAL_TAG, "rotate $rotation")
+        sendRotation(rotation) { error ->
+            // DJI refuses the whole rotation when only the yaw is out of range, so on a gimbal with
+            // little or no yaw (a Mini has none) any yaw a ground station sends would cost the
+            // pitch too. Retried once, yaw held, so the axes the gimbal does have still move.
+            if (!rotation.yawIgnored && error.errorCode().contains(YAW_OUT_OF_RANGE)) {
+                Log.i(GIMBAL_TAG, "yaw out of range; retrying with yaw held")
+                sendRotation(rotation.copy(yawIgnored = true)) {}
+            }
+        }
+    }
+
+    private fun sendRotation(
+        rotation: GimbalRotation,
+        onRefused: (IDJIError) -> Unit,
+    ) {
         host.gimbalKey.action(
             GimbalAngleRotation(
                 if (rotation.mode == GimbalRotationMode.ABSOLUTE) {
@@ -111,7 +127,10 @@ internal class V5PayloadCommandPort(
                 0,
             ),
             { Log.d(GIMBAL_TAG, "rotate accepted by DJI") },
-            { error: IDJIError -> Log.w(GIMBAL_TAG, "rotate refused by DJI: ${error.errorCode()} ${error.description()}") },
+            { error: IDJIError ->
+                Log.w(GIMBAL_TAG, "rotate refused by DJI: ${error.errorCode()} ${error.description()}")
+                onRefused(error)
+            },
         )
     }
 

@@ -27,19 +27,33 @@ object GimbalManager {
      * NaN means "unset" on this command. An angle wins over a rate, as on PX4. A NaN angle keeps
      * its axis where it is — passed through, it would reach DJI as a NaN target. With both angles
      * unset, the rates become one relative step; a zero rate (QGC's button release) moves nothing.
+     *
+     * DJI's absolute yaw is relative to the aircraft. A yaw sent in the earth frame ([flags] with
+     * YAW_IN_EARTH_FRAME, or the legacy YAW_LOCK without YAW_IN_VEHICLE_FRAME) is a compass
+     * bearing, so it is turned into an aircraft-relative angle with [vehicleYawDeg] first.
+     * Passed straight through, a bearing of -95 degrees reached a Mini as a 95-degree turn and
+     * DJI refused the whole rotation, pitch with it.
      */
     fun rotationFor(
         pitchDeg: Float,
         yawDeg: Float,
         pitchRateDegS: Float,
         yawRateDegS: Float,
+        flags: Int = 0,
+        vehicleYawDeg: Double = 0.0,
     ): GimbalRotation? {
         if (!pitchDeg.isNaN() || !yawDeg.isNaN()) {
+            val bodyYawDeg =
+                when {
+                    yawDeg.isNaN() -> 0.0
+                    isEarthFrame(flags) -> wrap180(yawDeg - vehicleYawDeg)
+                    else -> yawDeg.toDouble()
+                }
             return GimbalRotation(
                 mode = GimbalRotationMode.ABSOLUTE,
                 pitchDeg = if (pitchDeg.isNaN()) 0.0 else pitchDeg.toDouble(),
                 rollDeg = 0.0,
-                yawDeg = if (yawDeg.isNaN()) 0.0 else yawDeg.toDouble(),
+                yawDeg = bodyYawDeg,
                 pitchIgnored = pitchDeg.isNaN(),
                 rollIgnored = true,
                 yawIgnored = yawDeg.isNaN(),
@@ -59,7 +73,34 @@ object GimbalManager {
         )
     }
 
+    /** GIMBAL_MANAGER_FLAGS: YAW_LOCK 16, YAW_IN_VEHICLE_FRAME 32, YAW_IN_EARTH_FRAME 64. */
+    private fun isEarthFrame(flags: Int): Boolean =
+        (flags and FLAG_YAW_IN_EARTH_FRAME) != 0 ||
+            ((flags and FLAG_YAW_LOCK) != 0 && (flags and FLAG_YAW_IN_VEHICLE_FRAME) == 0)
+
+    private const val FLAG_YAW_LOCK = 16
+    private const val FLAG_YAW_IN_VEHICLE_FRAME = 32
+    private const val FLAG_YAW_IN_EARTH_FRAME = 64
+
     private fun stepFor(rateDegS: Float): Double = if (rateDegS.isNaN()) 0.0 else rateDegS * RATE_STEP_SECONDS
+
+    /**
+     * The aircraft's yaw as the gimbal sees it: world yaw minus joint yaw, wrapped to ±180.
+     *
+     * Sent as `delta_yaw`, and used to turn an earth-frame yaw target into the vehicle-relative
+     * angle DJI's absolute rotation takes. Taking it from the gimbal's own two angles rather than
+     * the aircraft attitude keeps the round trip exact: quaternion yaw minus this is DJI's joint
+     * yaw to the last bit.
+     */
+    fun vehicleYawDeg(snapshot: MavlinkSnapshot): Double = wrap180(snapshot.gimbalYawDeg - snapshot.gimbalJointYawDeg)
+
+    internal fun wrap180(degrees: Double): Double {
+        val wrapped = ((degrees + HALF_TURN) % FULL_TURN + FULL_TURN) % FULL_TURN - HALF_TURN
+        return wrapped
+    }
+
+    private const val HALF_TURN = 180.0
+    private const val FULL_TURN = 360.0
 }
 
 /**
