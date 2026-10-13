@@ -315,14 +315,39 @@ def _apply_discovered_ip(name, found):
     return old_ip
 
 
+def _rename_drone(old_name, new_name):
+    """Move a drone renamed on the aircraft to its new name. Call with the lock held.
+
+    The aircraft's name is also its stream path: renaming it republishes the video under the new
+    name, so an entry that kept the first name it was discovered under played a stream that no
+    longer existed. Names fixed by DRONE_NAMES are configuration, not discovery, and stay.
+    """
+    if old_name == new_name or old_name in DRONE_NAMES or new_name in drones:
+        return old_name
+    drone = drones.pop(old_name)
+    drone["name"] = new_name
+    drone["streamName"] = new_name
+    drones[new_name] = drone
+    return new_name
+
+
 def upsert_discovered(found):
+    renamed_from = None
     with lock:
         name = _existing_drone_name(found)
         if name is None:
             if _ignore_unconfigured_discovery(found):
                 return
             name = found["name"]
+        elif name != found["name"]:
+            new_name = _rename_drone(name, found["name"])
+            if new_name != name:
+                renamed_from, name = name, new_name
         old_ip = _apply_discovered_ip(name, found)
+    if renamed_from:
+        log_event("drone_renamed", drone=name, previousName=renamed_from, ip=found["ip"])
+        # The telemetry thread is keyed by name; restart it under the new one.
+        stop_telemetry(renamed_from)
     if old_ip != found["ip"]:
         log_event(
             "drone_discovered",
@@ -565,6 +590,20 @@ def _mark_telemetry_disconnected(name, ip):
 
 
 def telemetry_loop(name, stop_event):
+    try:
+        _telemetry_loop(name, stop_event)
+    except KeyError:
+        # Renamed while this thread ran (see _rename_drone): its entry moved to the new name and
+        # a successor thread serves it there. Any other missing key is still a bug.
+        with lock:
+            renamed_away = name not in drones
+            if renamed_away:
+                telemetry_threads.pop(name, None)
+        if not renamed_away:
+            raise
+
+
+def _telemetry_loop(name, stop_event):
     while not stop_event.is_set():
         with lock:
             drone = drones[name]

@@ -18,6 +18,8 @@ internal class V5SettingsNativeStreamingHost(
     private val onStatus: (String) -> Unit,
     private val onMessage: (String) -> Unit,
     private val onConfigChanged: () -> Unit,
+    /** The aircraft serial, from which an unnamed aircraft's name is derived. */
+    private val serialProvider: () -> String = { LyrebirdSettings.UNKNOWN_SERIAL },
 ) : V5NativeStreamingHost {
     private val settings = LyrebirdSettings(preferences)
 
@@ -70,13 +72,11 @@ internal class V5SettingsNativeStreamingHost(
 
     override fun onConfigChanged() = onConfigChanged.invoke()
 
-    /** The name the aircraft publishes under, from the same preference the settings screen writes. */
-    private fun droneName(): String =
-        preferences
-            .getString(LyrebirdSettings.PREF_DRONE_NAME, LyrebirdSettings.DEFAULT_DRONE_NAME)
-            ?.trim()
-            .orEmpty()
-            .ifEmpty { LyrebirdSettings.DEFAULT_DRONE_NAME }
+    /**
+     * The name the aircraft publishes under, by the one rule every surface uses: the operator's
+     * name, or the serial-derived one. Reading the raw preference skipped the derivation.
+     */
+    private fun droneName(): String = settings.droneName(serialProvider())
 
     private companion object {
         val FALLBACK_RTSP_PORTS = intArrayOf(18554, 28554, 38554)

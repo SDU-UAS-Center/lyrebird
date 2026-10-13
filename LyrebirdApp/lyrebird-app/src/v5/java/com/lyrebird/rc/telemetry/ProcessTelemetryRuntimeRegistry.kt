@@ -80,12 +80,12 @@ internal object ProcessTelemetryRuntimeRegistry : TelemetryFeed {
             val listener =
                 SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                     if (key == LyrebirdSettings.PREF_DRONE_NAME || key == LyrebirdSettings.PREF_STREAMING_MODE) {
-                        applyProcessPublishedSettings()
+                        refreshPublishedSettings()
                     }
                 }
             namePrefListener = listener
             preferences?.registerOnSharedPreferenceChangeListener(listener)
-            applyProcessPublishedSettings()
+            refreshPublishedSettings()
         }
         if (!serialListenerStarted) {
             serialListenerStarted = true
@@ -163,7 +163,7 @@ internal object ProcessTelemetryRuntimeRegistry : TelemetryFeed {
         if (preferences?.let { prefs -> LyrebirdSettings(prefs).applyAutomaticDroneName(aircraftSerial) } != null) {
             ProcessCommandSurface.onDroneNameChanged()
         }
-        applyProcessPublishedSettings()
+        refreshPublishedSettings()
         runCatching { ControlAuthority.restoreLatch() }
     }
 
@@ -177,7 +177,7 @@ internal object ProcessTelemetryRuntimeRegistry : TelemetryFeed {
      * reason: it is part of the frame, and it has to be right with no screen open - a ground
      * station reading the frame and GET /config must not be told two different video paths.
      */
-    private fun applyProcessPublishedSettings() {
+    internal fun refreshPublishedSettings() {
         val prefs = preferences ?: return
         val settings = LyrebirdSettings(prefs)
         val name = settings.droneName(aircraftSerial)

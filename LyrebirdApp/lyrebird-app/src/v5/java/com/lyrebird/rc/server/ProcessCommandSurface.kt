@@ -18,7 +18,6 @@ import com.lyrebird.rc.controller.DroneController
 import com.lyrebird.rc.controller.V5MediaPort
 import com.lyrebird.rc.edge.ProcessDetectionRuntimeRegistry
 import com.lyrebird.rc.edge.V5DetectionPort
-import com.lyrebird.rc.logger.LyrebirdFlightLogger
 import com.lyrebird.rc.mavlink.MavlinkEndpointConfig
 import com.lyrebird.rc.mavlink.MavlinkSystemId
 import com.lyrebird.rc.settings.DetectionSource
@@ -116,7 +115,21 @@ internal object ProcessCommandSurface : LyrebirdCommandHost {
      * re-read it, the same way a settings command does.
      */
     internal fun onDroneNameChanged() {
+        // Everything that publishes the name re-reads it here, whichever path renamed the aircraft
+        // (settings, HTTP, MAVLink, the start screen, or the serial arriving for an unnamed one).
+        // The telemetry frame and flight log hold a copy; the name is also the WHIP path, so
+        // publishing restarts under it — otherwise the video stays under the old name while
+        // discovery, telemetry and the RTSP URL given to QGroundControl move to the new one.
+        ProcessTelemetryRuntimeRegistry.refreshPublishedSettings()
+        ProcessStreamingRuntimeRegistry.restartActiveStreaming()
         notifyStateChanged()
+    }
+
+    /** Hand the name back to the serial-derived default; applied now if the serial is known. */
+    fun setAutomaticDroneName() {
+        preferences.edit().putBoolean(LyrebirdSettings.PREF_DRONE_NAME_USER_SET, false).apply()
+        settings.applyAutomaticDroneName(ProcessTelemetryRuntimeRegistry.droneSerial)
+        onDroneNameChanged()
     }
 
     // ── Answered from shared state ─────────────────────────────────────────────
@@ -148,10 +161,8 @@ internal object ProcessCommandSurface : LyrebirdCommandHost {
 
     override fun setDroneName(name: String): Boolean {
         if (!settings.setDroneName(name)) return false
-        val trimmed = name.trim()
-        LyrebirdFlightLogger.setDroneName(trimmed)
-        Log.i(TAG, "Drone name set to: $trimmed")
-        notifyStateChanged()
+        Log.i(TAG, "Drone name set to: ${name.trim()}")
+        onDroneNameChanged()
         return true
     }
 

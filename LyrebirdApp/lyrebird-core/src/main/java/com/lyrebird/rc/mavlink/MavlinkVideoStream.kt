@@ -27,18 +27,28 @@ data class MavlinkVideoStream(
          * `http://gs:8889/RedScout/whip` becomes `rtsp://gs:8554/RedScout`. Returns null when the
          * WHIP URL is missing or malformed, in which case nothing is advertised — better than
          * pointing a ground station at a stream that is not there.
+         *
+         * The path comes from the WHIP URL too, not from [droneName]: MediaMTX names the stream
+         * after the path it was published to, and the ground station that chose that URL may
+         * know the aircraft by another name than the one stored on it. Advertising [droneName]
+         * pointed QGroundControl at `lb_<serial>` while the video sat under the dashboard's name.
+         * [droneName] is only the fallback for a WHIP URL with no path.
          */
         fun fromWhipUrl(
             whipUrl: String?,
             droneName: String,
             rtspPort: Int = DEFAULT_RTSP_PORT,
         ): MavlinkVideoStream? {
-            val host =
-                whipUrl
-                    ?.let {
-                        runCatching { java.net.URI(it).host }.getOrNull()
-                    }?.takeIf { it.isNotBlank() } ?: return null
-            val path = droneName.ifBlank { "drone" }
+            val uri = whipUrl?.let { runCatching { java.net.URI(it) }.getOrNull() } ?: return null
+            val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
+            val path =
+                uri.path
+                    .orEmpty()
+                    .split('/')
+                    .filter { it.isNotEmpty() }
+                    .let { segments -> if (segments.lastOrNull() == "whip") segments.dropLast(1) else segments }
+                    .joinToString("/")
+                    .ifBlank { droneName.ifBlank { "drone" } }
             return MavlinkVideoStream(
                 uri = "rtsp://$host:$rtspPort/$path",
                 name = path,

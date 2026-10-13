@@ -55,6 +55,7 @@ import dji.v5.utils.common.StringUtils
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.addTo
+import com.lyrebird.rc.server.ProcessCommandSurface
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -182,9 +183,7 @@ abstract class DJIMainActivity : AppCompatActivity() {
 
     protected fun updateLyrebirdBuildInfo() {
         val preferences = getSharedPreferences(LYREBIRD_PREFS_NAME, MODE_PRIVATE)
-        val droneName = preferences.getString(LYREBIRD_PREF_DRONE_NAME, LYREBIRD_DEFAULT_DRONE_NAME)
-            ?.takeIf { it.isNotBlank() }
-            ?: LYREBIRD_DEFAULT_DRONE_NAME
+        val droneName = ProcessCommandSurface.droneName
         val configuredSystemId = preferences.getInt(
             MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
         )
@@ -354,8 +353,7 @@ abstract class DJIMainActivity : AppCompatActivity() {
         raw?.trim('"')?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
 
     private fun promptDroneIdentity(preferences: SharedPreferences) {
-        val currentName = preferences.getString(LYREBIRD_PREF_DRONE_NAME, LYREBIRD_DEFAULT_DRONE_NAME)
-            ?: LYREBIRD_DEFAULT_DRONE_NAME
+        val currentName = ProcessCommandSurface.droneName
         val currentSysId = preferences.getInt(
             MavlinkEndpointConfig.PREF_SYSTEM_ID, MavlinkEndpointConfig.DEFAULT_SYSTEM_ID
         )
@@ -366,8 +364,14 @@ abstract class DJIMainActivity : AppCompatActivity() {
             currentName,
             currentSysId,
             onSave = { name, sysId ->
+                // Through the one rename path, as the settings page does: the name is marked as the
+                // operator's (it was written as a bare preference here, so the serial-derived name
+                // replaced it as soon as the aircraft connected), and everything publishing it follows.
+                // An empty field hands the name back to the automatic one, also as the settings page does.
                 if (name != null) {
-                    preferences.edit().putString(LYREBIRD_PREF_DRONE_NAME, name).apply()
+                    ProcessCommandSurface.setDroneName(name)
+                } else {
+                    ProcessCommandSurface.setAutomaticDroneName()
                 }
                 preferences.edit().putInt(MavlinkEndpointConfig.PREF_SYSTEM_ID, sysId).apply()
                 updateLyrebirdBuildInfo()
@@ -785,5 +789,3 @@ abstract class DJIMainActivity : AppCompatActivity() {
 }
 
 private const val LYREBIRD_PREFS_NAME = "LyrebirdPrefs"
-private const val LYREBIRD_PREF_DRONE_NAME = "drone_name"
-private const val LYREBIRD_DEFAULT_DRONE_NAME = "drone_1"

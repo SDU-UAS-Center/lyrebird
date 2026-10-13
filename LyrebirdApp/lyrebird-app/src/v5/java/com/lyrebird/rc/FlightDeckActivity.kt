@@ -92,7 +92,6 @@ import com.lyrebird.rc.util.ToastUtils
 import com.lyrebird.rc.webrtc.TelemetryProvider
 import com.lyrebird.rc.webrtc.WebRTCStreamMetrics
 import com.lyrebird.rc.webrtc.WebRTCStreamer
-import com.lyrebird.rc.webrtc.WhipEndpoint
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.key.FlightControllerKey
@@ -340,7 +339,14 @@ class FlightDeckActivity :
         )
     }
 
-    var droneName: String = LyrebirdSettings.DEFAULT_DRONE_NAME
+    /**
+     * The name this aircraft answers to — read through, never held.
+     *
+     * The screen used to keep its own copy, and discovery read it. When the process applied the
+     * serial-derived name first, the screen's own update found nothing to change and kept the old
+     * name: discovery and the WHIP path said one name, telemetry and MAVLink another.
+     */
+    val droneName: String get() = ProcessCommandSurface.droneName
 
     private val deviceStatusSource get() = ProcessTelemetryRuntimeRegistry.deviceStatusSource()
 
@@ -1068,10 +1074,7 @@ class FlightDeckActivity :
     // a ground station asking for the hottest point or the last laser fix must not need the
     // screen that draws them (see ProcessPayloadCommands.readThermalMaxTempNow / readLrfMeasurement).
 
-    private fun setAutomaticDroneName() {
-        sharedPreferences.edit().putBoolean(LyrebirdSettings.PREF_DRONE_NAME_USER_SET, false).apply()
-        applyAutomaticDroneName()
-    }
+    private fun setAutomaticDroneName() = ProcessCommandSurface.setAutomaticDroneName()
 
     /** The pref and its endpoint restart live in the process surface; this keeps the caller's API. */
     fun setMavlinkSystemId(value: Int): Boolean = ProcessCommandSurface.setMavlinkSystemId(value)
@@ -1942,44 +1945,15 @@ class FlightDeckActivity :
     }
 
     /**
-     * Resolve the name this aircraft answers to, and show it.
+     * Show the name this aircraft answers to.
      *
-     * The serial is not known yet when this runs at startup, and the rule used to be applied
-     * anyway: an automatically named device resolved "UNKNOWN" into `lb_unknown`, wrote that over
-     * its own name and published it — in the bottom bar, in discovery, in telemetry and on the
-     * dashboard — until the serial arrived seconds later and [applyAutomaticDroneName] renamed it.
-     * The name is an address; a placeholder that looks like one is worse than no name, so while the
-     * serial is unknown the last known name stands and nothing is written.
+     * The process owns the name (ProcessCommandSurface, LyrebirdSettings.droneName): this screen
+     * used to resolve and write it as well, by a rule of its own, and the two copies drifted.
      */
     private fun loadDroneName() {
-        val storedName = sharedPreferences.getString(LyrebirdSettings.PREF_DRONE_NAME, "")?.trim().orEmpty()
-        val explicit = sharedPreferences.getBoolean(LyrebirdSettings.PREF_DRONE_NAME_USER_SET, false)
-        val serialKnown = droneSerialNumber.isNotBlank() && droneSerialNumber != LyrebirdSettings.UNKNOWN_SERIAL
-        // The same rule the process uses when no screen is involved (LyrebirdSettings.droneName):
-        // the operator's name when they set one, the serial-derived one otherwise.
-        droneName =
-            when {
-                explicit && storedName.isNotEmpty() -> storedName
-                serialKnown -> LyrebirdSettings.deriveDroneName(droneSerialNumber)
-                storedName.isNotEmpty() -> storedName
-                else -> LyrebirdSettings.DEFAULT_DRONE_NAME
-            }
-        if (explicit || serialKnown || storedName.isNotEmpty()) {
-            sharedPreferences
-                .edit()
-                .putString(LyrebirdSettings.PREF_DRONE_NAME, droneName)
-                .putBoolean(LyrebirdSettings.PREF_DRONE_NAME_USER_SET, explicit)
-                .apply()
-        }
-        Log.i(TAG, "Loaded ${if (explicit) "user" else "automatic"} drone name: $droneName")
-        // Whoever names the aircraft also shows it: a caller that forgot used to leave the bottom
-        // bar printing the layout's own placeholder while the rest of the app used the real name.
-        // The process applies the name to the telemetry frame and the flight log from the
-        // preference write above (see ProcessTelemetryRuntimeRegistry).
+        Log.i(TAG, "Drone name: $droneName")
         updateDroneNameDisplay()
     }
-
-    private fun defaultDroneName(): String = LyrebirdSettings.deriveDroneName(droneSerialNumber)
 
     /**
      * Take the serial-derived name once the serial is known.
@@ -1989,8 +1963,9 @@ class FlightDeckActivity :
      * bar of a screen that is open.
      */
     private fun applyAutomaticDroneName() {
-        val applied = LyrebirdSettings(sharedPreferences).applyAutomaticDroneName(droneSerialNumber) ?: return
-        droneName = applied
+        if (LyrebirdSettings(sharedPreferences).applyAutomaticDroneName(droneSerialNumber) != null) {
+            ProcessCommandSurface.onDroneNameChanged()
+        }
         mainHandler.post { updateDroneNameDisplay() }
     }
 
@@ -2109,13 +2084,6 @@ class FlightDeckActivity :
                 },
             )
     }
-
-    private fun buildWhipUrl(clientIp: String): String =
-        WhipEndpoint.url(
-            clientIp = clientIp,
-            droneName = droneName,
-            configuredServer = settings.getMediamtxServer(),
-        )
 
     private fun startLocationUpdates() {
         if (!deviceStatusSource.startLocationUpdates()) {

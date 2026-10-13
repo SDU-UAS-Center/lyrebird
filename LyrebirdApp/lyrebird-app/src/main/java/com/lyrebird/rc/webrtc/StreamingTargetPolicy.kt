@@ -15,14 +15,24 @@ internal data class StreamingTargetDecision(
 internal enum class PublisherState { NONE, STARTING, PUBLISHING }
 
 internal object StreamingTargetPolicy {
+    /**
+     * [desiredWhipUrl] is where a publish for [clientIp] would go now. When it differs from
+     * [previousWhipUrl] the drone was renamed (the name is the URL path), and keeping the healthy
+     * publisher would leave the video under the old name while everything else moved to the new
+     * one. Null means "no opinion", for callers that do not build a WHIP URL.
+     */
     fun decide(
         previousClientIp: String?,
         previousWhipUrl: String?,
         publisherState: PublisherState,
         clientIp: String,
+        desiredWhipUrl: String? = null,
     ): StreamingTargetDecision =
         when {
-            previousClientIp == clientIp && previousWhipUrl != null && publisherState != PublisherState.NONE ->
+            previousClientIp == clientIp &&
+                previousWhipUrl != null &&
+                publisherState != PublisherState.NONE &&
+                (desiredWhipUrl == null || desiredWhipUrl == previousWhipUrl) ->
                 StreamingTargetDecision(false, clientIp)
             previousClientIp != null && previousClientIp != clientIp && publisherState == PublisherState.PUBLISHING ->
                 StreamingTargetDecision(false, previousClientIp)
