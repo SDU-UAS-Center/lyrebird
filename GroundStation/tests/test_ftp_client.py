@@ -6,7 +6,7 @@ import time
 import pytest
 from lyrebird_groundstation.ftp_client import (
     AIRCRAFT_COMPONENT_ID,
-    AIRCRAFT_SYSTEM_ID,
+    DEFAULT_TARGET_SYSTEM,
     ERR_EOF,
     ERR_FILE_NOT_FOUND,
     FTP_HEADER_BYTES,
@@ -35,11 +35,15 @@ class _Sink:
         self.buf += data
 
 
+#: Any configured id; the client must not depend on it.
+_AIRCRAFT_SYSID = 7
+
+
 def _frame_ftp(payload):
-    """A FILE_TRANSFER_PROTOCOL frame as the aircraft would send it (sysid 127, compid 1)."""
+    """A FILE_TRANSFER_PROTOCOL frame as the aircraft would send it (sysid 7, compid 1)."""
     sink = _Sink()
     mavlink_common.MAVLink(
-        sink, srcSystem=AIRCRAFT_SYSTEM_ID, srcComponent=AIRCRAFT_COMPONENT_ID
+        sink, srcSystem=_AIRCRAFT_SYSID, srcComponent=AIRCRAFT_COMPONENT_ID
     ).file_transfer_protocol_send(0, 255, 190, payload)
     return sink.buf
 
@@ -142,12 +146,20 @@ def test_an_ack_reply_parses_from_an_aircraft_frame():
     assert int.from_bytes(reply.data[:4], "little") == 100
 
 
+def test_an_explicit_target_system_is_used_as_given():
+    client = _client([_ftp_ack(2, 0, OP_RESET_SESSIONS, 0, 0)], target_system=_AIRCRAFT_SYSID)
+    client.reset_sessions()
+    assert _decode(client._socket.sent[0][0]).target_system == _AIRCRAFT_SYSID
+    client.close()
+
+
 def test_sent_frames_target_the_aircraft_and_claim_a_gcs_identity():
     client = _client([_ftp_ack(2, 0, OP_RESET_SESSIONS, 0, 0)])
     client.reset_sessions()
     msg = _decode(client._socket.sent[0][0])
     assert msg.get_type() == "FILE_TRANSFER_PROTOCOL"
-    assert msg.target_system == AIRCRAFT_SYSTEM_ID
+    # Broadcast system id: the aircraft's id is configurable and it drops frames for any other.
+    assert msg.target_system == DEFAULT_TARGET_SYSTEM == 0
     assert msg.target_component == AIRCRAFT_COMPONENT_ID
     assert msg.get_srcSystem() == 255
     assert msg.get_srcComponent() == 190

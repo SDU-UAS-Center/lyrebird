@@ -54,8 +54,13 @@ ERR_EOF = 6
 ERR_UNKNOWN_COMMAND = 7
 ERR_FILE_NOT_FOUND = 10
 
-#: The aircraft answers FTP from its MAVLink endpoint: system id 127, autopilot component 1.
-AIRCRAFT_SYSTEM_ID = 127
+#: Requests go to MAVLink's broadcast system id (0) by default. The aircraft's own id is
+#: configurable (LB_MAV_SYSID, or derived automatically), and it drops frames addressed to any
+#: other system, so a fixed id here silently timed out against every aircraft not using it.
+#: Broadcast is safe because the datagram is unicast to one aircraft's address anyway; pass
+#: target_system to name one explicitly.
+DEFAULT_TARGET_SYSTEM = 0
+#: The aircraft answers FTP from its autopilot component.
 AIRCRAFT_COMPONENT_ID = 1
 
 #: How long to keep resending a request before giving up, and how often to resend.
@@ -164,7 +169,7 @@ class MavlinkFtpClient:
         self,
         host: str,
         port: int = DEFAULT_MAVLINK_PORT,
-        target_system: int = AIRCRAFT_SYSTEM_ID,
+        target_system: int = DEFAULT_TARGET_SYSTEM,
         target_component: int = AIRCRAFT_COMPONENT_ID,
         src_system: int = 255,
         src_component: int = 190,
