@@ -123,6 +123,11 @@ def _parse_reply(payload: bytes) -> FtpReply | None:
     )
 
 
+def _reply_seq(request_seq: int) -> int:
+    """The seq a reply to [request_seq] carries: one more, wrapping at 16 bits."""
+    return (request_seq + 1) & 0xFFFF
+
+
 def _request_payload(
     seq: int,
     session: int,
@@ -316,7 +321,8 @@ class MavlinkFtpClient:
         once and waited out, so a lost final reply cannot trigger duplicate work.
 
         Replies are matched on the exact seq, so a stale reply from an earlier timed-out request
-        can never satisfy a newer one — the aircraft echoes the request's seq back.
+        can never satisfy a newer one. Per the MAVLink FTP spec (and PX4, and QGroundControl) a
+        reply carries the request's seq plus one.
         """
         seq = self._next_seq()
         payload = _request_payload(seq, session, opcode, size, offset, data)
@@ -329,11 +335,11 @@ class MavlinkFtpClient:
                 self._send(payload)
                 last_send = now
             if not resend:
-                reply = self._await(seq, max(0.0, deadline - time.time()))
+                reply = self._await(_reply_seq(seq), max(0.0, deadline - time.time()))
                 if reply is None:
                     raise FtpTimeoutError(f"no FTP reply for opcode {opcode} seq {seq}")
                 return reply
-            reply = self._await(seq, min(RESEND_INTERVAL, deadline - now))
+            reply = self._await(_reply_seq(seq), min(RESEND_INTERVAL, deadline - now))
             if reply is not None:
                 return reply
             if time.time() >= deadline:

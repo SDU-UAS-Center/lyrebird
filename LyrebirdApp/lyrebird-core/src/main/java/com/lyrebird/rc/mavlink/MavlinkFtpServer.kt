@@ -39,6 +39,11 @@ class MavlinkFtpServer(
         val size: Long,
     )
 
+    private companion object {
+        /** PX4 names its virtual files with a leading '@'; camera DCF names never start with one. */
+        const val VIRTUAL_PATH_PREFIX = "@"
+    }
+
     private val sessions = ConcurrentHashMap<Int, Session>()
     private val nextSession = AtomicInteger(1)
 
@@ -84,7 +89,16 @@ class MavlinkFtpServer(
 
             MavlinkFtp.OP_LIST_DIRECTORY -> executor.execute { reply(buildListing(request)) }
 
-            MavlinkFtp.OP_OPEN_FILE_RO -> executor.execute { reply(openFile(request)) }
+            MavlinkFtp.OP_OPEN_FILE_RO ->
+                if (request.text().startsWith(VIRTUAL_PATH_PREFIX)) {
+                    // PX4's virtual files (@PARAM/param.pck and friends) do not exist here, and
+                    // asking the camera for one took ~30 s to fail. QGC 5.2 opens @PARAM on every
+                    // connect and waits on it before falling back to the parameter list, so the
+                    // answer has to be immediate.
+                    reply(MavlinkFtp.nak(request.seq, 0, request.opcode, MavlinkFtp.ERR_FILE_NOT_FOUND))
+                } else {
+                    executor.execute { reply(openFile(request)) }
+                }
 
             MavlinkFtp.OP_READ_FILE -> reply(readFile(request))
 
