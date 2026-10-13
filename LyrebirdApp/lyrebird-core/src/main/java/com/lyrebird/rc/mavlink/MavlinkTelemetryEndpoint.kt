@@ -271,6 +271,9 @@ class MavlinkTelemetryEndpoint(
      * a UDP link as soon as it receives traffic, so this mostly matters for the reverse case: a
      * GCS that heartbeats at us before we know its address.
      */
+    @Volatile
+    private var loggedMavlink1 = false
+
     private fun receiveLoop(bound: DatagramSocket) {
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
         while (running && !bound.isClosed) {
@@ -286,6 +289,12 @@ class MavlinkTelemetryEndpoint(
                     false
                 }
             if (!received) break
+            if (packet.length > 0 && buffer[0] == MAVLINK1_MAGIC && !loggedMavlink1) {
+                // Dropped below like any non-MAVLink-2 frame, but said once: a ground station
+                // that fell back to MAVLink 1 otherwise looks exactly like one that went quiet.
+                loggedMavlink1 = true
+                Log.w(TAG, "Ignoring MAVLink 1 frames from ${packet.address.hostAddress}:${packet.port}; only MAVLink 2 is read")
+            }
             if (packet.length > 0 && buffer[0] == MavlinkFramer.MAGIC_V2) {
                 // Who is speaking, before anything they said is acted on. A signature that is
                 // present but wrong is dropped rather than downgraded to an unsigned frame: an
@@ -1293,6 +1302,11 @@ class MavlinkTelemetryEndpoint(
                 Mav.RESULT_ACCEPTED
             }
 
+            messageId == MavlinkMsgId.PROTOCOL_VERSION -> {
+                sendOnce(MavlinkMsgId.PROTOCOL_VERSION, MavlinkMessages.protocolVersion())
+                Mav.RESULT_ACCEPTED
+            }
+
             messageId == MavlinkMsgId.HOME_POSITION -> {
                 val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
                 if (snapshot.homeCoordinatesValid) {
@@ -1591,6 +1605,9 @@ class MavlinkTelemetryEndpoint(
         private const val MICROS_PER_MILLI = 1_000L
         private const val JOIN_TIMEOUT_MS = 1_000L
         private const val RECEIVE_BUFFER_BYTES = 512
+
+        /** MAVLink 1 start-of-frame marker; MAVLink 2 uses 0xFD. */
+        private const val MAVLINK1_MAGIC: Byte = 0xFE.toByte()
         private const val BROADCAST_ADDRESS = "255.255.255.255"
 
         private const val HEARTBEAT_INTERVAL_MS = 1_000L

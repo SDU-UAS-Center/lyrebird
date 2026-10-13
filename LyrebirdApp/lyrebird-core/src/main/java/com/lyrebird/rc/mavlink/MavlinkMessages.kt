@@ -284,6 +284,22 @@ object MavlinkMessages {
             .zeros(CUSTOM_VERSION_BYTES * 2)
             .build()
 
+    /**
+     * version(u16), min_version(u16), max_version(u16), spec_version_hash(u8[8]),
+     * library_version_hash(u8[8])
+     *
+     * All three versions are 2.0, unlike PX4's min_version of 1.0: the endpoint only parses
+     * MAVLink 2 frames, so advertising MAVLink 1 support would invite a ground station to use it.
+     * The hashes are left zero; they identify a mavlink library build this code does not have.
+     */
+    fun protocolVersion(): ByteArray =
+        PayloadWriter()
+            .u16(MAVLINK2_VERSION)
+            .u16(MAVLINK2_VERSION)
+            .u16(MAVLINK2_VERSION)
+            .zeros(VERSION_HASH_BYTES * 2)
+            .build()
+
     /** severity(u8), text(char[50]) */
     fun statusText(
         severity: Int,
@@ -1021,6 +1037,10 @@ object MavlinkMessages {
     private const val VOLTAGE_CELLS = 10
     private const val QUATERNION_LENGTH = 4
     private const val CUSTOM_VERSION_BYTES = 8
+
+    /** MAVLink version numbers are the version times 100: 2.0 is 200. */
+    private const val MAVLINK2_VERSION = 200
+    private const val VERSION_HASH_BYTES = 8
 
     /**
      * PX4 release encoding: (major << 24) | (minor << 16) | (patch << 8) | type, with 0xFF the

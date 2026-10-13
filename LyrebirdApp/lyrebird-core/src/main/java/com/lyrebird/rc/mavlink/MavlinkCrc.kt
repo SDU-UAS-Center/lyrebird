@@ -66,6 +66,8 @@ object MavlinkCrc {
             MavlinkMsgId.AUTOSENSING_STATUS to 254,
             MavlinkMsgId.AUTOSENSING_TARGET to 83,
             MavlinkMsgId.PARAM_REQUEST_LIST to 159,
+            // Sent on request; keeps QGroundControl 5.0 from falling back to MAVLink 1.
+            MavlinkMsgId.PROTOCOL_VERSION to 217,
             MavlinkMsgId.MISSION_REQUEST_LIST to 132,
         )
 

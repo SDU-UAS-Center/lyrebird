@@ -55,6 +55,14 @@ object MavlinkMsgId {
     const val EXTENDED_SYS_STATE = 245
     const val BATTERY_STATUS = 147
     const val AUTOPILOT_VERSION = 148
+
+    /**
+     * Answered on request so a ground station keeps talking MAVLink 2. QGroundControl 5.0
+     * requests it on connect and, when the vehicle cannot report it, assumes MAVLink 1 and
+     * switches its framing — which this endpoint does not read, so every request after that
+     * went unanswered.
+     */
+    const val PROTOCOL_VERSION = 300
     const val HOME_POSITION = 242
     const val STATUSTEXT = 253
 
