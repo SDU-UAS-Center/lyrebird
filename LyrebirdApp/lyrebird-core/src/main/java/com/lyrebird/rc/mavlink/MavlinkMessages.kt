@@ -561,9 +561,54 @@ object MavlinkMessages {
             .u8(0) // target_component
             .f32((snapshot.gimbalJointYawDeg * DEG_TO_RAD).toFloat()) // delta_yaw, radians per spec
             .f32(Float.NaN) // delta_yaw_velocity
-            .u8(GIMBAL_DEVICE_ID)
+            // 1, not 0: manager and device are the same component, and the gimbal v2 spec numbers
+            // such a gimbal 1-6. With 0, QGC looks for a gimbal named after component 100 and
+            // finds none, so the attitude never pairs with the manager and no gimbal appears.
+            .u8(GimbalManager.DEVICE_ID)
             .build()
     }
+
+    /**
+     * time_boot_ms(u32), cap_flags(u32), roll_min, roll_max, pitch_min, pitch_max, yaw_min,
+     * yaw_max (f32, radians), gimbal_device_id(u8)
+     *
+     * Sent on request from the camera component, which manages gimbal [GimbalManager.DEVICE_ID].
+     * The limits are the common DJI range rather than a per-model table: pitch from straight down
+     * to slightly above the horizon, yaw a full turn. A model with less (a Mini cannot yaw) simply
+     * does not move on that axis, as it already does for HTTP gimbal commands.
+     */
+    fun gimbalManagerInformation(timeBootMs: Long): ByteArray =
+        PayloadWriter()
+            .u32(timeBootMs)
+            .u32(GIMBAL_MANAGER_CAPABILITIES)
+            .f32(0f) // roll_min: roll is not commandable
+            .f32(0f) // roll_max
+            .f32((GIMBAL_PITCH_MIN_DEG * DEG_TO_RAD).toFloat())
+            .f32((GIMBAL_PITCH_MAX_DEG * DEG_TO_RAD).toFloat())
+            .f32((-GIMBAL_YAW_RANGE_DEG * DEG_TO_RAD).toFloat())
+            .f32((GIMBAL_YAW_RANGE_DEG * DEG_TO_RAD).toFloat())
+            .u8(GimbalManager.DEVICE_ID)
+            .build()
+
+    /**
+     * time_boot_ms(u32), flags(u32), gimbal_device_id(u8), primary_control_sysid(u8),
+     * primary_control_compid(u8), secondary_control_sysid(u8), secondary_control_compid(u8)
+     *
+     * Roll and pitch are reported locked to the horizon, which is how DJI stabilises them.
+     */
+    fun gimbalManagerStatus(
+        control: GimbalControl,
+        timeBootMs: Long,
+    ): ByteArray =
+        PayloadWriter()
+            .u32(timeBootMs)
+            .u32(GIMBAL_MANAGER_FLAGS_ROLL_LOCK or GIMBAL_MANAGER_FLAGS_PITCH_LOCK)
+            .u8(GimbalManager.DEVICE_ID)
+            .u8(control.primarySystem)
+            .u8(control.primaryComponent)
+            .u8(control.secondarySystem)
+            .u8(control.secondaryComponent)
+            .build()
 
     /**
      * time_boot_ms(u32), min_distance(u16), max_distance(u16), current_distance(u16), type(u8),
@@ -1057,8 +1102,16 @@ object MavlinkMessages {
     /** GIMBAL_DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME: delta_yaw is relative to the aircraft. */
     private const val GIMBAL_FLAGS_YAW_IN_VEHICLE_FRAME = 16
 
-    /** Lyrebird has one gimbal; 0 means "the only one". */
-    private const val GIMBAL_DEVICE_ID = 0
+    /** GIMBAL_MANAGER_FLAGS_ROLL_LOCK / _PITCH_LOCK: stabilised to the horizon. */
+    private const val GIMBAL_MANAGER_FLAGS_ROLL_LOCK = 4L
+    private const val GIMBAL_MANAGER_FLAGS_PITCH_LOCK = 8L
+
+    /** GIMBAL_MANAGER_CAP_FLAGS: pitch axis (32) locked to the horizon (128), yaw axis (256) following the vehicle (512). */
+    private const val GIMBAL_MANAGER_CAPABILITIES = 32L or 128L or 256L or 512L
+
+    private const val GIMBAL_PITCH_MIN_DEG = -90.0
+    private const val GIMBAL_PITCH_MAX_DEG = 30.0
+    private const val GIMBAL_YAW_RANGE_DEG = 180.0
 
     /** Range bounds of the DJI laser rangefinder, in centimetres. */
     private const val LRF_MIN_DISTANCE_CM = 100

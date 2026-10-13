@@ -561,6 +561,11 @@ class MavlinkTelemetryEndpoint(
             Stream(MavlinkMsgId.GIMBAL_DEVICE_ATTITUDE_STATUS, GIMBAL_INTERVAL_MS, camera = true) {
                 MavlinkMessages.gimbalDeviceAttitudeStatus(it, timeBootMs())
             },
+            // The manager half of the gimbal, from the same component. Changes only when control
+            // does, and a configure answers with an immediate copy, so 1 Hz is plenty.
+            Stream(MavlinkMsgId.GIMBAL_MANAGER_STATUS, GIMBAL_MANAGER_STATUS_INTERVAL_MS, camera = true) {
+                MavlinkMessages.gimbalManagerStatus(gimbalControl, timeBootMs())
+            },
             // Only while the laser holds a lock: a rangefinder that reports a stale range is
             // worse than one that reports nothing, because a consumer cannot tell the difference.
             Stream(
@@ -636,6 +641,8 @@ class MavlinkTelemetryEndpoint(
                     asResult(if (forCamera) sendVideoStreamInformation() else Mav.RESULT_UNSUPPORTED)
                 Mav.CMD_REQUEST_CAMERA_SETTINGS ->
                     asResult(if (forCamera) sendCameraSettings() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_DO_GIMBAL_MANAGER_CONFIGURE ->
+                    asResult(if (forCamera) configureGimbalControl(command) else Mav.RESULT_UNSUPPORTED)
                 Mav.CMD_REQUEST_STORAGE_INFORMATION ->
                     asResult(if (forCamera) sendStorageInformation() else Mav.RESULT_UNSUPPORTED)
                 Mav.CMD_REQUEST_VIDEO_STREAM_STATUS ->
@@ -768,22 +775,15 @@ class MavlinkTelemetryEndpoint(
         val result =
             runCatching {
                 when (command.command) {
-                    // param1 pitch, param2 yaw, both degrees.
+                    // param1/2 pitch and yaw angles, param3/4 rates, degrees; NaN means unset. An axis
+                    // the gimbal does not have is a no-op on the aircraft, so there is no capability
+                    // check to make. A command that sets nothing (QGC's rate-zero button release)
+                    // is accepted without touching the gimbal.
                     Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
-                        sink.setGimbal(
-                            GimbalRotation(
-                                mode = GimbalRotationMode.ABSOLUTE,
-                                pitchDeg = command.param1.toDouble(),
-                                rollDeg = 0.0,
-                                yawDeg = command.param2.toDouble(),
-                                // DO_GIMBAL_MANAGER_PITCHYAW sets pitch and yaw; roll is not part of
-                                // the command. An axis the gimbal does not have is a no-op on the
-                                // aircraft, so there is no capability check to make.
-                                pitchIgnored = false,
-                                rollIgnored = true,
-                                yawIgnored = false,
-                            ),
-                        )
+                        GimbalManager
+                            .rotationFor(command.param1, command.param2, command.param3, command.param4)
+                            ?.let(sink::setGimbal)
+                            ?: CommandResult(MavlinkCommandOutcome.ACCEPTED)
 
                     // param2 is the zoom value for MAV_ZOOM_TYPE_RANGE / _CONTINUOUS.
                     Mav.CMD_SET_CAMERA_ZOOM -> sink.setCameraZoom(command.param2)
@@ -1341,6 +1341,15 @@ class MavlinkTelemetryEndpoint(
 
             messageId == MavlinkMsgId.CAMERA_SETTINGS && forCamera -> sendCameraSettings()
 
+            messageId == MavlinkMsgId.GIMBAL_MANAGER_INFORMATION && forCamera -> {
+                sendOnce(
+                    MavlinkMsgId.GIMBAL_MANAGER_INFORMATION,
+                    MavlinkMessages.gimbalManagerInformation(timeBootMs()),
+                    fromCamera = true,
+                )
+                Mav.RESULT_ACCEPTED
+            }
+
             messageId == MavlinkMsgId.CAMERA_CAPTURE_STATUS && forCamera -> sendCameraCaptureStatus()
 
             messageId == MavlinkMsgId.VIDEO_STREAM_STATUS && forCamera -> sendVideoStreamStatus()
@@ -1387,6 +1396,32 @@ class MavlinkTelemetryEndpoint(
                 captures.isCapturing,
                 imageCount.get(),
             ),
+            fromCamera = true,
+        )
+        return Mav.RESULT_ACCEPTED
+    }
+
+    @Volatile
+    private var gimbalControl = GimbalControl()
+
+    /**
+     * Record who controls the gimbal and report it straight away, rather than at the next 1 Hz
+     * status, so QGroundControl sees itself in control before it sends its first setpoint.
+     */
+    private fun configureGimbalControl(command: MavlinkCommand): Int {
+        gimbalControl =
+            gimbalControl.configure(
+                command.param1,
+                command.param2,
+                command.param3,
+                command.param4,
+                command.senderSystem,
+                command.senderComponent,
+            )
+        Log.i(TAG, "Gimbal control: $gimbalControl")
+        sendOnce(
+            MavlinkMsgId.GIMBAL_MANAGER_STATUS,
+            MavlinkMessages.gimbalManagerStatus(gimbalControl, timeBootMs()),
             fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
@@ -1644,6 +1679,7 @@ class MavlinkTelemetryEndpoint(
 
         /** Gimbal pointing changes as fast as the operator moves it. */
         private const val GIMBAL_INTERVAL_MS = 200L
+        private const val GIMBAL_MANAGER_STATUS_INTERVAL_MS = 1_000L
 
         /** The rangefinder is fired on demand, so its range only needs restating slowly. */
         private const val DISTANCE_SENSOR_INTERVAL_MS = 500L

@@ -1,5 +1,6 @@
 package com.lyrebird.rc.controller
 
+import android.util.Log
 import com.lyrebird.rc.DroneControlProfiles
 import com.lyrebird.rc.StreamingMode
 import com.lyrebird.rc.mavlink.CommandResult
@@ -17,6 +18,7 @@ import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotationMode
+import dji.v5.common.error.IDJIError
 import dji.v5.et.action
 import dji.v5.et.set
 
@@ -84,9 +86,13 @@ internal class V5PayloadCommandPort(
 ) : PayloadCommandPort {
     companion object {
         private const val VIDEO_SOURCE_LABEL = "drone"
+        private const val GIMBAL_TAG = "LyrebirdGimbal"
     }
 
     override fun rotateGimbal(rotation: GimbalRotation) {
+        // Logged both ways: the rotation used to be fire-and-forget, so a gimbal that did not move
+        // could not be told apart from a command that never arrived or one DJI refused.
+        Log.i(GIMBAL_TAG, "rotate $rotation")
         host.gimbalKey.action(
             GimbalAngleRotation(
                 if (rotation.mode == GimbalRotationMode.ABSOLUTE) {
@@ -104,6 +110,8 @@ internal class V5PayloadCommandPort(
                 false,
                 0,
             ),
+            { Log.d(GIMBAL_TAG, "rotate accepted by DJI") },
+            { error: IDJIError -> Log.w(GIMBAL_TAG, "rotate refused by DJI: ${error.errorCode()} ${error.description()}") },
         )
     }
 

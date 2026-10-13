@@ -27,6 +27,10 @@ object MavlinkMsgId {
     /** Gimbal attitude, from the gimbal v2 microservice we already advertise. */
     const val GIMBAL_DEVICE_ATTITUDE_STATUS = 285
 
+    /** The gimbal v2 manager half: what QGroundControl needs before it shows gimbal controls. */
+    const val GIMBAL_MANAGER_INFORMATION = 280
+    const val GIMBAL_MANAGER_STATUS = 281
+
     /** The laser rangefinder's range, as a standard ranging sensor. */
     const val DISTANCE_SENSOR = 132
 
@@ -205,6 +209,9 @@ object Mav {
     const val CMD_VIDEO_START_CAPTURE = 2500
     const val CMD_VIDEO_STOP_CAPTURE = 2501
     const val CMD_DO_GIMBAL_MANAGER_PITCHYAW = 1000
+
+    /** Take or release control of the gimbal; QGroundControl sends it before any setpoint. */
+    const val CMD_DO_GIMBAL_MANAGER_CONFIGURE = 1001
 
     /**
      * The legacy gimbal-aim command. param1 is pitch, param2 is roll (unsupported, ignored),
