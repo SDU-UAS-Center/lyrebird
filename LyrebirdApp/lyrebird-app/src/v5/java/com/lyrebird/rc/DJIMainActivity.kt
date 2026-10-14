@@ -373,7 +373,10 @@ abstract class DJIMainActivity : AppCompatActivity() {
                 } else {
                     ProcessCommandSurface.setAutomaticDroneName()
                 }
-                preferences.edit().putInt(MavlinkEndpointConfig.PREF_SYSTEM_ID, sysId).apply()
+                // Also through the process path: it restarts the MAVLink endpoint so the new id is
+                // used at once. Written as a bare preference here, the endpoint kept announcing the
+                // automatic id it had started with until the app was restarted.
+                ProcessCommandSurface.setMavlinkSystemId(sysId)
                 updateLyrebirdBuildInfo()
             }
         )
