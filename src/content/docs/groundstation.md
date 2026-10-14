@@ -17,6 +17,22 @@ The two pieces of this repo earn their keep for two specific, different reasons 
 - **The Python client and the [ROS 2](/ros/) packages** are mainly valuable today as a *local translator*: they turn the aircraft's MAVLink or HTTP surface into a ROS 2 graph, which matters if the application flying the drone is already built around ROS 2 — a planner, a SLAM stack, multi-robot coordination — and would otherwise have to speak MAVLink/HTTP itself just to get into ROS. If the application isn't ROS-based, it gains nothing by going through this layer; it should talk MAVLink or HTTP to the aircraft directly instead, the same way this ROS 2 node itself does.
 - **MediaMTX and the video dashboard** solve a fan-out and protocol-translation problem for video specifically — see [Why MediaMTX?](#why-mediamtx) below. Watching or consuming video directly from the phone, with no MediaMTX involved, is also a legitimate option.
 
+## What runs where
+
+Everything on the aircraft side lives in the app on the RC; the ground station is whatever you choose to run on your computer. Only two of those pieces need Docker:
+
+| What | Runs on | Needs Docker? |
+|---|---|---|
+| MAVLink — QGroundControl, MAVSDK, `pymavlink`, `lyrebird-mavlink-listen` | your computer, talking straight to the app | No |
+| HTTP API (port 8080) and TCP telemetry (port 8081) | served by the app; call them with `curl`, Python, anything | No |
+| Python client — `DJIInterface`, the FTP client, the test scripts | plain Python on your computer | No |
+| [ROS 2](/ros/) nodes | a ROS 2 environment | Yes — `GroundStation/run_docker.sh` — or a local ROS 2 install |
+| [Video dashboard](#groundstation-video-dashboard), MediaMTX | the Docker Compose stack in `GroundStation/video_test/` | Yes |
+
+So flying from QGroundControl — take-off, go-to, missions, gimbal, recording — needs no Docker at all. **Live video** is the exception: QGroundControl and the browser both watch the stream through MediaMTX, and the dashboard stack is what starts MediaMTX and tells the aircraft to publish to it. Run the stack whenever you want video, in QGroundControl or in the browser.
+
+The two Docker setups overlap in one place. The dashboard stack's `ros-monitor` container also starts the ROS controller nodes by default (`ROS_RUN_CONTROLLER=1`), so with the dashboard running, ROS nodes are already connected to every discovered drone. Don't start `run_docker.sh` on top of it, or each drone gets two sets of controllers — or start the dashboard with `ROS_RUN_CONTROLLER=0` if you only want video and will run ROS separately.
+
 ## Choosing a transport
 
 The `DJIInterface` class (and everything built on it — the ROS nodes, the safety wrapper, the video dashboard) reads one environment variable, `LB_TRANSPORT`, to decide which wire to use. It can also be passed explicitly as `transport=` to the constructor, which is what a test or a script pinning a specific behavior should do instead of relying on the environment.
@@ -193,7 +209,47 @@ This addresses the prototype failure modes: dropping compressed delta frames cau
 
 Flying more than one aircraft at once raises a question a single Python script doesn't answer well: is every drone's video actually healthy, and if one isn't, is the problem the phone, the network, MediaMTX, or the browser watching it? The video dashboard exists to answer that at a glance across a whole fleet, rather than one drone at a time from the command line. Under the hood it's the same building blocks as everything else on this page — MediaMTX for WHIP/WHEP video, and the TCP telemetry stream (or MAVLink) for state — packaged as a Docker stack with a browser front end: it discovers phones on the network automatically, connects to each one's telemetry, tracks stream health continuously, and plays every feed back through WHEP.
 
-Default services:
+### What the stack starts
+
+[`GroundStation/video_test/compose.yaml`](https://github.com/SDU-UAS-Center/lyrebird/blob/main/GroundStation/video_test/compose.yaml) starts three containers, all on the host network so the aircraft can reach them directly:
+
+| Container | What it does |
+|---|---|
+| `lyrebird_mediamtx` | The video relay. Each aircraft publishes its stream here over WHIP; MediaMTX serves it back as WHEP to browsers and as RTSP to QGroundControl. |
+| `lyrebird_video_grid` | The dashboard at <http://localhost:8090>. It finds aircraft on the network, connects to their telemetry — which is what makes an aircraft start publishing video to this computer — and shows every tab below. It follows a drone being renamed in the app on its own. |
+| `lyrebird_ros_monitor` | The **ROS** tab's data, and by default the ROS controller nodes for every discovered drone (see [What runs where](#what-runs-where)). |
+
+### Start, check, stop
+
+From the repository root:
+
+```bash
+docker compose -f GroundStation/video_test/compose.yaml up -d --build
+docker compose -f GroundStation/video_test/compose.yaml ps
+```
+
+The first start builds the images and takes a few minutes; later starts are quick. `--build` also rebuilds after you pull new code, so keep it. `ps` should show all three containers running and the two with health checks (`video_grid`, `ros_monitor`) as **healthy**. Then open <http://localhost:8090>: with the RC on the same network and the app running, the drone appears within a few seconds and its video tile starts playing.
+
+```bash
+docker compose -f GroundStation/video_test/compose.yaml logs -f video-grid   # follow one service
+docker compose -f GroundStation/video_test/compose.yaml down                 # stop everything
+```
+
+Runtime diagnostics are also written under `GroundStation/video_test/logs/`, which git ignores.
+
+### Settings
+
+Set these as environment variables in front of the `up` command, for example `ROS_RUN_CONTROLLER=0 docker compose -f GroundStation/video_test/compose.yaml up -d`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ROS_RUN_CONTROLLER` | `1` | Start the ROS controller nodes for discovered drones. `0` for video and dashboard only |
+| `DRONE_NAMES` | *(empty)* | Comma-separated names to show; empty shows every drone discovered. Listed names are fixed and don't follow a rename in the app |
+| `DRONE_FALLBACKS` | *(empty)* | `name=ip` pairs, comma-separated, for drones that discovery can't reach |
+| `VIDEO_GRID_PORT` | `8090` | Dashboard port |
+| `LB_WEBAPP_MAVLINK_PORT` | `14552` | Port the dashboard's **MAVLink** tab listens on — kept off QGroundControl's 14550 |
+
+Ports in use:
 
 | Service | Default URL / Port |
 |---------|--------------------|
@@ -203,15 +259,7 @@ Default services:
 | MediaMTX RTSP | rtsp://localhost:8554 |
 | ICE UDP | :8189 |
 
-Useful restart command:
-
-```bash
-docker compose -f GroundStation/video_test/compose.yaml down
-docker compose -f GroundStation/video_test/compose.yaml up -d
-docker compose -f GroundStation/video_test/compose.yaml ps
-```
-
-Runtime diagnostics are written under `GroundStation/video_test/logs/`. Those logs are intentionally ignored by git.
+### Tabs
 
 Settings can be viewed and changed for each drone from the **Settings** tab: it reads and writes DJI flight limits (RTH altitude, max height/distance), RC pairing and stick mode, and app/video settings over HTTP, and shows read-only rows for the drone name, the detected aircraft model, and the [control profile](/android-app/#control-profiles) (speed/PID/gimbal profile) automatically selected for it — so you can confirm the right profile is active without opening the app on the phone.
 
