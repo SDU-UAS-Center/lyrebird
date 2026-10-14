@@ -973,7 +973,8 @@ class MavlinkTelemetryEndpoint(
                     // QGC's APM plugin (and some PX4 flows) request modes this way; QGC's PX4 plugin
                     // normally sends SET_MODE instead — both land in the same mapper. The packed mode
                     // numbers fit a float exactly (low 16 bits are zero), so the round trip is lossless.
-                    Mav.CMD_DO_SET_MODE -> modeResult(command.param2.toInt())
+                    Mav.CMD_DO_SET_MODE ->
+                        modeResult(MavlinkFlightMode.px4ModeFromDoSetMode(command.param2, command.param3))
 
                     else -> {
                         Log.d(TAG, "Refusing unsupported command ${command.command}")

@@ -161,6 +161,9 @@ object Mav {
     const val PX4_MODE_RTL = (4 shl 16) or (5 shl 24)
     const val PX4_MODE_FOLLOW_TARGET = (4 shl 16) or (8 shl 24)
 
+    /** PX4 AUTO.LOITER, "Hold": never reported, but MAVSDK requests it before every go-to. */
+    const val PX4_MODE_LOITER = (4 shl 16) or (3 shl 24)
+
     const val COMP_ID_AUTOPILOT1 = 1
 
     /**
