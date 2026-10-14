@@ -379,6 +379,7 @@ def _bare_client():
     client._telemetry_seq = 0
     client._telemetry_lock = threading.Lock()
     client._timestamp_factory = lambda: "2026-08-26_00-00-00.000000"
+    client._mavlink_commands = None
     return client
 
 
@@ -411,6 +412,24 @@ def test_telemetry_update_reports_each_snapshot_once():
     assert telemetry["batteryLevel"] == 90
     assert sequence == 2
     assert client.getTelemetryUpdate(sequence)[1] is None
+
+
+def test_http_reach_latch_is_ignored_when_commands_go_over_mavlink():
+    """The aircraft's latch counts its HTTP commands; this client's MAVLink seqs are its own.
+
+    Field regression: a "reached, seq 2" left by an earlier HTTP flight matched the MAVLink goto
+    that this client numbered 2, so the goto read as arrived before the aircraft had moved.
+    """
+    client = _bare_client()
+    client._mavlink_commands = object()
+    client._apply_mavlink_telemetry({"waypointReached": False, "waypointSeq": 2})
+
+    client._process_telemetry_data(
+        "", b'{"batteryLevel": 50, "waypointReached": true, "waypointSeq": 2}\n'
+    )
+
+    assert client.getTelemetry()["batteryLevel"] == 50
+    assert not client.isWaypointReached(2)
 
 
 def test_telemetry_update_returns_a_copy():

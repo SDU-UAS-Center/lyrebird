@@ -1982,7 +1982,9 @@ class MavlinkCommandChannel:
             return system_id
         if self._configured_target_system is not None:
             return self._configured_target_system
-        return 1
+        # Broadcast. The frame goes unicast to one aircraft anyway, and Lyrebird drops commands
+        # addressed to any id but its own -- which is rarely 1 (manual 1-99, else 100-254).
+        return 0
 
     def close(self) -> None:
         """Release the command reader and its route or private socket."""
@@ -2080,9 +2082,18 @@ class MavlinkCommandChannel:
         """
 
         def wait() -> None:
-            ack = self._await(_ack_matcher(command), COMPLETION_TIMEOUT_S)
-            if ack is not None and ack.result == MAV_RESULT_ACCEPTED:
-                self._raise_latch(endpoint, seq)
+            # The aircraft repeats IN_PROGRESS about twice a second while it flies, so the final
+            # result is the first ack that is not one of those.
+            deadline = time.time() + COMPLETION_TIMEOUT_S
+            while (remaining := deadline - time.time()) > 0:
+                ack = self._await(_ack_matcher(command), remaining)
+                if ack is None:
+                    return
+                if ack.result == MAV_RESULT_IN_PROGRESS:
+                    continue
+                if ack.result == MAV_RESULT_ACCEPTED:
+                    self._raise_latch(endpoint, seq)
+                return
 
         threading.Thread(target=wait, name=f"mavlink-complete-{command}", daemon=True).start()
 
