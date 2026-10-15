@@ -24,6 +24,7 @@ from lyrebird_groundstation.transport import (
     DEFAULT_MAVLINK_PORT,
     GRIPPER_ACTION_RELEASE,
     HTTP_ONLY_BY_DESIGN,
+    LB_FLAG_HOME_SET,
     LB_FLAG_LRF_TARGET_VALID,
     LB_FLAG_MANUAL_OVERRIDE,
     LB_FLAG_READY_TO_TAKEOFF,
@@ -332,6 +333,63 @@ def test_shared_router_dispatches_two_aircraft_to_separate_telemetry_states():
         assert len(updates_b) == 1
         assert updates_a[0]["flightMode"] == "MANUAL"
         assert updates_b[0]["flightMode"] == "MANUAL"
+    finally:
+        source_a.stop()
+        source_b.stop()
+        route_a.close()
+        route_b.close()
+
+
+def _lyrebird_frame(system_id, message_id, payload, crc_extra):
+    """A MAVLink 2 frame from [system_id] carrying a message pymavlink has no definition for."""
+    from pymavlink.generator.mavcrc import x25crc
+
+    header = bytes([0xFD, len(payload), 0, 0, 0, system_id, 1]) + message_id.to_bytes(3, "little")
+    crc = x25crc(header[1:] + payload)
+    crc.accumulate(bytes([crc_extra]))
+    return header + payload + crc.crc.to_bytes(2, "little")
+
+
+def test_shared_router_delivers_lyrebird_status_to_its_aircraft():
+    """Field regression: a fleet never saw home-set, take-off readiness or the override latch.
+
+    LYREBIRD_STATUS is not in pymavlink's dialect, so it decodes to no message, and the router
+    dropped every such datagram as carrying the wrong system id -- the ROS fleet reported
+    `valid_hpos: false` and `takeoff_block_reason: UNKNOWN` for an aircraft that had both.
+    """
+    router = MavlinkRouter(port=0)
+    route_a = router.register("10.0.0.1", name="alpha")
+    route_b = router.register("10.0.0.2", name="bravo")
+    updates_a = []
+    updates_b = []
+    source_a = MavlinkTelemetrySource(route=route_a, on_update=updates_a.append)
+    source_b = MavlinkTelemetrySource(route=route_b, on_update=updates_b.append)
+    source_a.start()
+    source_b.start()
+
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_frame(42), ("10.0.0.2", 14550))
+        status = status_payload(
+            flags=LB_FLAG_HOME_SET | LB_FLAG_MANUAL_OVERRIDE, reason=b"CHLSTATUS_POOR"
+        )
+        router._dispatch_datagram(
+            _lyrebird_frame(41, LYREBIRD_STATUS_ID, status, LYREBIRD_STATUS_CRC_EXTRA),
+            ("10.0.0.1", 14550),
+        )
+
+        assert updates_a[-1]["homeSet"] is True
+        assert updates_a[-1]["isManualOverrideActive"] is True
+        assert updates_a[-1]["takeoffBlockReason"] == "CHLSTATUS_POOR"
+        assert all("homeSet" not in update for update in updates_b), "only its own aircraft"
+
+        # The header is still checked: a frame claiming another aircraft's id is not delivered.
+        before = len(updates_a)
+        router._dispatch_datagram(
+            _lyrebird_frame(42, LYREBIRD_STATUS_ID, status, LYREBIRD_STATUS_CRC_EXTRA),
+            ("10.0.0.1", 14550),
+        )
+        assert len(updates_a) == before
     finally:
         source_a.stop()
         source_b.stop()

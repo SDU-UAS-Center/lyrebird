@@ -577,6 +577,13 @@ def apply_mavlink_message(telemetry: dict[str, Any], msg: Any) -> bool:
 MAVLINK_ROUTE_STALE_TIMEOUT_S = 10.0
 
 
+def _raw_system_id(data: bytes) -> int | None:
+    """The sender's system id from a MAVLink 2 frame header, whatever the message is."""
+    if len(data) < 12 or data[0] != MAVLINK2_MAGIC:
+        return None
+    return data[5]
+
+
 def _message_identity(msg: Any) -> tuple[int | None, int | None]:
     """Return a decoded message's source system and component, if it has a MAVLink header."""
     try:
@@ -874,7 +881,7 @@ class MavlinkRouter:
                 return
             if not self._bind_heartbeat(route, messages):
                 return
-            accepted = self._accepted_messages(route, messages)
+            accepted = self._accepted_messages(route, messages, data)
             if accepted is None:
                 return
             route.last_seen = time.monotonic()
@@ -916,11 +923,20 @@ class MavlinkRouter:
                 return system_id
         return None
 
-    def _accepted_messages(self, route: MavlinkRoute, messages: list[Any]) -> list[Any] | None:
+    def _accepted_messages(
+        self, route: MavlinkRoute, messages: list[Any], data: bytes = b""
+    ) -> list[Any] | None:
         system_id = route.system_id
         if system_id is None or self._routes_by_system_id.get(system_id) is not route:
             return None
         accepted = [message for message in messages if _message_identity(message)[0] == system_id]
+        if not accepted and _raw_system_id(data) == system_id:
+            # Lyrebird's own messages (LYREBIRD_STATUS, LYREBIRD_CONFIG, detections) are not in
+            # pymavlink's dialect, so they decode to nothing and carry no identity to check.
+            # The frame header still names the sender; route it, and let the subscriber decode
+            # the raw bytes as the single-aircraft path does. Dropping it lost home-set, take-off
+            # readiness and the manual-override latch for every aircraft in a fleet.
+            return []
         if not accepted:
             frame_ids = sorted(
                 {
