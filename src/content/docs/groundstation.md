@@ -33,6 +33,24 @@ So flying from QGroundControl — take-off, go-to, missions, gimbal, recording �
 
 The two Docker setups overlap in one place. The dashboard stack's `ros-monitor` container also starts the ROS controller nodes by default (`ROS_RUN_CONTROLLER=1`), so with the dashboard running, ROS nodes are already connected to every discovered drone. Don't start `run_docker.sh` on top of it, or each drone gets two sets of controllers — or start the dashboard with `ROS_RUN_CONTROLLER=0` if you only want video and will run ROS separately.
 
+## Flight examples
+
+`GroundStation/examples/` flies the same short flight — take off, fly 15 m north at 10 m, return
+home — through each way of talking to the aircraft, so you can start from the one that matches your
+stack. Each checks the aircraft before it flies, does nothing without `--fly`, and sends the
+aircraft home on Ctrl+C, a timeout or a refusal. The folder's `README.md` walks through installing,
+a dry run and the first flight.
+
+| Script | Interface | Start from it when |
+|---|---|---|
+| `http_raw.py` | HTTP + the TCP telemetry stream, nothing else imported | writing a client in another language |
+| `python_client.py` | `DJIInterface` (any `LB_TRANSPORT`) | you want the shortest Python |
+| `mavlink_pymavlink.py` | raw MAVLink 2 — the commands QGroundControl sends | debugging, or another MAVLink tool |
+| `mavlink_mavsdk.py` | MAVSDK (`mavsdk-grpc`) | autonomy software built on MAVSDK |
+| `ros2_flight.py` | ROS 2, `lyrebird_controller` topics | a ROS 2 stack |
+
+All five have been flown with a DJI Mini 4 Pro.
+
 ## Choosing a transport
 
 The `DJIInterface` class (and everything built on it — the ROS nodes, the safety wrapper, the video dashboard) reads one environment variable, `LB_TRANSPORT`, to decide which wire to use. It can also be passed explicitly as `transport=` to the constructor, which is what a test or a script pinning a specific behavior should do instead of relying on the environment.
@@ -280,6 +298,7 @@ Settings can be viewed and changed for each drone from the **Settings** tab: it 
 ## Next steps
 
 - Browse every command and status endpoint: [HTTP API](/http-api/).
+- Fly a complete example flight from your own code: [Flight examples](#flight-examples).
 - Fly from QGroundControl or MAVSDK instead: [MAVLink 2](/mavlink/).
 - Feed a ROS 2 graph from the same aircraft: [ROS 2](/ros/).
 - See what runs on the aircraft side of this connection: [Android App](/android-app/).

@@ -88,6 +88,22 @@ action it named. The same modes are also advertised through the newer, portable 
 protocol (`AVAILABLE_MODES`/`CURRENT_MODE`) wherever a standard identity exists, so a ground station
 that understands standard modes doesn't need any PX4-specific knowledge at all.
 
+A mode request also arrives as `MAV_CMD_DO_SET_MODE`, which carries PX4's mode in two parameters:
+`param2` is the main mode and `param3` the sub mode — Return is `(4, 5)`. That is how MAVSDK asks
+for Return, and for Hold `(4, 3)` before every `goto_location()`. The endpoint reads both forms, and
+an already-packed number in `param2`, which is what Lyrebird's own Python client sends. PX4's
+**Hold** is accepted as a position hold and reported as `POSCTL`: on a DJI aircraft the two mean the
+same thing, so the mode list doesn't offer both.
+
+What QGC shows as the current mode follows the aircraft, not the last button pressed: **Position**
+while DJI holds position on its own (hovering, after Hold), **Offboard** while the app is flying the
+aircraft (a go-to, an altitude change, an orbit), **Manual** while the manual-override latch is
+set. The latch closes when the pilot moves an RC stick past 30 % during autonomous flight, or when DJI
+starts a return home the app did not ask for; commands from a ground station are then refused
+until the app's **MANUAL/AUTO** toggle is switched back to AUTO. Over MAVLink that currently
+includes Return and Land (`DENIED`), so while the latch is set, bring the aircraft back with the
+RC's own return button or the sticks.
+
 **A version number QGC insists on.** QGC's initial-connect handshake explicitly requests
 `AUTOPILOT_VERSION` by name and retries until it gets one — streaming it on a timer alone was not
 enough (found by running QGC against the endpoint and reading `RequestAutopilotVersion: Max retries
@@ -110,6 +126,27 @@ same class of mistake as claiming the wrong autopilot — QGC would assume behav
 **Where honesty resumes.** The identity claim stops at the wire-protocol level. Any telemetry value
 DJI genuinely does not provide is reported using MAVLink's own "unknown" conventions (`NaN`,
 `INT32_MAX`, and similar), not a plausible-looking zero that would read as real data.
+
+## How commands are acknowledged
+
+Every command gets a `COMMAND_ACK`, and the result is what actually happened rather than what was
+dispatched:
+
+- **Take-off** is acknowledged `IN_PROGRESS` straight away and then with DJI's verdict, typically
+  within a fraction of a second: `ACCEPTED`, or `FAILED` with DJI's reason as a `STATUSTEXT`
+  ("DJI refused take-off: …"), which QGroundControl shows. A take-off with an altitude (`param7`)
+  climbs to it once DJI's own take-off has finished — unless another movement command arrived
+  in the meantime, which then takes precedence instead of being replaced by the climb.
+- **Movements that take time** — a go-to (`DO_REPOSITION`), an altitude or yaw change — are
+  acknowledged `IN_PROGRESS` and the acknowledgement is repeated about twice a second while the
+  aircraft flies, as MAVLink's command protocol asks; the final acknowledgement is `ACCEPTED` on
+  arrival. A ground station waiting for the result must skip the repeated `IN_PROGRESS` and wait for
+  the first one that isn't.
+- **Replaced is not failed.** A movement that another movement command replaces — a newer go-to, or
+  a return, land or abort — ends `CANCELLED` at once. A movement the pilot ends by taking the
+  sticks (the manual-override latch, which DJI's own return home also sets) ends `FAILED`.
+- Payload actions that take DJI a moment, such as starting a recording, also answer `IN_PROGRESS`
+  first, so QGroundControl 5.2's 1.2 s acknowledgement timeout is never hit.
 
 ## Two conventions worth knowing
 
@@ -135,7 +172,7 @@ A UDP datagram goes to exactly one socket, so each ground station needs its own 
 | | Listens | Sends to aircraft |
 |---|---|---|
 | QGroundControl | 14550 | 14550 |
-| Lyrebird fleet router (`mavlink_port` / `LB_MAVLINK_PORT`) | 14551 | 14550 |
+| Lyrebird fleet router (`mavlink_port` in `fleet_settings.yaml`) | 14561 | 14550 |
 | Dashboard MAVLink tab (`LB_WEBAPP_MAVLINK_PORT`) | 14552 | 14550 |
 
 A Lyrebird fleet uses one shared local listener for all aircraft. The router registers each
@@ -160,7 +197,9 @@ It prints the first instance of each message with decoded values, then a rate su
 
 **Connect.** QGroundControl listens on UDP 14550 by default and adds a link on receiving traffic. If the RC and the ground station share a LAN, enabling `lb_mav_0_enabled` is all that is required — see [above](#why-it-looks-like-px4-to-qgroundcontrol) for why QGC's action buttons and mission controls light up with no plugin. Tested with QGroundControl 5.0.8 and 5.2.0; both load the parameters and finish connecting within a couple of seconds.
 
-**Fly.** Take-off, Change altitude, Go to location, Pause, Land and Return in Fly View have been flown from QGroundControl 5.2 against a DJI Mini 4 Pro. Heights are above the take-off point (see [Altitude](#two-conventions-worth-knowing)). The RC sticks always take over from an automated action.
+**Fly.** Take-off, Change altitude, Go to location, Orbit, Pause, Land and Return in Fly View have been flown from QGroundControl 5.2 against a DJI Mini 4 Pro. Heights are above the take-off point (see [Altitude](#two-conventions-worth-knowing)). The RC sticks always take over from an automated action.
+
+**"Command failed" during a go-to** means the go-to ended before it arrived because the pilot took over — the sticks, or DJI starting its own return home, for example on low battery. QGC's mode then reads **Manual**; the app's MANUAL/AUTO toggle hands control back. See [How commands are acknowledged](#how-commands-are-acknowledged).
 
 **Video.** QGroundControl plays RTSP, not WebRTC, so its video comes through MediaMTX: the aircraft publishes to MediaMTX over WHIP, MediaMTX republishes the same stream on RTSP, and the aircraft advertises that address in `VIDEO_STREAM_INFORMATION` — QGC picks it up on its own, with nothing to configure. The [video dashboard](/groundstation/#groundstation-video-dashboard) stack has to be running for this, because it is what tells the aircraft where to publish. QGC reads the address once per connection: after renaming the drone (the name is the stream path), restart QGroundControl so it picks up the new one. The dashboard follows a rename by itself.
 
@@ -172,6 +211,21 @@ It prints the first instance of each message with decoded values, then a rate su
 QGC takes control of the gimbal (`DO_GIMBAL_MANAGER_CONFIGURE`) before it sends a setpoint, and the aircraft reports it in control. Other ground stations can still move the gimbal without doing so. A gimbal that cannot yaw (a Mini) simply holds its yaw: if DJI refuses a rotation only because of its yaw, the pitch is applied on its own.
 
 **Camera.** Start and stop recording from QGC's camera controls. Because the aircraft reports its camera in video mode, QGC's photo button saves a still from the video stream on the ground station rather than triggering the aircraft's shutter; for a photo on the aircraft, use the dashboard's **Photo** button or `/send/capture` on the [HTTP API](/http-api/).
+
+## Using MAVSDK
+
+MAVSDK's Action and Telemetry plugins drive the aircraft as a PX4 vehicle: `arm()` (a no-op — DJI
+arms on take-off), `takeoff()`, `goto_location()`, `return_to_launch()`, and the position, GPS,
+battery, home and landed-state streams. Two Lyrebird specifics:
+
+- `set_takeoff_altitude()` writes PX4's `MIS_TAKEOFF_ALT` parameter, which Lyrebird does not have.
+  The aircraft takes off to DJI's default height; give the height to the following `goto_location()`.
+- `goto_location()` takes an "absolute" altitude, but Lyrebird's altitudes are heights above take-off
+  (see [Altitude](#two-conventions-worth-knowing)), so pass the height as it is.
+
+The Python package with MAVSDK's familiar async API is `mavsdk-grpc` (tested with 3.17.4); the plain
+`mavsdk` package switched to a different API with version 4. The flight examples in
+`GroundStation/examples/` include a complete MAVSDK flight — see [Ground Station](/groundstation/#flight-examples).
 
 ## Field testing
 
