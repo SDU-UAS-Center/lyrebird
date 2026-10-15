@@ -85,19 +85,23 @@ def dji_status(t: dict) -> str | None:
 def wait_until(condition, timeout_s: float, what: str, drone: DJIInterface) -> None:
     """Poll `condition` until it is true, or raise TimeoutError naming `what`.
 
-    Prints the height and how many telemetry updates have arrived once a second, so a wait
-    that runs out shows whether the aircraft was slow or the telemetry had stopped.
+    Shows the height on one line that updates in place, so a wait that runs out still shows
+    whether the aircraft was climbing.
     """
     deadline = time.time() + timeout_s
-    next_report = time.time() + 1.0
-    while not condition():
-        if time.time() > deadline:
-            raise TimeoutError(f"{what} did not happen within {timeout_s:.0f} s")
-        if time.time() >= next_report:
+    shown = False
+    try:
+        while not condition():
+            if time.time() > deadline:
+                raise TimeoutError(f"{what} did not happen within {timeout_s:.0f} s")
             height = drone.getTelemetry().get("altitude", 0.0)
-            print(f"   ... {height:.1f} m  (telemetry #{drone.getTelemetrySequence()})")
-            next_report += 1.0
-        time.sleep(0.2)
+            print(f"\r   ... {height:.1f} m ", end="", flush=True)
+            shown = True
+            time.sleep(0.2)
+    finally:
+        if shown:
+            print()  # end the in-place line before whatever is printed next
+
 
 def hovering(read_height):
     """A condition that is true once DJI's take-off is over: off the ground and holding height.

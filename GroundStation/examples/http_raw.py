@@ -131,6 +131,7 @@ def wait_until(condition, timeout_s: float, what: str) -> None:
             raise TimeoutError(f"{what} did not happen within {timeout_s:.0f} s")
         time.sleep(0.2)
 
+
 def hovering(read_height):
     """A condition that is true once DJI's take-off is over: off the ground and holding height.
 
