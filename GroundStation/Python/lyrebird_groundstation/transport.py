@@ -2013,12 +2013,21 @@ class MavlinkCommandChannel:
             return f"{UNSUPPORTED_PREFIX} {endpoint}"
 
         command, params = builder(payload)
+        deadline = time.time() + timeout
         result, value = self._send_command(command, params, timeout)
         if result == MAV_RESULT_IN_PROGRESS:
-            seq = self._next_seq()
             if endpoint in REACH_LATCHES:
+                seq = self._next_seq()
                 self._watch_completion(command, endpoint, seq)
-            return f"ACCEPTED seq={seq} via MAVLink cmd={command}"
+                return f"ACCEPTED seq={seq} via MAVLink cmd={command}"
+            # Anything else answering IN_PROGRESS -- a take-off, a recording -- finishes within
+            # seconds, and its final answer is the one that matters: DJI refuses a take-off after
+            # the aircraft has already acknowledged it. Still running when the caller's timeout
+            # is up, it was accepted and has not finished, which is how it is reported.
+            final = self._await_final(command, deadline - time.time())
+            if final is None:
+                return f"ACCEPTED seq={self._next_seq()} via MAVLink cmd={command}"
+            result, value = final.result, getattr(final, "result_param2", 0) or 0
         return self._render(endpoint, command, result, value)
 
     def _next_seq(self) -> int:
@@ -2082,20 +2091,24 @@ class MavlinkCommandChannel:
         """
 
         def wait() -> None:
-            # The aircraft repeats IN_PROGRESS about twice a second while it flies, so the final
-            # result is the first ack that is not one of those.
-            deadline = time.time() + COMPLETION_TIMEOUT_S
-            while (remaining := deadline - time.time()) > 0:
-                ack = self._await(_ack_matcher(command), remaining)
-                if ack is None:
-                    return
-                if ack.result == MAV_RESULT_IN_PROGRESS:
-                    continue
-                if ack.result == MAV_RESULT_ACCEPTED:
-                    self._raise_latch(endpoint, seq)
-                return
+            ack = self._await_final(command, COMPLETION_TIMEOUT_S)
+            if ack is not None and ack.result == MAV_RESULT_ACCEPTED:
+                self._raise_latch(endpoint, seq)
 
         threading.Thread(target=wait, name=f"mavlink-complete-{command}", daemon=True).start()
+
+    def _await_final(self, command: int, timeout: float) -> Any:
+        """The first ack for [command] that is not IN_PROGRESS, or None if none arrives in time.
+
+        The aircraft repeats IN_PROGRESS about twice a second while a command runs, so the next
+        ack is usually another of those rather than the result.
+        """
+        deadline = time.time() + timeout
+        while (remaining := deadline - time.time()) > 0:
+            ack = self._await(_ack_matcher(command), remaining)
+            if ack is None or ack.result != MAV_RESULT_IN_PROGRESS:
+                return ack
+        return None
 
     def _await(self, matches: Callable[[Any], bool], timeout: float) -> Any:
         """Wait for a message this channel cares about, ignoring the telemetry flowing past.

@@ -1214,6 +1214,79 @@ def test_a_command_that_never_completes_leaves_its_latch_down():
     assert "waypointReached" not in latched
 
 
+def test_arrival_is_the_final_ack_after_repeated_in_progress():
+    """Field regression: the watcher took the second IN_PROGRESS for the final answer.
+
+    The aircraft repeats IN_PROGRESS about twice a second while it flies, so a goto that took
+    longer than half a second never raised its latch and the caller timed out at the target.
+    """
+    channel = MavlinkCommandChannel("127.0.0.1")
+    latched = {}
+    channel._on_latch = latched.update
+    channel._socket = _FakeSocket(
+        [_ack_frame(CMD_DO_REPOSITION, MAV_RESULT_IN_PROGRESS)] * 4
+        + [_ack_frame(CMD_DO_REPOSITION, MAV_RESULT_ACCEPTED)]
+    )
+
+    reply = channel.send("/send/gotoWaypointHoldHeading", "46.518,6.566,30,90,5", timeout=2.0)
+
+    seq = int(reply.split("seq=")[1].split()[0])
+    deadline = time.time() + 3.0
+    while time.time() < deadline and "waypointReached" not in latched:
+        time.sleep(0.02)
+    assert latched == {"waypointReached": True, "waypointSeq": seq}
+
+
+def test_a_goto_that_ends_failed_after_in_progress_never_reads_as_arrived():
+    channel = MavlinkCommandChannel("127.0.0.1")
+    latched = {}
+    channel._on_latch = latched.update
+    channel._socket = _FakeSocket(
+        [_ack_frame(CMD_DO_REPOSITION, MAV_RESULT_IN_PROGRESS)] * 3
+        + [_ack_frame(CMD_DO_REPOSITION, 4)]  # MAV_RESULT_FAILED
+    )
+
+    channel.send("/send/gotoWaypointHoldHeading", "46.518,6.566,30,90,5", timeout=2.0)
+
+    time.sleep(0.5)
+    assert "waypointReached" not in latched
+
+
+def test_a_takeoff_reports_the_aircrafts_final_verdict_not_its_in_progress():
+    """The aircraft acknowledges a take-off IN_PROGRESS and only then hears DJI's answer.
+
+    Reporting the IN_PROGRESS as accepted made a take-off DJI refused look like one that was
+    happening, and the caller waited for a climb that never came.
+    """
+    refused = MavlinkCommandChannel("127.0.0.1")
+    refused._socket = _FakeSocket(
+        [_ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_IN_PROGRESS)] * 2
+        + [_ack_frame(CMD_NAV_TAKEOFF, 4)]  # MAV_RESULT_FAILED
+    )
+    assert refused.send("/send/takeoff", "", timeout=2.0).startswith("REJECTED")
+
+    accepted = MavlinkCommandChannel("127.0.0.1")
+    accepted._socket = _FakeSocket(
+        [
+            _ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_IN_PROGRESS),
+            _ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_ACCEPTED),
+        ]
+    )
+    assert accepted.send("/send/takeoff", "", timeout=2.0).startswith("ACCEPTED")
+
+
+def test_a_takeoff_still_in_progress_at_the_timeout_is_reported_accepted():
+    """No final answer in time is not a refusal: it was accepted and has not finished."""
+    channel = MavlinkCommandChannel("127.0.0.1")
+    channel._socket = _FakeSocket([_ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_IN_PROGRESS)])
+
+    started = time.time()
+    reply = channel.send("/send/takeoff", "", timeout=0.5)
+
+    assert reply.startswith("ACCEPTED")
+    assert time.time() - started < 1.5, "the wait is bounded by the caller's timeout"
+
+
 def test_a_refused_command_is_reported_as_refused():
     channel = MavlinkCommandChannel("127.0.0.1")
     channel._socket = _FakeSocket([_ack_frame(CMD_DO_REPOSITION, 3)])  # MAV_RESULT_DENIED
