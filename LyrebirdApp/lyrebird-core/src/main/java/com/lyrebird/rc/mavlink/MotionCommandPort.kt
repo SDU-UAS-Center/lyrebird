@@ -14,7 +14,11 @@ interface MotionCommandPort {
     /** True while the physical RC pilot's manual-override latch blocks autonomous commands. */
     fun shouldRejectAutonomousCommand(commandName: String = ""): Boolean
 
-    fun takeoff()
+    /**
+     * Start the aircraft's take-off. [onResult] is called once, when the aircraft has answered:
+     * with null when it accepted the take-off, otherwise with its reason for refusing.
+     */
+    fun takeoff(onResult: (refusal: String?) -> Unit)
 
     fun land()
 

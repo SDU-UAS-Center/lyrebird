@@ -19,7 +19,7 @@ internal object V5MotionCommandPort : MotionCommandPort {
 
     override fun canDispatchFlightCommands(): Boolean = DroneController.isFlightControllerConnected()
 
-    override fun takeoff() = DroneController.startTakeOff()
+    override fun takeoff(onResult: (refusal: String?) -> Unit) = DroneController.startTakeOff(onResult)
 
     override fun land() = DroneController.startLanding()
 

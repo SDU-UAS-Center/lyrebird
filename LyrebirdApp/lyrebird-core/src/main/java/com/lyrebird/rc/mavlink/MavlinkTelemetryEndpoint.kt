@@ -708,6 +708,12 @@ class MavlinkTelemetryEndpoint(
             val result = runCatching { completion.getNow(null) }.getOrNull()
             val outcome = result?.mavResult ?: Mav.RESULT_FAILED
             Log.i(TAG, "Command ${command.command} finished: ${result?.outcome ?: "no result"}")
+            // A COMMAND_ACK has no room for a reason, so a refusal that has one also goes out as
+            // STATUSTEXT, which QGroundControl shows to the pilot.
+            val reason = result?.detail
+            if (reason != null && outcome != Mav.RESULT_ACCEPTED) {
+                sendOnce(MavlinkMsgId.STATUSTEXT, MavlinkMessages.statusText(Mav.SEVERITY_WARNING, reason))
+            }
             ack(outcome)
         }
     }

@@ -110,6 +110,12 @@ interface MavlinkCommandSink {
 data class PendingCommand(
     val kind: PendingKind,
     val seq: Long,
+    /**
+     * The motion policy's count of movement commands when this one was issued, or null where no
+     * one counts. A return home, landing or abort replaces a go-to without moving its reach latch,
+     * so the latch alone left a replaced go-to "in progress" until the completion timeout.
+     */
+    val generation: Long? = null,
 )
 
 /** Which reach latch a [PendingCommand] is waiting on. */

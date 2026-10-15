@@ -10,6 +10,8 @@ import com.lyrebird.rc.mavlink.PendingCommand
 import com.lyrebird.rc.mavlink.PendingKind
 import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.platform.ManualStick
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
 /**
@@ -26,7 +28,15 @@ internal interface MavlinkMotionHost {
 
     fun isMavlinkOriginTrusted(): Boolean
 
-    fun climbAfterTakeoff(altitudeMeters: Double)
+    /**
+     * Climb to [altitudeMeters] once DJI's take-off has finished, unless [stillWanted] has turned
+     * false by then: the climb starts seconds after it was asked for, and must not replace a
+     * command that arrived in between.
+     */
+    fun climbAfterTakeoff(
+        altitudeMeters: Double,
+        stillWanted: () -> Boolean,
+    )
 
     fun mavlinkFlightGate(): CommandResult?
 
@@ -69,6 +79,20 @@ internal class MavlinkMotionPolicy(
     val sink: MavlinkMotionSink
         get() = mavlinkMotionSink
 
+    /** Bumped by every movement command, so a take-off's delayed climb can tell it was overtaken. */
+    private val movementGeneration = AtomicLong()
+
+    private fun supersede(reason: String) {
+        movementGeneration.incrementAndGet()
+        host.supersedeMission(reason)
+    }
+
+    /** A pending movement, stamped so that any later movement command ends it. */
+    private fun pendingSince(
+        kind: PendingKind,
+        seq: Long,
+    ) = PendingCommand(kind, seq, generation = movementGeneration.get())
+
     internal val mavlinkMotionSink =
         object : MavlinkMotionSink {
             override fun takeoff(altitudeM: Float?): CommandResult {
@@ -82,9 +106,26 @@ internal class MavlinkMotionPolicy(
                         detail = "Aircraft is not connected: takeoff not sent",
                     )
                 }
-                commands.takeoff()
-                if (altitudeM != null) host.climbAfterTakeoff(altitudeM.toDouble())
-                return CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                // Answered with DJI's verdict rather than on dispatch: DJI refuses a take-off in its
+                // callback, after this method has returned, and acknowledging the dispatch reported
+                // a take-off that never happened as accepted.
+                val generation = movementGeneration.get()
+                val verdict = CompletableFuture<CommandResult>()
+                commands.takeoff { refusal ->
+                    if (refusal != null) {
+                        verdict.complete(
+                            CommandResult(MavlinkCommandOutcome.FAILED, "DJI refused take-off: $refusal"),
+                        )
+                        return@takeoff
+                    }
+                    if (altitudeM != null) {
+                        host.climbAfterTakeoff(altitudeM.toDouble()) {
+                            movementGeneration.get() == generation && !commands.isManualOverrideActive
+                        }
+                    }
+                    verdict.complete(CommandResult(MavlinkCommandOutcome.ACCEPTED))
+                }
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED, completion = verdict)
             }
 
             override fun land(): CommandResult {
@@ -98,7 +139,7 @@ internal class MavlinkMotionPolicy(
                         detail = "Aircraft is not connected: landing not sent",
                     )
                 }
-                host.supersedeMission("land")
+                supersede("land")
                 commands.land()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
@@ -114,7 +155,7 @@ internal class MavlinkMotionPolicy(
                         detail = "Aircraft is not connected: return to home not sent",
                     )
                 }
-                host.supersedeMission("return to home")
+                supersede("return to home")
                 commands.returnToHome()
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
@@ -130,7 +171,7 @@ internal class MavlinkMotionPolicy(
                 if (commands.shouldRejectAutonomousCommand("reposition")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                host.supersedeMission("reposition")
+                supersede("reposition")
 
                 // DO_REPOSITION carries three "leave this one alone" sentinels, and QGroundControl
                 // sends all three. None of them are values to fly to, and passing them through as if
@@ -168,7 +209,7 @@ internal class MavlinkMotionPolicy(
                         val seq = commands.gotoYaw(yawDeg)
                         CommandResult(
                             MavlinkCommandOutcome.ACCEPTED,
-                            pending = PendingCommand(PendingKind.YAW, seq),
+                            pending = pendingSince(PendingKind.YAW, seq),
                         )
                     } else {
                         val seq =
@@ -181,7 +222,7 @@ internal class MavlinkMotionPolicy(
                             )
                         CommandResult(
                             MavlinkCommandOutcome.ACCEPTED,
-                            pending = PendingCommand(PendingKind.ALTITUDE, seq),
+                            pending = pendingSince(PendingKind.ALTITUDE, seq),
                         )
                     }
                 }
@@ -230,7 +271,7 @@ internal class MavlinkMotionPolicy(
                 }
                 return CommandResult(
                     MavlinkCommandOutcome.ACCEPTED,
-                    pending = PendingCommand(PendingKind.WAYPOINT, seq),
+                    pending = pendingSince(PendingKind.WAYPOINT, seq),
                 )
             }
 
@@ -239,11 +280,11 @@ internal class MavlinkMotionPolicy(
                 if (commands.shouldRejectAutonomousCommand("yaw")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                host.supersedeMission("yaw")
+                supersede("yaw")
                 val seq = commands.gotoYaw(yawDeg)
                 return CommandResult(
                     MavlinkCommandOutcome.ACCEPTED,
-                    pending = PendingCommand(PendingKind.YAW, seq),
+                    pending = pendingSince(PendingKind.YAW, seq),
                 )
             }
 
@@ -273,7 +314,7 @@ internal class MavlinkMotionPolicy(
                         "Orbit radius must be at least $MIN_ORBIT_RADIUS_M m",
                     )
                 }
-                host.supersedeMission("orbit")
+                supersede("orbit")
                 commands.orbit(
                     centreLatitude = latitudeDeg,
                     centreLongitude = longitudeDeg,
@@ -298,7 +339,7 @@ internal class MavlinkMotionPolicy(
                 if (commands.shouldRejectAutonomousCommand("abort")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                host.supersedeMission("abort")
+                supersede("abort")
                 // The union of the three HTTP aborts: stop the PID loops, neutralise the sticks and
                 // leave virtual stick, and end any DJI wayline. Each is safe when nothing is running.
                 commands.abortAllMissions()
@@ -343,11 +384,11 @@ internal class MavlinkMotionPolicy(
                 if (commands.shouldRejectAutonomousCommand("altitude")) {
                     return CommandResult(MavlinkCommandOutcome.DENIED)
                 }
-                host.supersedeMission("altitude change")
+                supersede("altitude change")
                 val seq = commands.gotoAltitude(altitudeMeters)
                 return CommandResult(
                     MavlinkCommandOutcome.ACCEPTED,
-                    pending = PendingCommand(PendingKind.ALTITUDE, seq),
+                    pending = pendingSince(PendingKind.ALTITUDE, seq),
                 )
             }
 
@@ -391,6 +432,12 @@ internal class MavlinkMotionPolicy(
              */
             override fun pollCompletion(pending: PendingCommand): CommandProgress {
                 if (commands.isManualOverrideActive) return CommandProgress.ABANDONED
+                // Any movement command since this one replaced it, whether or not it moved the
+                // same reach latch: a go-to followed by a return home is over, not still flying.
+                val generation = pending.generation
+                if (generation != null && generation != movementGeneration.get()) {
+                    return CommandProgress.SUPERSEDED
+                }
                 // A refused waypoint is a refusal the moment it is detected, not a command that
                 // runs until somebody gives up waiting: the leg was never issued to the airframe,
                 // so no reach latch will ever close for it.

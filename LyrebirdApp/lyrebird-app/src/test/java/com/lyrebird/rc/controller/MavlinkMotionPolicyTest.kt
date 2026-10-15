@@ -12,6 +12,8 @@ import com.lyrebird.rc.mavlink.WaypointRefusal
 import com.lyrebird.rc.mavlink.WaypointRejection
 import com.lyrebird.rc.platform.ManualStick
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,6 +45,69 @@ class MavlinkMotionPolicyTest {
 
         assertEquals(listOf("takeoff", "takeoff"), commands.calls)
         assertEquals(listOf("climb:12.5"), host.calls)
+    }
+
+    @Test
+    fun `takeoff is answered with DJI's verdict, not on dispatch`() {
+        val result = sink.takeoff(null)
+
+        // IN_PROGRESS on the wire until the completion resolves, then the verdict.
+        assertNotNull(result.completion)
+        assertEquals(MavlinkCommandOutcome.ACCEPTED, result.completion!!.getNow(null)?.outcome)
+    }
+
+    @Test
+    fun `a takeoff DJI refuses fails with DJI's reason and never climbs`() {
+        commands.takeoffRefusal = "Motors cannot start"
+
+        val verdict = sink.takeoff(10f).completion!!.getNow(null)
+
+        assertEquals(MavlinkCommandOutcome.FAILED, verdict?.outcome)
+        assertEquals("DJI refused take-off: Motors cannot start", verdict?.detail)
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `a command sent before the takeoff climb starts cancels the climb`() {
+        // Field regression: a go-to sent while the take-off settled was replaced, silently, by the
+        // climb that started seconds later.
+        sink.takeoff(10f)
+        assertTrue(host.climbStillWanted!!())
+
+        sink.reposition(55.1, 12.2, 10.0, Double.NaN, 3.0)
+
+        assertFalse(host.climbStillWanted!!())
+    }
+
+    @Test
+    fun `a return home ends a go-to that was still flying`() {
+        // Field regression: a go-to replaced by a return home kept acknowledging IN_PROGRESS for
+        // minutes, and its final CANCELLED, sent when the next flight's go-to moved the latch,
+        // was read by that flight as the answer to its own go-to.
+        val goto = sink.reposition(55.1, 12.2, 10.0, Double.NaN, 3.0).pending!!
+        assertEquals(CommandProgress.RUNNING, sink.pollCompletion(goto))
+
+        sink.returnToHome()
+
+        assertEquals(CommandProgress.SUPERSEDED, sink.pollCompletion(goto))
+    }
+
+    @Test
+    fun `a newer go-to ends the older one but not itself`() {
+        val first = sink.reposition(55.1, 12.2, 10.0, Double.NaN, 3.0).pending!!
+        val second = sink.reposition(55.2, 12.2, 10.0, Double.NaN, 3.0).pending!!
+
+        assertEquals(CommandProgress.SUPERSEDED, sink.pollCompletion(first))
+        assertEquals(CommandProgress.RUNNING, sink.pollCompletion(second))
+    }
+
+    @Test
+    fun `the pilot taking over cancels the takeoff climb`() {
+        sink.takeoff(10f)
+
+        commands.override = true
+
+        assertFalse(host.climbStillWanted!!())
     }
 
     @Test
@@ -207,8 +272,15 @@ class MavlinkMotionPolicyTest {
 
         override fun isMavlinkOriginTrusted() = false
 
-        override fun climbAfterTakeoff(altitudeMeters: Double) {
+        /** The last scheduled climb's "is it still wanted" check, asked when it would start. */
+        var climbStillWanted: (() -> Boolean)? = null
+
+        override fun climbAfterTakeoff(
+            altitudeMeters: Double,
+            stillWanted: () -> Boolean,
+        ) {
             calls += "climb:$altitudeMeters"
+            climbStillWanted = stillWanted
         }
 
         override fun mavlinkFlightGate(): CommandResult? = gate
@@ -237,8 +309,12 @@ class MavlinkMotionPolicyTest {
 
         override fun canDispatchFlightCommands() = canDispatch
 
-        override fun takeoff() {
+        /** DJI's answer to the next take-off: null accepts it, a reason refuses it. */
+        var takeoffRefusal: String? = null
+
+        override fun takeoff(onResult: (refusal: String?) -> Unit) {
             calls += "takeoff"
+            onResult(takeoffRefusal)
         }
 
         override fun land() {
