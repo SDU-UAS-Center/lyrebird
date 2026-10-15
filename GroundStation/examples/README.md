@@ -1,6 +1,6 @@
 # Flight examples
 
-Four scripts that fly the same short flight, each through a different interface:
+Five scripts that fly the same short flight, each through a different interface:
 
 **take off → fly 15 m north at 10 m height → return home**
 
@@ -76,8 +76,32 @@ Repeat steps 3 and 4 with each script. Recommended order:
 | `mavlink_pymavlink.py` | raw MAVLink | `~/.venvs/lyrebird-examples/bin/python GroundStation/examples/mavlink_pymavlink.py --ip <RC_IP>` |
 | `mavlink_mavsdk.py` | MAVSDK | `~/.venvs/lyrebird-examples/bin/python GroundStation/examples/mavlink_mavsdk.py --ip <RC_IP>` |
 
-All four were flown with a DJI Mini 4 Pro on 2026-10-14. `mavlink_mavsdk.py` needs an app build
+These four were flown with a DJI Mini 4 Pro on 2026-10-14. `mavlink_mavsdk.py` needs an app build
 that reads MAVSDK's mode changes (from 2026-10-14 on); with an older one it stops with `UNSUPPORTED`.
+
+### ROS 2: `ros2_flight.py`
+
+The same flight through ROS 2, using the `lyrebird_controller` node and `lyrebird_msgs` (PX4-style
+topics, not `px4_msgs` — the ROS 2 page of the docs has the comparison). Flown with a DJI Mini 4
+Pro on 2026-10-15, in the Jazzy container.
+
+It runs inside the ground-station container, where `lyrebird_msgs` is built. The container must be
+built from this checkout, so it includes the current Python client:
+
+1. Stop the dashboard's ROS node if the video stack is running — it uses the same MAVLink port and
+   ROS domain: `docker compose -f GroundStation/video_test/compose.yaml stop ros-monitor`
+2. Terminal 1, start the container (it finds the aircraft and starts its controller under the
+   aircraft's name): `ROS_DISTRO=jazzy ./GroundStation/run_docker.sh`
+3. Terminal 2, from the repository root (`--drone` is the aircraft's name in the app; add `--fly`
+   after it to fly):
+
+   ```bash
+   docker exec -i $(docker ps -q --filter ancestor=lyrebird-gs) bash -c \
+       'source /opt/ros/$ROS_DISTRO/setup.bash && source /ros2_ws/install/setup.bash && \
+        python3 - --drone mini7' < GroundStation/examples/ros2_flight.py
+   ```
+
+Afterwards: `docker compose -f GroundStation/video_test/compose.yaml start ros-monitor`.
 
 Optional arguments for all of them: `--distance 15` (metres north), `--height 10` (metres above
 take-off), `--speed 3` (m/s; not in the MAVSDK one).
@@ -106,5 +130,6 @@ To find out afterwards what happened, keep a capture running during the flight:
 - **`mavlink_pymavlink.py`** — exactly what goes over MAVLink, the same commands QGroundControl
   sends. Useful for debugging and other MAVLink tools.
 - **`mavlink_mavsdk.py`** — MAVSDK, the usual library for autonomy software on MAVLink drones.
+- **`ros2_flight.py`** — ROS 2, for a robotics stack; the topic layout is PX4's.
 
 Heights in all of them are **above the take-off point**: Lyrebird reports 0 m on the ground.
