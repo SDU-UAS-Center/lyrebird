@@ -38,7 +38,8 @@ typecheck = ["mypy", "types-requests"]
 # at start-up, but the dashboard's comparison panel, the ROS monitor and the
 # dialect test all use it -- this group is the single source of that version.
 mavlink = ["pymavlink>=2.4.49"]
-# Heavy, and only for the ROS 2 stack image: uv sync --group ros
+# Heavy, and only for running the ROS 2 nodes outside the container: uv sync --group ros.
+# The ROS image takes numpy and OpenCV from the distro instead, to match its cv_bridge.
 ros = ["numpy", "opencv-python"]
 # What the ros-monitor image installs (numpy for the controller node, the
 # MAVLink decoder because its DjiNodes register with the shared router).

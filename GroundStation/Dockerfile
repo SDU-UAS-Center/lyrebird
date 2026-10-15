@@ -1,5 +1,5 @@
-# ROS 2 Lyrical (the current LTS) is the default base. The legacy Humble stack stays
-# supported from this same Dockerfile:  docker build --build-arg ROS_DISTRO=humble ...
+# ROS 2 Lyrical (the current LTS) is the default base. Jazzy and the legacy Humble build
+# from this same Dockerfile:  docker build --build-arg ROS_DISTRO=jazzy ...
 #
 # The -ros-base variant is named explicitly rather than the bare distro tag: those two
 # tags are the same image today (same manifest digests), but naming the variant means
@@ -27,7 +27,10 @@ RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 
 # Install system dependencies (python3-pip stays: colcon installs the ament_python
-# packages below through it; uv installs everything on the Python side)
+# packages below through it; uv installs everything on the Python side).
+# numpy and OpenCV come from the distro, not the lock: cv_bridge is compiled against the
+# distro's numpy, and a newer major version installed over it breaks every image
+# conversion (Jazzy's cv_bridge is built for numpy 1.x; the lock's numpy is 2.x).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -35,6 +38,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ros-${ROS_DISTRO}-cv-bridge \
     ros-${ROS_DISTRO}-vision-opencv \
     ros-${ROS_DISTRO}-image-transport \
+    python3-numpy \
+    python3-opencv \
     python3-pip \
     libgl1 \
     libglib2.0-0 \
@@ -56,12 +61,13 @@ COPY GroundStation/ROS /ros2_ws/src/
 
 # ROS Python modules are apt-managed, so the exact locked groups are installed with
 # `uv pip` into system Python rather than synced (a sync would remove them). uv is
-# mounted for the build only. The mavlink group joins the ros group because the
-# fleet auto-discovery manager's transport router imports pymavlink in start().
+# mounted for the build only. Only the mavlink group: the fleet auto-discovery
+# manager's transport router imports pymavlink in start(). The ros group (numpy,
+# OpenCV) is for running the nodes outside the image; here the distro provides both.
 RUN --mount=from=ghcr.io/astral-sh/uv:0.12.17,source=/uv,target=/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
     uv export --quiet --locked --no-emit-project --no-emit-workspace \
-        --only-group ros --only-group mavlink --output-file /tmp/locked.txt \
+        --only-group mavlink --output-file /tmp/locked.txt \
     && uv pip install --system --break-system-packages --no-cache --requirements /tmp/locked.txt \
     && uv pip install --system --break-system-packages --no-cache ./GroundStation/Python \
     && rm -f /tmp/locked.txt

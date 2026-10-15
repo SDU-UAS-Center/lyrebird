@@ -12,7 +12,7 @@
 [![CI](https://github.com/SDU-UAS-Center/lyrebird/actions/workflows/ci.yml/badge.svg)](https://github.com/SDU-UAS-Center/lyrebird/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/📖_Docs-blue.svg)](https://SDU-UAS-Center.github.io/lyrebird/)
 [![DJI MSDK V5](https://img.shields.io/badge/DJI%20MSDK-V5.18.0-blue.svg)](https://developer.dji.com/doc/mobile-sdk-tutorial/en/)
-[![ROS 2 Lyrical / Humble](https://img.shields.io/badge/ROS%202-Lyrical%20%2F%20Humble-brightgreen.svg)](https://SDU-UAS-Center.github.io/lyrebird/ros/)
+[![ROS 2 Lyrical / Jazzy / Humble](https://img.shields.io/badge/ROS%202-Lyrical%20%2F%20Jazzy%20%2F%20Humble-brightgreen.svg)](https://SDU-UAS-Center.github.io/lyrebird/ros/)
 [![Based on WildBridge](https://img.shields.io/badge/Based%20on-WildBridge-orange.svg)](https://github.com/WildDrone/WildBridge)
 
 *A continuation of [WildBridge](https://github.com/WildDrone/WildBridge).*
@@ -32,7 +32,7 @@ Lyrebird is a **source-available ground-control solution for DJI drones**. Its A
 
 Both control surfaces are **on by default**: **MAVLink 2** for QGroundControl, MAVSDK, and PX4-oriented tooling, and **HTTP + TCP** for commands and streaming JSON telemetry. HTTP also covers media download, AI detections, and live settings, and maintains compatibility with ground stations built against [WildBridge](https://github.com/WildDrone/WildBridge). A custom application can use either interface or both without integrating DJI's proprietary SDK.
 
-Optional tools include a Python **GroundStation** client, **ROS 2** packages for bridging control and telemetry into a local robotics graph, and a Docker **MediaMTX + browser dashboard** stack for multi-drone video and telemetry. The supported public video pipeline is WHIP publishing to MediaMTX with WHEP playback. The ROS container defaults to **Lyrical**, with **Humble** available from the same Dockerfile. Lyrebird continues WildBridge, which was part of the WildDrone project; see [LICENSE](LICENSE) for its Business Source License and planned MIT conversion.
+Optional tools include a Python **GroundStation** client, **ROS 2** packages for bridging control and telemetry into a local robotics graph, and a Docker **MediaMTX + browser dashboard** stack for multi-drone video and telemetry. The supported public video pipeline is WHIP publishing to MediaMTX with WHEP playback. The ROS container defaults to **Lyrical**, with **Jazzy** and **Humble** available from the same Dockerfile. Lyrebird continues WildBridge, which was part of the WildDrone project; see [LICENSE](LICENSE) for its Business Source License and planned MIT conversion.
 
 ![Lyrebird System Architecture](docs/images/LyrebirdDiagram.png)
 
@@ -91,7 +91,7 @@ docker compose -f GroundStation/video_test/compose.yaml up -d --build
 
 Open [localhost:8090](http://localhost:8090) for the dashboard; MediaMTX accepts WHIP/WHEP connections on port `8889`.
 
-For ROS, `./GroundStation/run_docker.sh` builds and runs the Lyrical stack. Use `ROS_DISTRO=humble ./GroundStation/run_docker.sh` for Humble. Fleet discovery and per-aircraft settings are configured in `GroundStation/ROS/lyrebird_controller/config/fleet_settings.yaml`.
+For ROS, `./GroundStation/run_docker.sh` builds and runs the Lyrical stack. Use `ROS_DISTRO=jazzy ./GroundStation/run_docker.sh` for Jazzy, or `ROS_DISTRO=humble` for Humble. Fleet discovery and per-aircraft settings are configured in `GroundStation/ROS/lyrebird_controller/config/fleet_settings.yaml`.
 
 **Next:** follow the [Getting Started guide](https://SDU-UAS-Center.github.io/lyrebird/getting-started/) to connect your first ground station.
 
