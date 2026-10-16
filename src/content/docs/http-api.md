@@ -77,6 +77,7 @@ safety.requestReleaseSafetyControl()           # hand authority back to the Pilo
 | <span class="http-method post">POST</span>`/send/gotoYaw` | `yaw_degrees` | Rotate to heading |
 | <span class="http-method post">POST</span>`/send/gimbal/rel_pitch` | `roll,pitch,yaw` | Gimbal pitch **relative** to current angle (degrees) |
 | <span class="http-method post">POST</span>`/send/gimbal/rel_yaw` | `roll,pitch,yaw` | Gimbal yaw **relative** to current angle (degrees) |
+| <span class="http-method post">POST</span>`/send/capture` | — | Take one photo on the aircraft's camera, whichever lens it is. Returns `{"captured":true,"file":"<name>"}` once the file is on the SD card, or `{"error":"Failed to capture photo"}` |
 | <span class="http-method post">POST</span>`/send/captureThermalImage` | — | Capture on the thermal lens. Returns a JSON capture descriptor |
 | <span class="http-method post">POST</span>`/send/captureTemperature` | — | Read the thermal max temperature. Returns `{"thermalMaxTemp": <float or null>}` |
 | <span class="http-method post">POST</span>`/send/listMedia` | — | List every file on the SD card as JSON |
