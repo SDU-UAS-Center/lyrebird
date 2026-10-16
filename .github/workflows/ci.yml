@@ -125,11 +125,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.14.7 is what developers run and what the images ship. 3.10 is the
-        # interpreter of the ros:humble containers that import the shared client,
-        # so the floor is exercised for real rather than assumed. One lock and
-        # one command cover both.
-        python: ["3.14.7", "3.10"]
+        # 3.14.7 is what developers run and what the images ship. 3.12 and 3.10
+        # are the interpreters of the ros:jazzy and ros:humble containers that
+        # import the shared client, so they are exercised for real rather than
+        # assumed. One lock and one command cover all three.
+        python: ["3.14.7", "3.12", "3.10"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

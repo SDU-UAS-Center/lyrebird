@@ -4,7 +4,7 @@ description: The lyrebird_controller node follows PX4's uXRCE-DDS topic conventi
 breadcrumb: Interfaces
 ---
 
-Full ROS 2 Humble package. `lyrebird_controller` follows PX4's real uXRCE-DDS topic convention as
+ROS 2 packages for Lyrical (the default), Jazzy and Humble. `lyrebird_controller` follows PX4's real uXRCE-DDS topic convention as
 closely as DJI's telemetry/command surface allows: telemetry is grouped into typed messages under
 `fmu/out/...`, and discrete actions are dispatched through one `fmu/in/vehicle_command` topic keyed
 by a MAV_CMD-style command id -- the same shape as PX4's real `VehicleCommand`/MAVLink
@@ -257,13 +257,22 @@ migrate to the new ones; see `lyrebird_controller/topics.py` for the exact remap
 
 **Docker (single-drone, auto-discovery):**
 
+From the repository root (the image installs the Python side from `pyproject.toml` and `uv.lock`, which live there):
+
 ```bash
-cd GroundStation
-docker build -t lyrebird-ros .
+docker build -t lyrebird-ros -f GroundStation/Dockerfile .
 docker run --rm --network=host lyrebird-ros
 ```
 
-The image is based on `ros:lyrical-ros-base` (ROS 2 Lyrical, the current LTS) with CycloneDDS, `cv-bridge`, `vision-opencv`, `image-transport`, plus all Python dependencies. The legacy Humble variant builds from the same Dockerfile with `docker build --build-arg ROS_DISTRO=humble -t lyrebird-ros .`.
+The image is based on `ros:lyrical-ros-base` (ROS 2 Lyrical, the current LTS) with CycloneDDS, `cv-bridge`, `vision-opencv`, `image-transport`, plus the Python client and pymavlink. Jazzy and the legacy Humble build from the same Dockerfile with `--build-arg ROS_DISTRO=jazzy` (or `humble`), or `ROS_DISTRO=jazzy ./GroundStation/run_docker.sh`.
+
+numpy and OpenCV in the image are the distribution's own packages, the ones its `cv_bridge` is compiled against: a newer numpy installed over them breaks every image conversion.
+
+| Distro | Ubuntu | Python | numpy / OpenCV (from the distro) |
+|---|---|---|---|
+| Lyrical (default) | 26.04 | 3.14 | 2.3 / 4.10 |
+| Jazzy | 24.04 | 3.12 | 1.26 / 4.6 |
+| Humble | 22.04 | 3.10 | 1.21 / 4.5 |
 
 **Manual multi-drone launch:**
 

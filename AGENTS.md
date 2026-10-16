@@ -1,13 +1,13 @@
 # AGENTS.md — Lyrebird
 
-Lyrebird is a source-available Android ground-station app (Kotlin + DJI Mobile SDK V5) that runs on the RC's Android system — built into controllers like the RC Pro/RC Plus, or on a phone connected to a non-smart controller like the RC-N3 — turning it into a networked drone server, speaking MAVLink 2 and HTTP side by side — both on by default — plus TCP telemetry, WHIP/WHEP video publishing, and auto-discovery. HTTP is kept alongside MAVLink for compatibility with ground stations built against this project's predecessor, WildBridge, and as the API for what MAVLink doesn't cover (media download, AI detections, live settings). It is paired with a Python GroundStation library, ROS 2 packages (Lyrical container default, Humble supported), and a Docker MediaMTX/video-test stack. The code is licensed under BUSL-1.1 with a planned MIT conversion; see `LICENSE`. This file tells coding agents how the repo is laid out and how to work in it safely.
+Lyrebird is a source-available Android ground-station app (Kotlin + DJI Mobile SDK V5) that runs on the RC's Android system — built into controllers like the RC Pro/RC Plus, or on a phone connected to a non-smart controller like the RC-N3 — turning it into a networked drone server, speaking MAVLink 2 and HTTP side by side — both on by default — plus TCP telemetry, WHIP/WHEP video publishing, and auto-discovery. HTTP is kept alongside MAVLink for compatibility with ground stations built against this project's predecessor, WildBridge, and as the API for what MAVLink doesn't cover (media download, AI detections, live settings). It is paired with a Python GroundStation library, ROS 2 packages (Lyrical container default, Jazzy and Humble supported), and a Docker MediaMTX/video-test stack. The code is licensed under BUSL-1.1 with a planned MIT conversion; see `LICENSE`. This file tells coding agents how the repo is laid out and how to work in it safely.
 
 ## Project Overview
 
 - **Android app** (Kotlin, DJI MSDK V5.18.0): `LyrebirdApp/android-sdk-v5-as/` — build root for `:app`, `:lyrebird-core`, and `:uxsdk`. The supported variant is `currentV5`; the declared `v4` flavor stays disabled until its adapter is implemented. `:uxsdk` is stock DJI UXSDK with a few intentional modifications.
 - **SDK-free Android core**: `LyrebirdApp/lyrebird-core/` — MAVLink wire/protocol logic and aircraft contracts shared by the app. It must not depend on either DJI SDK or on `:app`.
 - **Python GroundStation**: `GroundStation/Python/lyrebird_groundstation/` — `dji_client.py` (`DJIInterface`), `dji_helpers.py`, `mavlink_helpers.py`; `lyrebird_dji_helpers.py` is a compatibility shim.
-- **ROS 2**: `GroundStation/ROS/` — `lyrebird_msgs`, `lyrebird_controller`, `lyrebird_videofeed`, and `lyrebird_bringup`. `GroundStation/Dockerfile` defaults to `ros:lyrical-ros-base`; `ROS_DISTRO=humble` selects the alternative. Fleet discovery and settings live in `lyrebird_controller/fleet_auto_discovery.py` and `config/fleet_settings.yaml`.
+- **ROS 2**: `GroundStation/ROS/` — `lyrebird_msgs`, `lyrebird_controller`, `lyrebird_videofeed`, and `lyrebird_bringup`. `GroundStation/Dockerfile` defaults to `ros:lyrical-ros-base`; `ROS_DISTRO=jazzy` or `ROS_DISTRO=humble` selects an alternative. The image takes numpy and OpenCV from the distro (they must match its `cv_bridge`), not from the lock. Fleet discovery and settings live in `lyrebird_controller/fleet_auto_discovery.py` and `config/fleet_settings.yaml`.
 - **Fleet and aircraft profiles**: process-owned fleet discovery/status and settings keyed by aircraft serial. Keep identity and profile selection independent of the attached screen.
 - **Video test stack**: `GroundStation/video_test/compose.yaml` — MediaMTX + a browser dashboard in `GroundStation/video_test/webapp/`.
 - **Safety model**: two-computer authority. A Safety Computer can seize command authority via the `X-Safety-Token` header; takeover is persistent and only the Safety Computer returns control. Safety-adjacent logic lives in `GroundStation/Python/djiInterfaceSafety.py`, `GroundStation/Python/lyrebird_groundstation/safety.py`, and on-device.
@@ -37,7 +37,7 @@ Preserve local archive branches, historical tags, and Git bundles. Push an expli
 
 ### Python GroundStation
 
-Python is managed by [uv](https://docs.astral.sh/uv/): `uv.lock` is committed, `.python-version` pins 3.14.7 and uv fetches that interpreter itself. ROS images use their distribution's Python; the shared client must keep importing on 3.10 for Humble — CI tests 3.14.7 and 3.10 from the one lock.
+Python is managed by [uv](https://docs.astral.sh/uv/): `uv.lock` is committed, `.python-version` pins 3.14.7 and uv fetches that interpreter itself. ROS images use their distribution's Python; the shared client must keep importing on 3.10 for Humble and 3.12 for Jazzy — CI tests 3.14.7, 3.12 and 3.10 from the one lock.
 
 ```bash
 uv sync                                          # client + dev tools, from the lock
@@ -65,6 +65,7 @@ From the repository root:
 
 ```bash
 ./GroundStation/run_docker.sh                    # build and run ROS 2 Lyrical
+ROS_DISTRO=jazzy ./GroundStation/run_docker.sh    # build and run the Jazzy alternative
 ROS_DISTRO=humble ./GroundStation/run_docker.sh   # build and run the Humble alternative
 ```
 
@@ -109,7 +110,7 @@ npm run build    # production build into dist/ (validate doc edits with this)
 | `GroundStation/ROS/lyrebird_bringup/` | Launch/config for the ROS stack |
 | `GroundStation/ROS/lyrebird_msgs/` | ROS message definitions shared by the ROS packages |
 | `GroundStation/ROS/lyrebird_controller/config/fleet_settings.yaml` | Fleet transport, discovery, MAVLink ports, and settings with per-aircraft overrides |
-| `GroundStation/Dockerfile` | ROS 2 Lyrical image, or Humble via `ROS_DISTRO`; installs the locked `ros` and `mavlink` dependency groups |
+| `GroundStation/Dockerfile` | ROS 2 Lyrical image, or Jazzy/Humble via `ROS_DISTRO`; numpy/OpenCV from the distro, the locked `mavlink` group and the client from the lock |
 | `GroundStation/tests/` | Pytest suite for the Python ground-station and video-test components |
 | `GroundStation/video_test/` | MediaMTX config + webapp for the video dashboard |
 | `GroundStation/qgc/` | QGroundControl MAVLink Actions config — Takeoff/Land/RTL Fly View buttons (`lyrebird-actions.json`) |
@@ -125,7 +126,7 @@ npm run build    # production build into dist/ (validate doc edits with this)
 
 ## Configuration Notes
 
-- `pyproject.toml` is the source of truth for Ruff (line length 100, Python 3.10 target for Humble compatibility), pytest paths (`GroundStation/Python` + `GroundStation/video_test/webapp`), mypy scope, bandit scope, and the uv workspace plus dependency groups. `uv.lock` is committed; `.python-version` pins 3.14.7 for local development. CI also tests 3.10, and ROS images use their distribution's Python.
+- `pyproject.toml` is the source of truth for Ruff (line length 100, Python 3.10 target for Humble compatibility), pytest paths (`GroundStation/Python` + `GroundStation/video_test/webapp`), mypy scope, bandit scope, and the uv workspace plus dependency groups. `uv.lock` is committed; `.python-version` pins 3.14.7 for local development. CI also tests 3.12 and 3.10, and ROS images use their distribution's Python.
 - Android SDK/API key live in `local.properties` (never committed).
 - MediaMTX behavior is defined in `GroundStation/video_test/mediamtx.yml`.
 

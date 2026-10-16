@@ -89,7 +89,7 @@ Lyrebird/
     │   ├── lyrebird_groundstation/    # Canonical DJI client (HTTP + TCP telemetry)
     │   ├── djiInterfaceSafety.py        # Legacy import shim for lyrebird_groundstation.safety
     │   └── test_scripts/                # Authority and capture/download test scripts
-    ├── Dockerfile                       # ros:lyrical + CycloneDDS container
+    ├── Dockerfile                       # ros:lyrical (or jazzy/humble) + CycloneDDS container
     ├── entrypoint.sh                    # Container entry point
     ├── run_docker.sh                    # Docker run helper
     ├── video_test/                      # MediaMTX + multi-drone video dashboard

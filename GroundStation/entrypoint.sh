@@ -1,6 +1,6 @@
 #!/bin/bash
-# ROS_DISTRO is baked into the image (Dockerfile ARG/ENV): lyrical by default, humble
-# for the alternative build.
+# ROS_DISTRO is baked into the image (Dockerfile ARG/ENV): lyrical by default, jazzy or
+# humble for the alternative builds.
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
 source /ros2_ws/install/setup.bash
 
