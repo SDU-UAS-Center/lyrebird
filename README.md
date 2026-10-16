@@ -42,7 +42,8 @@ The lyrebird is Australia's most famous mimic — it can reproduce almost any so
 
 ## Key features
 
-- 🛰️ **MAVLink 2 on by default, reporting as PX4** — every aircraft is a full MAVLink 2 vehicle from boot: QGroundControl, MAVSDK, and `pymavlink` connect and fly it, Fly View and Plan view both light up, no plugin or fleet-specific handling required
+- 🛰️ **MAVLink 2 on by default, reporting as PX4** — every aircraft is a full MAVLink 2 vehicle from boot: QGroundControl, MAVSDK, and `pymavlink` connect and fly it, Fly View and Plan view both light up, no plugin or fleet-specific handling required. Flown from QGroundControl 5.0.8 and 5.2 — take-off, go-to, altitude, orbit, return, gimbal control, video and recording
+- 🧪 **Flight examples for every interface** — the same take-off, go-to and return-home flight in plain HTTP, the Python client, `pymavlink`, MAVSDK and ROS 2, each with pre-flight checks and a dry run, in [`GroundStation/examples/`](GroundStation/examples/)
 - ✈️ **Full QGroundControl mission support** — build a plan in QGC and Lyrebird flies it: take-off, land/RTL, speed, heading, camera, gimbal and region-of-interest items are all translated, either onto Lyrebird's own PID sequencer or DJI's native wayline engine. [How it works](https://SDU-UAS-Center.github.io/lyrebird/missions/)
 - 🌐 **HTTP + TCP alongside it, also on by default** — REST commands and streaming JSON telemetry, kept for compatibility with WildBridge-era ground stations, as the API for what MAVLink doesn't cover yet (AI detections, live settings), and as the fast path for big transfers: HTTP saturates the Wi-Fi link for media and video, where MAVLink FTP stays deliberately slow and lightweight so it doesn't crowd the radio spectrum a whole swarm depends on
 - 🎥 **A complete video & dashboard pipeline, not just an SDK** — WHIP/WHEP through MediaMTX plus a browser dashboard for multi-drone video, telemetry, health, and settings
@@ -61,7 +62,8 @@ The supported app build uses **DJI MSDK V5.18.0** (`currentV5`). The declared `v
 
 ## In the field
 
-Lyrebird has been used in the following research applications (Rolland et al., RiTA 2025):
+Lyrebird has been used in the following research applications (Rolland et al., RiTA 2025, and
+Jarabo-Peñas et al., ICUAS 2026 — see [Citation](#citation)):
 
 | Study | UAVs | Features | Video |
 |-------|------|----------|-------|
@@ -69,6 +71,7 @@ Lyrebird has been used in the following research applications (Rolland et al., R
 | Drone Swarm for Wildfire Detection | 1× M3E, 1× M4T, 2× M300 | Thermal detection, coordinated take-off, payload drop; XPRIZE Wildfire finalist | [▶ Watch](https://www.youtube.com/watch?v=F73VcUoOzo8) |
 | Atmospheric Wind Field Profiling | 3× Mini 3 | Vertical wind profiles validated against LiDAR | [▶ Watch](https://www.youtube.com/watch?v=KZ40L-y1xt8) |
 | Custom PID Position Controller | — | On-device PID controller | [▶ Watch](https://www.youtube.com/watch?v=j52ovMPVt_I) |
+| Swarm-Steward: Natural-Language Control of Drone Swarms | — | Natural-language coordination of aerial and ground robots, in simulation and the real world | [▶ Watch](https://www.youtube.com/watch?v=eXD3l9EsT4M) |
 
 ## Documentation
 
@@ -93,6 +96,8 @@ Open [localhost:8090](http://localhost:8090) for the dashboard; MediaMTX accepts
 
 For ROS, `./GroundStation/run_docker.sh` builds and runs the Lyrical stack. Use `ROS_DISTRO=jazzy ./GroundStation/run_docker.sh` for Jazzy, or `ROS_DISTRO=humble` for Humble. Fleet discovery and per-aircraft settings are configured in `GroundStation/ROS/lyrebird_controller/config/fleet_settings.yaml`.
 
+To fly a first autonomous flight from your own code, follow [`GroundStation/examples/README.md`](GroundStation/examples/README.md).
+
 **Next:** follow the [Getting Started guide](https://SDU-UAS-Center.github.io/lyrebird/getting-started/) to connect your first ground station.
 
 ## Repository layout
@@ -103,6 +108,7 @@ For ROS, `./GroundStation/run_docker.sh` builds and runs the Lyrical stack. Use 
 | `LyrebirdApp/lyrebird-app/` | App, SDK adapters, process runtimes, and Flight Deck UI |
 | `LyrebirdApp/lyrebird-core/` | Shared SDK-free MAVLink protocol and aircraft contracts |
 | `GroundStation/Python/` | Python client, discovery, transport, and safety helpers |
+| `GroundStation/examples/` | One example flight per interface: HTTP, Python client, pymavlink, MAVSDK, ROS 2 |
 | `GroundStation/ROS/` | ROS 2 messages, controller, video feed, and fleet launch files |
 | `GroundStation/video_test/` | MediaMTX and browser dashboard Docker stack |
 | `src/content/docs/` | Documentation site content |
@@ -113,7 +119,7 @@ Contributor setup, checks, and architecture rules are documented in [AGENTS.md](
 
 ## Funding
 
-This work was supported by Innovation Fund Denmark (DIREC U07 –PERSIST), the Independent Research Fund Denmark (Grant 10.46540/4264-00105B – NAMUR), and the EU Horizon Europe WildDrone Project (MarieSkłodowska-Curie Grant No. 101071224).
+This work was supported by Innovation Fund Denmark (DIREC U07 –PERSIST), the Independent Research Fund Denmark (Grant 10.46540/4264-00105B – NAMUR), the Novo Nordisk Foundation ([Robotic Intercropping (RIC) project](https://roboticintercropping.eu/the-project/)), and the EU Horizon Europe WildDrone Project (MarieSkłodowska-Curie Grant No. 101071224).
 
 ## Citation
 
@@ -140,7 +146,7 @@ This work was supported by Innovation Fund Denmark (DIREC U07 –PERSIST), the I
 - [Alejandro Jarabo-Peñas](https://alejp.me)
 - [Edouard Rolland](https://www.linkedin.com/in/edouardrolland/)
 - [Juan Bravo-Arrabal](https://www.linkedin.com/in/juan-bravo-arrabal)
-- [Patrik Pordi](https://www.linkedin.com/in/patrik-pordi)
+- [Patrik Dominik Pördi](https://www.linkedin.com/in/patrik-pordi)
 
 ## License
 
