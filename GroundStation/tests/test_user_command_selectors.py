@@ -6,12 +6,11 @@ from pathlib import Path
 
 from lyrebird_groundstation import transport
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def _dialect_user1_selectors() -> dict[str, float]:
-    dialect = ET.parse(ROOT / "GroundStation/mavlink/lyrebird.xml")
+    dialect = ET.parse(ROOT / "GroundStation/mavlink/lyrebird.xml")  # nosec B314
     selector_enum = dialect.find(".//enum[@name='LYREBIRD_USER_1_SELECTOR']")
     assert selector_enum is not None
     return {
@@ -22,8 +21,7 @@ def _dialect_user1_selectors() -> dict[str, float]:
 
 def _kotlin_user1_selectors() -> dict[str, float]:
     source = (
-        ROOT
-        / "LyrebirdApp/lyrebird-core/src/main/java/com/lyrebird/rc/mavlink/MavlinkProtocol.kt"
+        ROOT / "LyrebirdApp/lyrebird-core/src/main/java/com/lyrebird/rc/mavlink/MavlinkProtocol.kt"
     ).read_text()
     return {
         name.removeprefix("USER1_"): float(value)
