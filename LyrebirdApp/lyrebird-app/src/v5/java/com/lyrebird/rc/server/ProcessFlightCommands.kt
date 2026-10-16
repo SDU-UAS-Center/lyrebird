@@ -82,7 +82,10 @@ internal object ProcessFlightCommands {
 
                 override fun isMavlinkOriginTrusted() = ProcessMavlinkRuntimeRegistry.isTrustedOrigin()
 
-                override fun climbAfterTakeoff(altitudeMeters: Double) = this@ProcessFlightCommands.climbAfterTakeoff(altitudeMeters)
+                override fun climbAfterTakeoff(
+                    altitudeMeters: Double,
+                    stillWanted: () -> Boolean,
+                ) = this@ProcessFlightCommands.climbAfterTakeoff(altitudeMeters, stillWanted)
 
                 override fun mavlinkFlightGate() = this@ProcessFlightCommands.mavlinkFlightGate()
 
@@ -199,16 +202,31 @@ internal object ProcessFlightCommands {
      * than climbing late if the take-off never completes — a climb that begins minutes afterwards
      * would be a surprise, not a service.
      */
-    private fun climbAfterTakeoff(altitudeMeters: Double) {
+    private fun climbAfterTakeoff(
+        altitudeMeters: Double,
+        stillWanted: () -> Boolean,
+    ) {
         ProcessCaptureExecutorRegistry.executor().execute {
             val deadline = System.currentTimeMillis() + TAKEOFF_CLIMB_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
+                // A command sent while the take-off was still settling is newer than this climb:
+                // climbing anyway would replace it without a word to whoever sent it.
+                if (!stillWanted()) {
+                    Log.i(TAG, "Take-off climb to ${altitudeMeters}m dropped: superseded by a newer command")
+                    return@execute
+                }
                 val airborne =
                     aircraftTelemetry.readState().readings.flying &&
                         DroneController.droneStatus != DroneController.DroneStatus.TAKING_OFF
                 if (airborne) {
                     Log.i(TAG, "Take-off complete; climbing to ${altitudeMeters}m")
-                    handler.post { DroneController.gotoAltitude(altitudeMeters) }
+                    handler.post {
+                        if (stillWanted()) {
+                            DroneController.gotoAltitude(altitudeMeters)
+                        } else {
+                            Log.i(TAG, "Take-off climb to ${altitudeMeters}m dropped: superseded by a newer command")
+                        }
+                    }
                     return@execute
                 }
                 runCatching { Thread.sleep(TAKEOFF_POLL_MS) }.onFailure {

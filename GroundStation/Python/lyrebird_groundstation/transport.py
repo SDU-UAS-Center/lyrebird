@@ -305,8 +305,23 @@ def _from_gimbal_attitude(telemetry: dict[str, Any], msg: Any) -> bool:
     telemetry["_gimbalQuaternion"] = quaternion
     delta_yaw = getattr(msg, "delta_yaw", None)
     if delta_yaw is not None and not math.isnan(delta_yaw):
-        telemetry["_gimbalJointYaw"] = math.degrees(delta_yaw)
+        if (getattr(msg, "flags", 0) or 0) & _GIMBAL_YAW_IN_EARTH_FRAME:
+            # As the spec defines it: delta_yaw is the vehicle's yaw, and the quaternion is in the
+            # earth frame, so the yaw relative to the aircraft is the difference.
+            telemetry["_gimbalJointYaw"] = _wrap_degrees(yaw - math.degrees(delta_yaw))
+        else:
+            # Aircraft builds before the earth-frame flag sent the joint yaw itself here.
+            telemetry["_gimbalJointYaw"] = math.degrees(delta_yaw)
     return True
+
+
+#: GIMBAL_DEVICE_FLAGS_YAW_IN_EARTH_FRAME.
+_GIMBAL_YAW_IN_EARTH_FRAME = 64
+
+
+def _wrap_degrees(angle: float) -> float:
+    """Wrap to [-180, 180)."""
+    return (angle + 180.0) % 360.0 - 180.0
 
 
 def _from_distance_sensor(telemetry: dict[str, Any], msg: Any) -> bool:
@@ -560,6 +575,13 @@ def apply_mavlink_message(telemetry: dict[str, Any], msg: Any) -> bool:
 
 
 MAVLINK_ROUTE_STALE_TIMEOUT_S = 10.0
+
+
+def _raw_system_id(data: bytes) -> int | None:
+    """The sender's system id from a MAVLink 2 frame header, whatever the message is."""
+    if len(data) < 12 or data[0] != MAVLINK2_MAGIC:
+        return None
+    return data[5]
 
 
 def _message_identity(msg: Any) -> tuple[int | None, int | None]:
@@ -859,7 +881,7 @@ class MavlinkRouter:
                 return
             if not self._bind_heartbeat(route, messages):
                 return
-            accepted = self._accepted_messages(route, messages)
+            accepted = self._accepted_messages(route, messages, data)
             if accepted is None:
                 return
             route.last_seen = time.monotonic()
@@ -901,26 +923,40 @@ class MavlinkRouter:
                 return system_id
         return None
 
-    def _accepted_messages(self, route: MavlinkRoute, messages: list[Any]) -> list[Any] | None:
+    def _accepted_messages(
+        self, route: MavlinkRoute, messages: list[Any], data: bytes = b""
+    ) -> list[Any] | None:
         system_id = route.system_id
         if system_id is None or self._routes_by_system_id.get(system_id) is not route:
             return None
         accepted = [message for message in messages if _message_identity(message)[0] == system_id]
-        if not accepted:
-            frame_ids = sorted(
-                {
-                    source_id
-                    for source_id, _component_id in (_message_identity(msg) for msg in messages)
-                    if source_id is not None
-                }
-            )
-            self._report(
-                f"Ignoring MAVLink system ids {frame_ids} from route {route.name!r}; "
-                f"expected {system_id}",
-                transient=True,
-            )
-            return None
-        return accepted
+        if accepted:
+            return accepted
+        if _raw_system_id(data) == system_id:
+            # Lyrebird's own messages (LYREBIRD_STATUS, LYREBIRD_CONFIG, detections) are not in
+            # pymavlink's dialect, so they decode to nothing and carry no identity to check.
+            # The frame header still names the sender; route it, and let the subscriber decode
+            # the raw bytes as the single-aircraft path does. Dropping it lost home-set, take-off
+            # readiness and the manual-override latch for every aircraft in a fleet.
+            return []
+        self._report_unaccepted_messages(route, messages, system_id)
+        return None
+
+    def _report_unaccepted_messages(
+        self, route: MavlinkRoute, messages: list[Any], system_id: int
+    ) -> None:
+        frame_ids = sorted(
+            {
+                source_id
+                for source_id, _component_id in (_message_identity(msg) for msg in messages)
+                if source_id is not None
+            }
+        )
+        self._report(
+            f"Ignoring MAVLink system ids {frame_ids} from route {route.name!r}; "
+            f"expected {system_id}",
+            transient=True,
+        )
 
     def _bind_system_id(self, route: MavlinkRoute, system_id: int) -> bool:
         if not 1 <= system_id <= 254:
@@ -1967,7 +2003,9 @@ class MavlinkCommandChannel:
             return system_id
         if self._configured_target_system is not None:
             return self._configured_target_system
-        return 1
+        # Broadcast. The frame goes unicast to one aircraft anyway, and Lyrebird drops commands
+        # addressed to any id but its own -- which is rarely 1 (manual 1-99, else 100-254).
+        return 0
 
     def close(self) -> None:
         """Release the command reader and its route or private socket."""
@@ -1996,12 +2034,21 @@ class MavlinkCommandChannel:
             return f"{UNSUPPORTED_PREFIX} {endpoint}"
 
         command, params = builder(payload)
+        deadline = time.time() + timeout
         result, value = self._send_command(command, params, timeout)
         if result == MAV_RESULT_IN_PROGRESS:
-            seq = self._next_seq()
             if endpoint in REACH_LATCHES:
+                seq = self._next_seq()
                 self._watch_completion(command, endpoint, seq)
-            return f"ACCEPTED seq={seq} via MAVLink cmd={command}"
+                return f"ACCEPTED seq={seq} via MAVLink cmd={command}"
+            # Anything else answering IN_PROGRESS -- a take-off, a recording -- finishes within
+            # seconds, and its final answer is the one that matters: DJI refuses a take-off after
+            # the aircraft has already acknowledged it. Still running when the caller's timeout
+            # is up, it was accepted and has not finished, which is how it is reported.
+            final = self._await_final(command, deadline - time.time())
+            if final is None:
+                return f"ACCEPTED seq={self._next_seq()} via MAVLink cmd={command}"
+            result, value = final.result, getattr(final, "result_param2", 0) or 0
         return self._render(endpoint, command, result, value)
 
     def _next_seq(self) -> int:
@@ -2065,11 +2112,24 @@ class MavlinkCommandChannel:
         """
 
         def wait() -> None:
-            ack = self._await(_ack_matcher(command), COMPLETION_TIMEOUT_S)
+            ack = self._await_final(command, COMPLETION_TIMEOUT_S)
             if ack is not None and ack.result == MAV_RESULT_ACCEPTED:
                 self._raise_latch(endpoint, seq)
 
         threading.Thread(target=wait, name=f"mavlink-complete-{command}", daemon=True).start()
+
+    def _await_final(self, command: int, timeout: float) -> Any:
+        """The first ack for [command] that is not IN_PROGRESS, or None if none arrives in time.
+
+        The aircraft repeats IN_PROGRESS about twice a second while a command runs, so the next
+        ack is usually another of those rather than the result.
+        """
+        deadline = time.time() + timeout
+        while (remaining := deadline - time.time()) > 0:
+            ack = self._await(_ack_matcher(command), remaining)
+            if ack is None or ack.result != MAV_RESULT_IN_PROGRESS:
+                return ack
+        return None
 
     def _await(self, matches: Callable[[Any], bool], timeout: float) -> Any:
         """Wait for a message this channel cares about, ignoring the telemetry flowing past.

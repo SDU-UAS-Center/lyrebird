@@ -271,6 +271,9 @@ class MavlinkTelemetryEndpoint(
      * a UDP link as soon as it receives traffic, so this mostly matters for the reverse case: a
      * GCS that heartbeats at us before we know its address.
      */
+    @Volatile
+    private var loggedMavlink1 = false
+
     private fun receiveLoop(bound: DatagramSocket) {
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
         while (running && !bound.isClosed) {
@@ -286,6 +289,12 @@ class MavlinkTelemetryEndpoint(
                     false
                 }
             if (!received) break
+            if (packet.length > 0 && buffer[0] == MAVLINK1_MAGIC && !loggedMavlink1) {
+                // Dropped below like any non-MAVLink-2 frame, but said once: a ground station
+                // that fell back to MAVLink 1 otherwise looks exactly like one that went quiet.
+                loggedMavlink1 = true
+                Log.w(TAG, "Ignoring MAVLink 1 frames from ${packet.address.hostAddress}:${packet.port}; only MAVLink 2 is read")
+            }
             if (packet.length > 0 && buffer[0] == MavlinkFramer.MAGIC_V2) {
                 // Who is speaking, before anything they said is acted on. A signature that is
                 // present but wrong is dropped rather than downgraded to an unsigned frame: an
@@ -552,6 +561,11 @@ class MavlinkTelemetryEndpoint(
             Stream(MavlinkMsgId.GIMBAL_DEVICE_ATTITUDE_STATUS, GIMBAL_INTERVAL_MS, camera = true) {
                 MavlinkMessages.gimbalDeviceAttitudeStatus(it, timeBootMs())
             },
+            // The manager half of the gimbal, from the same component. Changes only when control
+            // does, and a configure answers with an immediate copy, so 1 Hz is plenty.
+            Stream(MavlinkMsgId.GIMBAL_MANAGER_STATUS, GIMBAL_MANAGER_STATUS_INTERVAL_MS, camera = true) {
+                MavlinkMessages.gimbalManagerStatus(gimbalControl, timeBootMs())
+            },
             // Only while the laser holds a lock: a rangefinder that reports a stale range is
             // worse than one that reports nothing, because a consumer cannot tell the difference.
             Stream(
@@ -627,6 +641,8 @@ class MavlinkTelemetryEndpoint(
                     asResult(if (forCamera) sendVideoStreamInformation() else Mav.RESULT_UNSUPPORTED)
                 Mav.CMD_REQUEST_CAMERA_SETTINGS ->
                     asResult(if (forCamera) sendCameraSettings() else Mav.RESULT_UNSUPPORTED)
+                Mav.CMD_DO_GIMBAL_MANAGER_CONFIGURE ->
+                    asResult(if (forCamera) configureGimbalControl(command) else Mav.RESULT_UNSUPPORTED)
                 Mav.CMD_REQUEST_STORAGE_INFORMATION ->
                     asResult(if (forCamera) sendStorageInformation() else Mav.RESULT_UNSUPPORTED)
                 Mav.CMD_REQUEST_VIDEO_STREAM_STATUS ->
@@ -637,12 +653,13 @@ class MavlinkTelemetryEndpoint(
             }
 
         val pending = result.pending
+        val completion = result.completion
         val ack =
             MavlinkMessages.commandAck(
-                // A command that has been accepted but has not arrived yet is acknowledged as
-                // IN_PROGRESS; the final ack follows from watchCompletion when it does.
+                // A command that has been accepted but has not finished yet is acknowledged as
+                // IN_PROGRESS; the final ack follows from watchCompletion / watchResult when it does.
                 command = command.command,
-                result = if (pending != null) Mav.RESULT_IN_PROGRESS else result.mavResult,
+                result = if (pending != null || completion != null) Mav.RESULT_IN_PROGRESS else result.mavResult,
                 targetSystem = command.senderSystem,
                 targetComponent = command.senderComponent,
                 resultValue = result.resultValue,
@@ -651,6 +668,54 @@ class MavlinkTelemetryEndpoint(
         // match it to its request.
         sendOnce(MavlinkMsgId.COMMAND_ACK, ack, fromCamera = forCamera)
         if (pending != null) watchCompletion(command, pending)
+        if (completion != null) watchResult(command, completion, forCamera)
+    }
+
+    /**
+     * Send the final ack for a command whose result arrives on a worker, repeating IN_PROGRESS
+     * until then.
+     *
+     * Every ack comes from the component that was addressed: QGroundControl's camera control only
+     * accepts acks from the camera component, so a recording acknowledged by the autopilot would be
+     * as unanswered as one not acknowledged at all. A result that never arrives is reported failed
+     * rather than left hanging.
+     */
+    private fun watchResult(
+        command: MavlinkCommand,
+        completion: java.util.concurrent.CompletableFuture<CommandResult>,
+        fromCamera: Boolean,
+    ) {
+        fun ack(result: Int) =
+            sendOnce(
+                MavlinkMsgId.COMMAND_ACK,
+                MavlinkMessages.commandAck(
+                    command = command.command,
+                    result = result,
+                    targetSystem = command.senderSystem,
+                    targetComponent = command.senderComponent,
+                ),
+                fromCamera = fromCamera,
+            )
+        thread(name = "MavlinkResultWatch", isDaemon = true) {
+            val deadline = System.currentTimeMillis() + RESULT_TIMEOUT_MS
+            while (running && !completion.isDone && System.currentTimeMillis() < deadline) {
+                runCatching {
+                    completion.get(COMMAND_IN_PROGRESS_REPEAT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                }
+                if (!completion.isDone) ack(Mav.RESULT_IN_PROGRESS)
+            }
+            // An exceptional or missing result is a failure, never a silent success.
+            val result = runCatching { completion.getNow(null) }.getOrNull()
+            val outcome = result?.mavResult ?: Mav.RESULT_FAILED
+            Log.i(TAG, "Command ${command.command} finished: ${result?.outcome ?: "no result"}")
+            // A COMMAND_ACK has no room for a reason, so a refusal that has one also goes out as
+            // STATUSTEXT, which QGroundControl shows to the pilot.
+            val reason = result?.detail
+            if (reason != null && outcome != Mav.RESULT_ACCEPTED) {
+                sendOnce(MavlinkMsgId.STATUSTEXT, MavlinkMessages.statusText(Mav.SEVERITY_WARNING, reason))
+            }
+            ack(outcome)
+        }
     }
 
     /**
@@ -759,22 +824,28 @@ class MavlinkTelemetryEndpoint(
         val result =
             runCatching {
                 when (command.command) {
-                    // param1 pitch, param2 yaw, both degrees.
-                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW ->
-                        sink.setGimbal(
-                            GimbalRotation(
-                                mode = GimbalRotationMode.ABSOLUTE,
-                                pitchDeg = command.param1.toDouble(),
-                                rollDeg = 0.0,
-                                yawDeg = command.param2.toDouble(),
-                                // DO_GIMBAL_MANAGER_PITCHYAW sets pitch and yaw; roll is not part of
-                                // the command. An axis the gimbal does not have is a no-op on the
-                                // aircraft, so there is no capability check to make.
-                                pitchIgnored = false,
-                                rollIgnored = true,
-                                yawIgnored = false,
-                            ),
-                        )
+                    // param1/2 pitch and yaw angles, param3/4 rates, degrees; NaN means unset. An axis
+                    // the gimbal does not have is a no-op on the aircraft, so there is no capability
+                    // check to make. A command that sets nothing (QGC's rate-zero button release)
+                    // is accepted without touching the gimbal.
+                    Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW -> {
+                        val result =
+                            GimbalManager
+                                .rotationFor(
+                                    command.param1,
+                                    command.param2,
+                                    command.param3,
+                                    command.param4,
+                                    flags = command.param5.toInt(),
+                                    vehicleYawDeg =
+                                        GimbalManager.vehicleYawDeg(
+                                            runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot()),
+                                        ),
+                                )?.let(sink::setGimbal)
+                                ?: CommandResult(MavlinkCommandOutcome.ACCEPTED)
+                        sendGimbalAttitudeNow()
+                        result
+                    }
 
                     // param2 is the zoom value for MAV_ZOOM_TYPE_RANGE / _CONTINUOUS.
                     Mav.CMD_SET_CAMERA_ZOOM -> sink.setCameraZoom(command.param2)
@@ -908,7 +979,8 @@ class MavlinkTelemetryEndpoint(
                     // QGC's APM plugin (and some PX4 flows) request modes this way; QGC's PX4 plugin
                     // normally sends SET_MODE instead — both land in the same mapper. The packed mode
                     // numbers fit a float exactly (low 16 bits are zero), so the round trip is lossless.
-                    Mav.CMD_DO_SET_MODE -> modeResult(command.param2.toInt())
+                    Mav.CMD_DO_SET_MODE ->
+                        modeResult(MavlinkFlightMode.px4ModeFromDoSetMode(command.param2, command.param3))
 
                     else -> {
                         Log.d(TAG, "Refusing unsupported command ${command.command}")
@@ -1293,6 +1365,11 @@ class MavlinkTelemetryEndpoint(
                 Mav.RESULT_ACCEPTED
             }
 
+            messageId == MavlinkMsgId.PROTOCOL_VERSION -> {
+                sendOnce(MavlinkMsgId.PROTOCOL_VERSION, MavlinkMessages.protocolVersion())
+                Mav.RESULT_ACCEPTED
+            }
+
             messageId == MavlinkMsgId.HOME_POSITION -> {
                 val snapshot = runCatching { snapshotProvider() }.getOrDefault(MavlinkSnapshot())
                 if (snapshot.homeCoordinatesValid) {
@@ -1326,6 +1403,15 @@ class MavlinkTelemetryEndpoint(
             }
 
             messageId == MavlinkMsgId.CAMERA_SETTINGS && forCamera -> sendCameraSettings()
+
+            messageId == MavlinkMsgId.GIMBAL_MANAGER_INFORMATION && forCamera -> {
+                sendOnce(
+                    MavlinkMsgId.GIMBAL_MANAGER_INFORMATION,
+                    MavlinkMessages.gimbalManagerInformation(timeBootMs()),
+                    fromCamera = true,
+                )
+                Mav.RESULT_ACCEPTED
+            }
 
             messageId == MavlinkMsgId.CAMERA_CAPTURE_STATUS && forCamera -> sendCameraCaptureStatus()
 
@@ -1373,6 +1459,50 @@ class MavlinkTelemetryEndpoint(
                 captures.isCapturing,
                 imageCount.get(),
             ),
+            fromCamera = true,
+        )
+        return Mav.RESULT_ACCEPTED
+    }
+
+    @Volatile
+    private var gimbalControl = GimbalControl()
+
+    /**
+     * An attitude report straight after a setpoint, on top of the 5 Hz stream.
+     *
+     * QGroundControl zeroes its stored gimbal pitch after every pitch/yaw it sends and only
+     * learns it again from the next report. Its click-and-drag sends a target of "stored pitch +
+     * step" every 100 ms, so at 5 Hz every other target was computed from zero and the gimbal was
+     * told to jump back and forth. One report per setpoint keeps the stored pitch real between
+     * ticks, and costs nothing while nobody is aiming.
+     */
+    private fun sendGimbalAttitudeNow() {
+        val snapshot = runCatching { snapshotProvider() }.getOrNull() ?: return
+        sendOnce(
+            MavlinkMsgId.GIMBAL_DEVICE_ATTITUDE_STATUS,
+            MavlinkMessages.gimbalDeviceAttitudeStatus(snapshot, timeBootMs()),
+            fromCamera = true,
+        )
+    }
+
+    /**
+     * Record who controls the gimbal and report it straight away, rather than at the next 1 Hz
+     * status, so QGroundControl sees itself in control before it sends its first setpoint.
+     */
+    private fun configureGimbalControl(command: MavlinkCommand): Int {
+        gimbalControl =
+            gimbalControl.configure(
+                command.param1,
+                command.param2,
+                command.param3,
+                command.param4,
+                command.senderSystem,
+                command.senderComponent,
+            )
+        Log.i(TAG, "Gimbal control: $gimbalControl")
+        sendOnce(
+            MavlinkMsgId.GIMBAL_MANAGER_STATUS,
+            MavlinkMessages.gimbalManagerStatus(gimbalControl, timeBootMs()),
             fromCamera = true,
         )
         return Mav.RESULT_ACCEPTED
@@ -1591,6 +1721,9 @@ class MavlinkTelemetryEndpoint(
         private const val MICROS_PER_MILLI = 1_000L
         private const val JOIN_TIMEOUT_MS = 1_000L
         private const val RECEIVE_BUFFER_BYTES = 512
+
+        /** MAVLink 1 start-of-frame marker; MAVLink 2 uses 0xFD. */
+        private const val MAVLINK1_MAGIC: Byte = 0xFE.toByte()
         private const val BROADCAST_ADDRESS = "255.255.255.255"
 
         private const val HEARTBEAT_INTERVAL_MS = 1_000L
@@ -1609,11 +1742,15 @@ class MavlinkTelemetryEndpoint(
         /**
          * How often a still-running command repeats its IN_PROGRESS acknowledgement.
          *
-         * Comfortably inside QGroundControl's roughly three-second patience, and slow enough that
+         * Inside QGroundControl 5.2's 1.2 s ack timeout with room for Wi-Fi jitter — 5.0.8 allowed
+         * 3 s, which is what the 1 s this used to be was tuned against — and still slow enough that
          * a five-minute leg costs a few hundred small frames rather than competing with telemetry
          * for the link.
          */
-        private const val COMMAND_IN_PROGRESS_REPEAT_MS = 1_000L
+        private const val COMMAND_IN_PROGRESS_REPEAT_MS = 500L
+
+        /** How long a worker-completed command may take before it is reported failed. */
+        private const val RESULT_TIMEOUT_MS = 15_000L
 
         /**
          * Tangential speed for an orbit whose command did not name one.
@@ -1627,6 +1764,7 @@ class MavlinkTelemetryEndpoint(
 
         /** Gimbal pointing changes as fast as the operator moves it. */
         private const val GIMBAL_INTERVAL_MS = 200L
+        private const val GIMBAL_MANAGER_STATUS_INTERVAL_MS = 1_000L
 
         /** The rangefinder is fired on demand, so its range only needs restating slowly. */
         private const val DISTANCE_SENSOR_INTERVAL_MS = 500L

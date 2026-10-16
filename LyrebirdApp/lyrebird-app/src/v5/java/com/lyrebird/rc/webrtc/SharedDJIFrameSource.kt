@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicLong
 @Suppress("TooManyFunctions")
 class SharedDJIFrameSource(
     private val preferredCameraIndex: ComponentIndexType,
-    private val droneName: String,
+    private val droneName: () -> String,
 ) {
     companion object {
         private const val TAG = "SharedDJIFrameSource"
@@ -316,7 +316,7 @@ class SharedDJIFrameSource(
                     timestampNs = timestampNs,
                     frameWidth = outputWidth,
                     frameHeight = outputHeight,
-                    droneName = droneName,
+                    droneName = droneName(),
                 )
             recipients.metadataListeners.forEach { it.onFrameMetadata(metadata) }
         }

@@ -24,6 +24,7 @@ from lyrebird_groundstation.transport import (
     DEFAULT_MAVLINK_PORT,
     GRIPPER_ACTION_RELEASE,
     HTTP_ONLY_BY_DESIGN,
+    LB_FLAG_HOME_SET,
     LB_FLAG_LRF_TARGET_VALID,
     LB_FLAG_MANUAL_OVERRIDE,
     LB_FLAG_READY_TO_TAKEOFF,
@@ -332,6 +333,63 @@ def test_shared_router_dispatches_two_aircraft_to_separate_telemetry_states():
         assert len(updates_b) == 1
         assert updates_a[0]["flightMode"] == "MANUAL"
         assert updates_b[0]["flightMode"] == "MANUAL"
+    finally:
+        source_a.stop()
+        source_b.stop()
+        route_a.close()
+        route_b.close()
+
+
+def _lyrebird_frame(system_id, message_id, payload, crc_extra):
+    """A MAVLink 2 frame from [system_id] carrying a message pymavlink has no definition for."""
+    from pymavlink.generator.mavcrc import x25crc
+
+    header = bytes([0xFD, len(payload), 0, 0, 0, system_id, 1]) + message_id.to_bytes(3, "little")
+    crc = x25crc(header[1:] + payload)
+    crc.accumulate(bytes([crc_extra]))
+    return header + payload + crc.crc.to_bytes(2, "little")
+
+
+def test_shared_router_delivers_lyrebird_status_to_its_aircraft():
+    """Field regression: a fleet never saw home-set, take-off readiness or the override latch.
+
+    LYREBIRD_STATUS is not in pymavlink's dialect, so it decodes to no message, and the router
+    dropped every such datagram as carrying the wrong system id -- the ROS fleet reported
+    `valid_hpos: false` and `takeoff_block_reason: UNKNOWN` for an aircraft that had both.
+    """
+    router = MavlinkRouter(port=0)
+    route_a = router.register("10.0.0.1", name="alpha")
+    route_b = router.register("10.0.0.2", name="bravo")
+    updates_a = []
+    updates_b = []
+    source_a = MavlinkTelemetrySource(route=route_a, on_update=updates_a.append)
+    source_b = MavlinkTelemetrySource(route=route_b, on_update=updates_b.append)
+    source_a.start()
+    source_b.start()
+
+    try:
+        router._dispatch_datagram(_aircraft_frame(41), ("10.0.0.1", 14550))
+        router._dispatch_datagram(_aircraft_frame(42), ("10.0.0.2", 14550))
+        status = status_payload(
+            flags=LB_FLAG_HOME_SET | LB_FLAG_MANUAL_OVERRIDE, reason=b"CHLSTATUS_POOR"
+        )
+        router._dispatch_datagram(
+            _lyrebird_frame(41, LYREBIRD_STATUS_ID, status, LYREBIRD_STATUS_CRC_EXTRA),
+            ("10.0.0.1", 14550),
+        )
+
+        assert updates_a[-1]["homeSet"] is True
+        assert updates_a[-1]["isManualOverrideActive"] is True
+        assert updates_a[-1]["takeoffBlockReason"] == "CHLSTATUS_POOR"
+        assert all("homeSet" not in update for update in updates_b), "only its own aircraft"
+
+        # The header is still checked: a frame claiming another aircraft's id is not delivered.
+        before = len(updates_a)
+        router._dispatch_datagram(
+            _lyrebird_frame(42, LYREBIRD_STATUS_ID, status, LYREBIRD_STATUS_CRC_EXTRA),
+            ("10.0.0.1", 14550),
+        )
+        assert len(updates_a) == before
     finally:
         source_a.stop()
         source_b.stop()
@@ -1031,6 +1089,57 @@ def test_a_real_gimbal_frame_recovers_the_joint_yaw_in_degrees():
     assert telemetry["gimbalAttitude"]["yaw"] == pytest.approx(0.0, abs=1e-3)
 
 
+def test_an_earth_frame_report_recovers_the_joint_yaw_from_the_vehicle_yaw():
+    """Current aircraft builds: flags carry YAW_IN_EARTH_FRAME and delta_yaw is the vehicle's yaw.
+
+    The gimbal points at 120 degrees and the aircraft faces 90, so the gimbal sits 30 degrees right
+    of the nose. Built with pymavlink exactly as the aircraft sends it.
+    """
+    from pymavlink.dialects.v20 import common as mavlink_common
+
+    class Sink:
+        buf = b""
+
+        def write(self, data):
+            self.buf += data
+
+    sink = Sink()
+    mavlink_common.MAVLink(sink, srcSystem=7, srcComponent=100).gimbal_device_attitude_status_send(
+        0,
+        0,
+        0,
+        4 | 8 | 64,  # flags: ROLL_LOCK | PITCH_LOCK | YAW_IN_EARTH_FRAME
+        _euler_to_quat(0.0, 0.0, math.radians(120.0)),
+        float("nan"),
+        float("nan"),
+        float("nan"),
+        0,
+        math.radians(90.0),  # delta_yaw: the vehicle's yaw
+        float("nan"),
+        1,  # gimbal_device_id
+    )
+    parser = mavlink_common.MAVLink(None)
+    (msg,) = parser.parse_buffer(sink.buf)
+    telemetry = {}
+    apply_mavlink_message(telemetry, msg)
+    assert telemetry["gimbalAttitude"]["yaw"] == pytest.approx(120.0, abs=1e-3)
+    assert telemetry["_gimbalJointYaw"] == pytest.approx(30.0, abs=1e-3)
+
+
+def test_an_earth_frame_joint_yaw_wraps_across_north():
+    telemetry = {}
+    apply_mavlink_message(
+        telemetry,
+        FakeMessage(
+            "GIMBAL_DEVICE_ATTITUDE_STATUS",
+            q=_euler_to_quat(0.0, 0.0, math.radians(-170.0)),
+            flags=64,
+            delta_yaw=math.radians(170.0),
+        ),
+    )
+    assert telemetry["_gimbalJointYaw"] == pytest.approx(20.0, abs=1e-3)
+
+
 def test_the_reported_joint_angles_beat_the_derived_ones():
     """When the aircraft reports its own joint angles, they win.
 
@@ -1161,6 +1270,79 @@ def test_a_command_that_never_completes_leaves_its_latch_down():
     assert reply.startswith("ACCEPTED"), "it was accepted; it just has not finished"
     time.sleep(0.3)
     assert "waypointReached" not in latched
+
+
+def test_arrival_is_the_final_ack_after_repeated_in_progress():
+    """Field regression: the watcher took the second IN_PROGRESS for the final answer.
+
+    The aircraft repeats IN_PROGRESS about twice a second while it flies, so a goto that took
+    longer than half a second never raised its latch and the caller timed out at the target.
+    """
+    channel = MavlinkCommandChannel("127.0.0.1")
+    latched = {}
+    channel._on_latch = latched.update
+    channel._socket = _FakeSocket(
+        [_ack_frame(CMD_DO_REPOSITION, MAV_RESULT_IN_PROGRESS)] * 4
+        + [_ack_frame(CMD_DO_REPOSITION, MAV_RESULT_ACCEPTED)]
+    )
+
+    reply = channel.send("/send/gotoWaypointHoldHeading", "46.518,6.566,30,90,5", timeout=2.0)
+
+    seq = int(reply.split("seq=")[1].split()[0])
+    deadline = time.time() + 3.0
+    while time.time() < deadline and "waypointReached" not in latched:
+        time.sleep(0.02)
+    assert latched == {"waypointReached": True, "waypointSeq": seq}
+
+
+def test_a_goto_that_ends_failed_after_in_progress_never_reads_as_arrived():
+    channel = MavlinkCommandChannel("127.0.0.1")
+    latched = {}
+    channel._on_latch = latched.update
+    channel._socket = _FakeSocket(
+        [_ack_frame(CMD_DO_REPOSITION, MAV_RESULT_IN_PROGRESS)] * 3
+        + [_ack_frame(CMD_DO_REPOSITION, 4)]  # MAV_RESULT_FAILED
+    )
+
+    channel.send("/send/gotoWaypointHoldHeading", "46.518,6.566,30,90,5", timeout=2.0)
+
+    time.sleep(0.5)
+    assert "waypointReached" not in latched
+
+
+def test_a_takeoff_reports_the_aircrafts_final_verdict_not_its_in_progress():
+    """The aircraft acknowledges a take-off IN_PROGRESS and only then hears DJI's answer.
+
+    Reporting the IN_PROGRESS as accepted made a take-off DJI refused look like one that was
+    happening, and the caller waited for a climb that never came.
+    """
+    refused = MavlinkCommandChannel("127.0.0.1")
+    refused._socket = _FakeSocket(
+        [_ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_IN_PROGRESS)] * 2
+        + [_ack_frame(CMD_NAV_TAKEOFF, 4)]  # MAV_RESULT_FAILED
+    )
+    assert refused.send("/send/takeoff", "", timeout=2.0).startswith("REJECTED")
+
+    accepted = MavlinkCommandChannel("127.0.0.1")
+    accepted._socket = _FakeSocket(
+        [
+            _ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_IN_PROGRESS),
+            _ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_ACCEPTED),
+        ]
+    )
+    assert accepted.send("/send/takeoff", "", timeout=2.0).startswith("ACCEPTED")
+
+
+def test_a_takeoff_still_in_progress_at_the_timeout_is_reported_accepted():
+    """No final answer in time is not a refusal: it was accepted and has not finished."""
+    channel = MavlinkCommandChannel("127.0.0.1")
+    channel._socket = _FakeSocket([_ack_frame(CMD_NAV_TAKEOFF, MAV_RESULT_IN_PROGRESS)])
+
+    started = time.time()
+    reply = channel.send("/send/takeoff", "", timeout=0.5)
+
+    assert reply.startswith("ACCEPTED")
+    assert time.time() - started < 1.5, "the wait is bounded by the caller's timeout"
 
 
 def test_a_refused_command_is_reported_as_refused():

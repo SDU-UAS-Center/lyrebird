@@ -6,7 +6,7 @@ import time
 import pytest
 from lyrebird_groundstation.ftp_client import (
     AIRCRAFT_COMPONENT_ID,
-    AIRCRAFT_SYSTEM_ID,
+    DEFAULT_TARGET_SYSTEM,
     ERR_EOF,
     ERR_FILE_NOT_FOUND,
     FTP_HEADER_BYTES,
@@ -35,11 +35,15 @@ class _Sink:
         self.buf += data
 
 
+#: Any configured id; the client must not depend on it.
+_AIRCRAFT_SYSID = 7
+
+
 def _frame_ftp(payload):
-    """A FILE_TRANSFER_PROTOCOL frame as the aircraft would send it (sysid 127, compid 1)."""
+    """A FILE_TRANSFER_PROTOCOL frame as the aircraft would send it (sysid 7, compid 1)."""
     sink = _Sink()
     mavlink_common.MAVLink(
-        sink, srcSystem=AIRCRAFT_SYSTEM_ID, srcComponent=AIRCRAFT_COMPONENT_ID
+        sink, srcSystem=_AIRCRAFT_SYSID, srcComponent=AIRCRAFT_COMPONENT_ID
     ).file_transfer_protocol_send(0, 255, 190, payload)
     return sink.buf
 
@@ -142,12 +146,20 @@ def test_an_ack_reply_parses_from_an_aircraft_frame():
     assert int.from_bytes(reply.data[:4], "little") == 100
 
 
+def test_an_explicit_target_system_is_used_as_given():
+    client = _client([_ftp_ack(2, 0, OP_RESET_SESSIONS, 0, 0)], target_system=_AIRCRAFT_SYSID)
+    client.reset_sessions()
+    assert _decode(client._socket.sent[0][0]).target_system == _AIRCRAFT_SYSID
+    client.close()
+
+
 def test_sent_frames_target_the_aircraft_and_claim_a_gcs_identity():
-    client = _client([_ftp_ack(1, 0, OP_RESET_SESSIONS, 0, 0)])
+    client = _client([_ftp_ack(2, 0, OP_RESET_SESSIONS, 0, 0)])
     client.reset_sessions()
     msg = _decode(client._socket.sent[0][0])
     assert msg.get_type() == "FILE_TRANSFER_PROTOCOL"
-    assert msg.target_system == AIRCRAFT_SYSTEM_ID
+    # Broadcast system id: the aircraft's id is configurable and it drops frames for any other.
+    assert msg.target_system == DEFAULT_TARGET_SYSTEM == 0
     assert msg.target_component == AIRCRAFT_COMPONENT_ID
     assert msg.get_srcSystem() == 255
     assert msg.get_srcComponent() == 190
@@ -160,10 +172,10 @@ def test_sent_frames_target_the_aircraft_and_claim_a_gcs_identity():
 
 def test_list_directory_pages_by_offset_until_eof():
     frames = [
-        _listing_page(1, 0, ["A.JPG", "B.JPG"]),
-        _listing_page(2, 2, ["C.JPG", "D.JPG"]),
-        _listing_page(3, 4, ["E.JPG"]),
-        _ftp_nak(4, 0, OP_LIST_DIRECTORY, ERR_EOF),
+        _listing_page(2, 0, ["A.JPG", "B.JPG"]),
+        _listing_page(3, 2, ["C.JPG", "D.JPG"]),
+        _listing_page(4, 4, ["E.JPG"]),
+        _ftp_nak(5, 0, OP_LIST_DIRECTORY, ERR_EOF),
     ]
     client = _client(frames)
     entries = client.list_directory()
@@ -178,7 +190,7 @@ def test_list_directory_pages_by_offset_until_eof():
 
 
 def test_list_directory_raises_on_a_real_error_not_eof():
-    client = _client([_ftp_nak(1, 0, OP_LIST_DIRECTORY, ERR_FILE_NOT_FOUND)])
+    client = _client([_ftp_nak(2, 0, OP_LIST_DIRECTORY, ERR_FILE_NOT_FOUND)])
     with pytest.raises(FtpError) as exc:
         client.list_directory()
     assert exc.value.code == ERR_FILE_NOT_FOUND
@@ -191,11 +203,11 @@ def test_list_directory_raises_on_a_real_error_not_eof():
 def test_download_streams_chunks_and_terminates_the_session():
     body = bytes(range(256)) * 2  # 512 bytes
     frames = [
-        _ftp_ack(1, 9, OP_OPEN_FILE_RO, 4, 0, (len(body)).to_bytes(4, "little")),
-        _ftp_ack(2, 9, OP_READ_FILE, 239, 0, body[0:239]),
-        _ftp_ack(3, 9, OP_READ_FILE, 239, 239, body[239:478]),
-        _ftp_ack(4, 9, OP_READ_FILE, 34, 478, body[478:512]),
-        _ftp_ack(5, 9, OP_TERMINATE_SESSION, 0, 0),
+        _ftp_ack(2, 9, OP_OPEN_FILE_RO, 4, 0, (len(body)).to_bytes(4, "little")),
+        _ftp_ack(3, 9, OP_READ_FILE, 239, 0, body[0:239]),
+        _ftp_ack(4, 9, OP_READ_FILE, 239, 239, body[239:478]),
+        _ftp_ack(5, 9, OP_READ_FILE, 34, 478, body[478:512]),
+        _ftp_ack(6, 9, OP_TERMINATE_SESSION, 0, 0),
     ]
     client = _client(frames)
     assert client.download("DJI_0001.JPG") == body
@@ -217,10 +229,10 @@ def test_download_streams_chunks_and_terminates_the_session():
 def test_download_reuses_a_page_when_the_server_returns_a_short_chunk():
     body = bytes(i % 256 for i in range(300))
     frames = [
-        _ftp_ack(1, 5, OP_OPEN_FILE_RO, 4, 0, (len(body)).to_bytes(4, "little")),
-        _ftp_ack(2, 5, OP_READ_FILE, 100, 0, body[0:100]),
-        _ftp_ack(3, 5, OP_READ_FILE, 200, 100, body[100:300]),
-        _ftp_ack(4, 5, OP_TERMINATE_SESSION, 0, 0),
+        _ftp_ack(2, 5, OP_OPEN_FILE_RO, 4, 0, (len(body)).to_bytes(4, "little")),
+        _ftp_ack(3, 5, OP_READ_FILE, 100, 0, body[0:100]),
+        _ftp_ack(4, 5, OP_READ_FILE, 200, 100, body[100:300]),
+        _ftp_ack(5, 5, OP_TERMINATE_SESSION, 0, 0),
     ]
     client = _client(frames)
     assert client.download("SHORT.JPG") == body
@@ -231,7 +243,7 @@ def test_download_reuses_a_page_when_the_server_returns_a_short_chunk():
 
 
 def test_open_missing_file_raises_with_the_nak_code():
-    client = _client([_ftp_nak(1, 0, OP_OPEN_FILE_RO, ERR_FILE_NOT_FOUND)])
+    client = _client([_ftp_nak(2, 0, OP_OPEN_FILE_RO, ERR_FILE_NOT_FOUND)])
     with pytest.raises(FtpError) as exc:
         client.open_file_ro("NOPE.JPG")
     assert exc.value.code == ERR_FILE_NOT_FOUND
@@ -243,9 +255,10 @@ def test_open_missing_file_raises_with_the_nak_code():
 
 def test_a_stale_reply_does_not_satisfy_a_newer_request():
     # A reply for a request that was never acknowledged sits in the inbox; the client waits for
-    # the seq it actually sent rather than grabbing the first FTP reply that arrives.
+    # the seq that answers the one it sent (request + 1) rather than grabbing the first FTP reply
+    # that arrives.
     client = _client(
-        [_ftp_ack(99, 0, OP_RESET_SESSIONS, 0, 0), _ftp_ack(1, 0, OP_RESET_SESSIONS, 0, 0)]
+        [_ftp_ack(99, 0, OP_RESET_SESSIONS, 0, 0), _ftp_ack(2, 0, OP_RESET_SESSIONS, 0, 0)]
     )
     client.reset_sessions()
     client.close()

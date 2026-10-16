@@ -174,6 +174,22 @@ class MavlinkPayloadPolicyTest {
     }
 
     @Test
+    fun `recording is accepted at once and finishes with the payload's own result`() {
+        // DJI takes ~1.6 s to confirm a start; the endpoint answers IN_PROGRESS and sends the
+        // completion as the final ack, so the real outcome must arrive there, failures included.
+        payload.recordingResult = CommandResult(MavlinkCommandOutcome.FAILED)
+        val result = sink.startVideoRecording()
+        assertEquals(MavlinkCommandOutcome.ACCEPTED, result.outcome)
+        assertEquals(MavlinkCommandOutcome.FAILED, result.completion!!.get().outcome)
+    }
+
+    @Test
+    fun `a payload that throws completes as failed rather than never`() {
+        payload.recordingThrows = true
+        assertEquals(MavlinkCommandOutcome.FAILED, sink.stopVideoRecording().completion!!.get().outcome)
+    }
+
+    @Test
     fun `auto-sensing runs on the main thread and syncs the switch`() {
         sink.setAutoSensing(true)
         assertEquals(listOf("autoSensing:start", "autoSensingSwitch:true"), payload.calls)
@@ -291,7 +307,8 @@ class MavlinkPayloadPolicyTest {
         var dropPort: String? = null
         var dropAccepted = true
         var writeApplied = true
-        private var recordingResult = CommandResult(MavlinkCommandOutcome.ACCEPTED)
+        var recordingResult = CommandResult(MavlinkCommandOutcome.ACCEPTED)
+        var recordingThrows = false
 
         override fun rotateGimbal(rotation: GimbalRotation) {
             calls +=
@@ -318,6 +335,7 @@ class MavlinkPayloadPolicyTest {
 
         override fun stopRecording(): CommandResult {
             calls += "record:stop"
+            check(!recordingThrows) { "DJI error" }
             return recordingResult
         }
 

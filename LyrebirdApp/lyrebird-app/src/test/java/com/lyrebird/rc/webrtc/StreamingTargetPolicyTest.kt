@@ -34,6 +34,37 @@ class StreamingTargetPolicyTest {
     }
 
     @Test
+    fun aRenameRestartsAHealthyPublisherUnderTheNewPath() {
+        // The drone name is the WHIP path. Keeping the publisher would leave the video under the
+        // old name while QGroundControl is told the new one.
+        val decision =
+            StreamingTargetPolicy.decide(
+                "10.0.0.2",
+                "http://relay/mini7/whip",
+                PublisherState.PUBLISHING,
+                "10.0.0.2",
+                desiredWhipUrl = "http://relay/mini8/whip",
+            )
+
+        assertTrue(decision.shouldStart)
+        assertEquals("10.0.0.2", decision.targetIp)
+    }
+
+    @Test
+    fun anUnchangedPublishUrlKeepsTheHealthyPublisher() {
+        val decision =
+            StreamingTargetPolicy.decide(
+                "10.0.0.2",
+                "http://relay/mini7/whip",
+                PublisherState.PUBLISHING,
+                "10.0.0.2",
+                desiredWhipUrl = "http://relay/mini7/whip",
+            )
+
+        assertFalse(decision.shouldStart)
+    }
+
+    @Test
     fun anAbandonedPublisherIsRebuiltForTheClientThatAsksAgain() {
         val decision =
             StreamingTargetPolicy.decide(

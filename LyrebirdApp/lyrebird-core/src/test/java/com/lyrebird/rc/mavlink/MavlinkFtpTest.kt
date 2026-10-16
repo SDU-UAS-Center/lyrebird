@@ -118,12 +118,40 @@ class MavlinkFtpTest {
     }
 
     @Test
+    fun theReplySeqWrapsAt16Bits() {
+        assertEquals(0, MavlinkFtp.replySeq(0xFFFF))
+    }
+
+    @Test
     fun anUnknownOpcodeIsNakedWithUnknownCommand() {
         val reply = handle(request(1, 0, 99, 0))
         assertEquals(MavlinkFtp.OP_NAK, reply.opcode)
         assertEquals(MavlinkFtp.ERR_UNKNOWN_COMMAND, reply.error)
-        assertEquals(1, reply.seq)
+        assertEquals("a reply carries the request's seq plus one", 2, reply.seq)
         assertEquals(99, reply.reqOpcode)
+    }
+
+    @Test
+    fun aPx4VirtualFileIsRefusedAtOnceWithoutTouchingTheCamera() {
+        // QGC 5.2 opens @PARAM/param.pck on connect and waits for the answer. The executor here
+        // never runs anything and the source fails the test if asked, so a reply proves the NAK
+        // was sent inline rather than after a media lookup.
+        val untouchable =
+            object : MavlinkFtpServer.FtpFileSource {
+                override fun listFiles(): List<Pair<String, Long>> = throw AssertionError("listed")
+
+                override fun readFileBytes(name: String): ByteArray? = throw AssertionError("read $name")
+            }
+        val inlineOnly = MavlinkFtpServer(untouchable) { }
+        val path = "@PARAM/param.pck?withdefaults=1".toByteArray()
+        val replies = mutableListOf<ByteArray>()
+        inlineOnly.handle(request(5, 0, MavlinkFtp.OP_OPEN_FILE_RO, path.size, data = path)) { replies.add(it) }
+
+        val reply = Reply(replies.single())
+        assertEquals(MavlinkFtp.OP_NAK, reply.opcode)
+        assertEquals(MavlinkFtp.ERR_FILE_NOT_FOUND, reply.error)
+        assertEquals(6, reply.seq)
+        assertEquals(MavlinkFtp.OP_OPEN_FILE_RO, reply.reqOpcode)
     }
 
     @Test

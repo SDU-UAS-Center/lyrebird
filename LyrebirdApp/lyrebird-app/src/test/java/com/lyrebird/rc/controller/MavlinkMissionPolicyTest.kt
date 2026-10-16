@@ -458,8 +458,12 @@ class MavlinkMissionPolicyTest {
 
         override fun canDispatchFlightCommands() = true
 
-        override fun takeoff() {
+        /** DJI's answer to the next take-off: null accepts it, a reason refuses it. */
+        var takeoffRefusal: String? = null
+
+        override fun takeoff(onResult: (refusal: String?) -> Unit) {
             calls += "takeoff"
+            onResult(takeoffRefusal)
         }
 
         override fun land() {

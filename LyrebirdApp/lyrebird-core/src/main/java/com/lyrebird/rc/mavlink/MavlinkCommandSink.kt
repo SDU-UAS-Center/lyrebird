@@ -110,6 +110,12 @@ interface MavlinkCommandSink {
 data class PendingCommand(
     val kind: PendingKind,
     val seq: Long,
+    /**
+     * The motion policy's count of movement commands when this one was issued, or null where no
+     * one counts. A return home, landing or abort replaces a go-to without moving its reach latch,
+     * so the latch alone left a replaced go-to "in progress" until the completion timeout.
+     */
+    val generation: Long? = null,
 )
 
 /** Which reach latch a [PendingCommand] is waiting on. */
@@ -185,6 +191,16 @@ data class CommandResult(
      * result_param2 is an int32 — the scaling is what keeps a fractional reading intact.
      */
     val resultValue: Int = 0,
+    /**
+     * Set when the command was accepted and its real outcome arrives later, for a payload action
+     * that blocks on the aircraft (starting a recording takes DJI ~1.6 s).
+     *
+     * The endpoint acknowledges IN_PROGRESS at once and the completed result as the final ack,
+     * so the receive thread never waits on the aircraft and a ground station with a short ack
+     * timeout (QGroundControl 5.2: 1.2 s) hears back in time. The decision to run — authority,
+     * logging — is still made synchronously; only the wait moves to a worker.
+     */
+    val completion: java.util.concurrent.CompletableFuture<CommandResult>? = null,
 ) {
     val mavResult: Int get() = outcome.mavResult
 }

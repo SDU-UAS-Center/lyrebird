@@ -88,7 +88,7 @@ object MavlinkFtp {
      * client how much of it is meaningful.
      */
     fun ack(
-        seq: Int,
+        requestSeq: Int,
         session: Int,
         reqOpcode: Int,
         size: Int,
@@ -96,7 +96,7 @@ object MavlinkFtp {
         data: ByteArray = EMPTY,
     ): ByteArray =
         PayloadWriter(PAYLOAD_BYTES)
-            .u16(seq)
+            .u16(replySeq(requestSeq))
             .u8(session)
             .u8(OP_ACK)
             .u8(size)
@@ -109,13 +109,13 @@ object MavlinkFtp {
 
     /** A NAK reply; [error] is one of the MAV_FTP_ERR values, carried in data[0]. */
     fun nak(
-        seq: Int,
+        requestSeq: Int,
         session: Int,
         reqOpcode: Int,
         error: Int,
     ): ByteArray =
         PayloadWriter(PAYLOAD_BYTES)
-            .u16(seq)
+            .u16(replySeq(requestSeq))
             .u8(session)
             .u8(OP_NAK)
             .u8(1) // size: one byte of error information
@@ -125,6 +125,14 @@ object MavlinkFtp {
             .u32(0)
             .bytes(byteArrayOf((error and 0xFF).toByte()), DATA_BYTES)
             .build()
+
+    /**
+     * A reply carries the request's seq plus one, wrapping at 16 bits. The MAVLink FTP spec and
+     * PX4 (`payload->seq_number++` before every reply) both do this, and QGroundControl discards a
+     * reply whose seq is not the next one — echoing the request's seq made it ignore every answer
+     * and wait out a 3 s timeout per step.
+     */
+    fun replySeq(requestSeq: Int): Int = (requestSeq + 1) and 0xFFFF
 
     private val EMPTY = ByteArray(0)
 }

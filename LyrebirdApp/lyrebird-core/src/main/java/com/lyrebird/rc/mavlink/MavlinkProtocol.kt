@@ -27,6 +27,10 @@ object MavlinkMsgId {
     /** Gimbal attitude, from the gimbal v2 microservice we already advertise. */
     const val GIMBAL_DEVICE_ATTITUDE_STATUS = 285
 
+    /** The gimbal v2 manager half: what QGroundControl needs before it shows gimbal controls. */
+    const val GIMBAL_MANAGER_INFORMATION = 280
+    const val GIMBAL_MANAGER_STATUS = 281
+
     /** The laser rangefinder's range, as a standard ranging sensor. */
     const val DISTANCE_SENSOR = 132
 
@@ -55,6 +59,14 @@ object MavlinkMsgId {
     const val EXTENDED_SYS_STATE = 245
     const val BATTERY_STATUS = 147
     const val AUTOPILOT_VERSION = 148
+
+    /**
+     * Answered on request so a ground station keeps talking MAVLink 2. QGroundControl 5.0
+     * requests it on connect and, when the vehicle cannot report it, assumes MAVLink 1 and
+     * switches its framing — which this endpoint does not read, so every request after that
+     * went unanswered.
+     */
+    const val PROTOCOL_VERSION = 300
     const val HOME_POSITION = 242
     const val STATUSTEXT = 253
 
@@ -149,6 +161,9 @@ object Mav {
     const val PX4_MODE_RTL = (4 shl 16) or (5 shl 24)
     const val PX4_MODE_FOLLOW_TARGET = (4 shl 16) or (8 shl 24)
 
+    /** PX4 AUTO.LOITER, "Hold": never reported, but MAVSDK requests it before every go-to. */
+    const val PX4_MODE_LOITER = (4 shl 16) or (3 shl 24)
+
     const val COMP_ID_AUTOPILOT1 = 1
 
     /**
@@ -197,6 +212,9 @@ object Mav {
     const val CMD_VIDEO_START_CAPTURE = 2500
     const val CMD_VIDEO_STOP_CAPTURE = 2501
     const val CMD_DO_GIMBAL_MANAGER_PITCHYAW = 1000
+
+    /** Take or release control of the gimbal; QGroundControl sends it before any setpoint. */
+    const val CMD_DO_GIMBAL_MANAGER_CONFIGURE = 1001
 
     /**
      * The legacy gimbal-aim command. param1 is pitch, param2 is roll (unsupported, ignored),

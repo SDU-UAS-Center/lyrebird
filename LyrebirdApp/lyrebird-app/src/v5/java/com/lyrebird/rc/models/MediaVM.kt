@@ -1,5 +1,6 @@
 package com.lyrebird.rc.models
 
+import android.util.Log
 import androidx.lifecycle.MutableLiveData
 import com.lyrebird.rc.R
 import com.lyrebird.rc.data.DJIToastResult
@@ -106,8 +107,11 @@ class MediaVM : DJIViewModel() {
         val manager = MediaDataCenter.getInstance().mediaManager
         val latch = CountDownLatch(1)
         val stateListener = MediaFileListStateListener { state ->
+            Log.d(PULL_TAG, "media list state: $state")
             if (state == MediaFileListState.UP_TO_DATE) latch.countDown()
         }
+        val before = manager.mediaFileListData?.data?.size ?: 0
+        val startedAt = System.currentTimeMillis()
         manager.addMediaFileListStateListener(stateListener)
         try {
             // Issue the pull on the main looper (matches how the rest of the app drives the SDK),
@@ -119,17 +123,36 @@ class MediaVM : DJIViewModel() {
                     builder.build(),
                     object : CommonCallbacks.CompletionCallback {
                         override fun onSuccess() { latch.countDown() }
-                        override fun onFailure(error: IDJIError) { latch.countDown() }
+                        override fun onFailure(error: IDJIError) {
+                            // Used to be silent: the caller then got the previous list back and
+                            // could not tell it from a fresh one.
+                            Log.w(
+                                PULL_TAG,
+                                "media list pull failed: code=${error.errorCode()} " +
+                                    "type=${error.errorType()} ${error.description()}"
+                            )
+                            latch.countDown()
+                        }
                     }
                 )
             }
-            latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+            if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+                Log.w(PULL_TAG, "media list pull timed out after $timeoutMs ms")
+            }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
         } finally {
             manager.removeMediaFileListStateListener(stateListener)
         }
-        return manager.mediaFileListData?.data ?: emptyList()
+        val files = manager.mediaFileListData?.data ?: emptyList()
+        Log.i(
+            PULL_TAG,
+            "media list pull: ${files.size} file(s) (was $before) in " +
+                "${System.currentTimeMillis() - startedAt} ms, " +
+                // DJI names start with the capture timestamp, so the largest name is the newest.
+                "newest=${files.mapNotNull { it.fileName }.maxOrNull()}"
+        )
+        return files
     }
 
     private fun addMediaFileListStateListener() {
@@ -338,5 +361,10 @@ class MediaVM : DJIViewModel() {
             }
 
         })
+    }
+
+    private companion object {
+        /** One tag for every media-list refresh, so `adb logcat | grep LyrebirdMedia` shows them all. */
+        const val PULL_TAG = "LyrebirdMedia"
     }
 }

@@ -54,10 +54,7 @@ internal object ProcessFleetRuntime : FleetRuntimeCallbacks {
 
     override val fleetDroneNameForRuntime: String
         get() =
-            preferences
-                ?.getString(LyrebirdSettings.PREF_DRONE_NAME, "")
-                ?.trim()
-                .takeUnless { it.isNullOrEmpty() }
+            preferences?.let { LyrebirdSettings(it).droneName(ProcessTelemetryRuntimeRegistry.droneSerial) }
                 ?: LyrebirdSettings.DEFAULT_DRONE_NAME
 
     override fun buildFleetBeaconForRuntime(): FleetBeacon? {

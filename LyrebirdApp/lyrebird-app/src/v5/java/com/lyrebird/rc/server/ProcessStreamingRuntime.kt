@@ -8,6 +8,7 @@ import android.util.Log
 import com.lyrebird.rc.StreamingMode
 import com.lyrebird.rc.models.LiveStreamVM
 import com.lyrebird.rc.settings.LyrebirdSettings
+import com.lyrebird.rc.telemetry.ProcessTelemetryRuntimeRegistry
 import com.lyrebird.rc.webrtc.PublisherState
 import com.lyrebird.rc.webrtc.StreamingTargetPolicy
 import com.lyrebird.rc.webrtc.V5NativeStreamingCoordinator
@@ -126,6 +127,7 @@ private class ProcessStreamingRuntime {
                 onStatus = { status -> uiRef.get()?.streamingUiOnState(status) },
                 onMessage = { message -> uiRef.get()?.streamingUiOnMessage(message) },
                 onConfigChanged = { uiRef.get()?.streamingUiOnConfigChanged() },
+                serialProvider = { ProcessTelemetryRuntimeRegistry.droneSerial },
             )
         // Someone may already be waiting: the network session accepts a telemetry client long
         // before the SDK registers, and such a request was only remembered. Nothing else asks
@@ -155,7 +157,8 @@ private class ProcessStreamingRuntime {
             V5WebRtcStreamerFactory(
                 context = appContext,
                 cameraIndex = ComponentIndexType.LEFT_OR_MAIN,
-                droneName = settings.droneName,
+                // Read per frame, not captured here: the streamer outlives a rename.
+                droneName = { settings.droneName },
                 options = settings.options,
                 configuredServer = { settings.configuredServer() },
                 clearConfiguredServer = { settings.clearConfiguredServer() },
@@ -222,6 +225,7 @@ private class ProcessStreamingRuntime {
                 previousWhipUrl = lastWhipUrl,
                 publisherState = publisherState,
                 clientIp = clientIp,
+                desiredWhipUrl = if (settings.mode == StreamingMode.WEBRTC) settings.whipUrl(clientIp) else null,
             )
         if (!decision.shouldStart) {
             if (lastClientIp != clientIp) {

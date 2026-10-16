@@ -4,7 +4,7 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # ROS distro for the image. Lyrical (the current LTS) matches the Dockerfile default;
-# override for the alternative Humble build:  ROS_DISTRO=humble ./run_docker.sh
+# override for the alternative builds:  ROS_DISTRO=jazzy ./run_docker.sh  (or humble)
 ROS_DISTRO="${ROS_DISTRO:-lyrical}"
 
 # Build the Docker image. The build context is the repository root, because the image

@@ -7,7 +7,7 @@ import dji.sdk.keyvalue.value.common.ComponentIndexType
 internal class V5WebRtcStreamerFactory(
     context: Context,
     private val cameraIndex: ComponentIndexType,
-    private val droneName: String,
+    private val droneName: () -> String,
     private val options: WebRTCMediaOptions,
     private val configuredServer: () -> String,
     private val clearConfiguredServer: () -> Unit,

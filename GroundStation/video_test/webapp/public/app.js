@@ -1087,6 +1087,15 @@ function initTheme() {
 initTheme();
 
 function renderVideoTiles(state) {
+  // A drone renamed on the aircraft arrives under its new name; drop the tile still playing the
+  // stream path that went away with the old one.
+  for (const [name, player] of players) {
+    if (!state.drones.some((drone) => drone.name === name)) {
+      player.close();
+      player.tile.remove();
+      players.delete(name);
+    }
+  }
   for (const drone of state.drones) {
     let player = players.get(drone.name);
     if (!player) {

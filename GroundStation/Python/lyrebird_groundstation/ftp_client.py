@@ -54,8 +54,13 @@ ERR_EOF = 6
 ERR_UNKNOWN_COMMAND = 7
 ERR_FILE_NOT_FOUND = 10
 
-#: The aircraft answers FTP from its MAVLink endpoint: system id 127, autopilot component 1.
-AIRCRAFT_SYSTEM_ID = 127
+#: Requests go to MAVLink's broadcast system id (0) by default. The aircraft's own id is
+#: configurable (LB_MAV_SYSID, or derived automatically), and it drops frames addressed to any
+#: other system, so a fixed id here silently timed out against every aircraft not using it.
+#: Broadcast is safe because the datagram is unicast to one aircraft's address anyway; pass
+#: target_system to name one explicitly.
+DEFAULT_TARGET_SYSTEM = 0
+#: The aircraft answers FTP from its autopilot component.
 AIRCRAFT_COMPONENT_ID = 1
 
 #: How long to keep resending a request before giving up, and how often to resend.
@@ -123,6 +128,11 @@ def _parse_reply(payload: bytes) -> FtpReply | None:
     )
 
 
+def _reply_seq(request_seq: int) -> int:
+    """The seq a reply to [request_seq] carries: one more, wrapping at 16 bits."""
+    return (request_seq + 1) & 0xFFFF
+
+
 def _request_payload(
     seq: int,
     session: int,
@@ -159,7 +169,7 @@ class MavlinkFtpClient:
         self,
         host: str,
         port: int = DEFAULT_MAVLINK_PORT,
-        target_system: int = AIRCRAFT_SYSTEM_ID,
+        target_system: int = DEFAULT_TARGET_SYSTEM,
         target_component: int = AIRCRAFT_COMPONENT_ID,
         src_system: int = 255,
         src_component: int = 190,
@@ -316,7 +326,8 @@ class MavlinkFtpClient:
         once and waited out, so a lost final reply cannot trigger duplicate work.
 
         Replies are matched on the exact seq, so a stale reply from an earlier timed-out request
-        can never satisfy a newer one — the aircraft echoes the request's seq back.
+        can never satisfy a newer one. Per the MAVLink FTP spec (and PX4, and QGroundControl) a
+        reply carries the request's seq plus one.
         """
         seq = self._next_seq()
         payload = _request_payload(seq, session, opcode, size, offset, data)
@@ -329,11 +340,11 @@ class MavlinkFtpClient:
                 self._send(payload)
                 last_send = now
             if not resend:
-                reply = self._await(seq, max(0.0, deadline - time.time()))
+                reply = self._await(_reply_seq(seq), max(0.0, deadline - time.time()))
                 if reply is None:
                     raise FtpTimeoutError(f"no FTP reply for opcode {opcode} seq {seq}")
                 return reply
-            reply = self._await(seq, min(RESEND_INTERVAL, deadline - now))
+            reply = self._await(_reply_seq(seq), min(RESEND_INTERVAL, deadline - now))
             if reply is not None:
                 return reply
             if time.time() >= deadline:

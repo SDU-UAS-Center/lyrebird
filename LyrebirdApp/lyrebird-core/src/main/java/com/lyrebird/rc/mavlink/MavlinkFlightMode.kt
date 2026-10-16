@@ -70,7 +70,29 @@ enum class MavlinkFlightMode(
          * when the number is not one of ours. The endpoint acts on the modes with a DJI
          * equivalent (takeoff, land, return) and refuses the rest.
          */
-        fun fromPx4Mode(customMode: Int): MavlinkFlightMode? = BY_CUSTOM_MODE[customMode]
+        fun fromPx4Mode(customMode: Int): MavlinkFlightMode? =
+            // Hold is requested but never reported: stopping where it is, it is what Lyrebird's
+            // position hold already does, and a second mode with the same meaning would only put
+            // a duplicate in the ground station's mode picker.
+            if (customMode == Mav.PX4_MODE_LOITER) POSITION_HOLD else BY_CUSTOM_MODE[customMode]
+
+        /**
+         * The packed PX4 custom_mode a `MAV_CMD_DO_SET_MODE` asks for.
+         *
+         * PX4 splits it across two params: param2 is the main mode and param3 the sub mode, which
+         * is how MAVSDK sends Return as (4, 5) and Hold as (4, 3). Lyrebird's own Python client
+         * sends the already-packed number in param2 instead. The two cannot be confused: a main
+         * mode is a small number, and a packed one is at least 1 shl 16.
+         */
+        fun px4ModeFromDoSetMode(
+            param2: Float,
+            param3: Float,
+        ): Int {
+            val main = param2.toInt()
+            if (main >= 1 shl 16) return main
+            val sub = if (param3.isFinite()) param3.toInt() else 0
+            return (main shl 16) or (sub shl 24)
+        }
 
         /**
          * Map a DJI flight-mode name onto a Lyrebird mode.

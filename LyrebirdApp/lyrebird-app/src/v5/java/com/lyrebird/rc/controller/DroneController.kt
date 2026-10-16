@@ -705,14 +705,21 @@ object DroneController {
         primitives?.sendManualStick(ManualStick(leftX = leftX, leftY = leftY, rightX = rightX, rightY = rightY))
     }
 
-    fun startTakeOff() {
+    /** [onResult] gets null when DJI accepts the take-off, otherwise DJI's reason for refusing. */
+    fun startTakeOff(onResult: (refusal: String?) -> Unit = {}) {
         // Disable virtual sticks first to ensure no control loops are running before takeoff
         disableVirtualStick()
+        val control = basicAircraftControlVM
+        if (control == null) {
+            onResult("aircraft control is not ready")
+            return
+        }
         setDroneStatus(DroneStatus.TAKING_OFF)
-        basicAircraftControlVM?.startTakeOff(
+        control.startTakeOff(
             object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
                 override fun onSuccess(t: EmptyMsg?) {
                     ToastUtils.showToast("start takeOff onSuccess.")
+                    onResult(null)
                     // Auto-reset after ~12 s; telemetry will upgrade IDLE → HOVERING if airborne
                     statusResetHandler.postDelayed({
                         if (droneStatus == DroneStatus.TAKING_OFF) setDroneStatus(DroneStatus.IDLE)
@@ -722,6 +729,7 @@ object DroneController {
                 override fun onFailure(error: IDJIError) {
                     setDroneStatus(DroneStatus.IDLE)
                     ToastUtils.showToast("start takeOff onFailure, $error")
+                    onResult(error.description()?.takeIf { it.isNotBlank() } ?: error.errorCode())
                 }
             },
         )

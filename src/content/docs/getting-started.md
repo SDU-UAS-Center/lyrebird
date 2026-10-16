@@ -22,28 +22,102 @@ git clone https://github.com/SDU-UAS-Center/lyrebird.git
 2. Create `local.properties` from the template and set the Android SDK path for your machine:
 
    ```bash
-   cd Lyrebird/LyrebirdApp/android-sdk-v5-as
+   cd lyrebird/LyrebirdApp/android-sdk-v5-as
    cp local.properties.example local.properties
+   nano local.properties
    ```
 
-   Example for a default Linux Android Studio install:
+   Set `sdk.dir` to your Android SDK path. Example for a default Linux Android Studio install:
 
    ```properties
    sdk.dir=/home/your-user/Android/Sdk
    ```
 
-3. Add your DJI API key to `local.properties`:
+3. Get your DJI API key. Sign in at [developer.dji.com](https://developer.dji.com/), open **Developer Center → Apps**, and create a new app with these properties:
 
-   ```properties
-   AIRCRAFT_API_KEY="Your_App_Key"
+   | Field | Value |
+   | --- | --- |
+   | SDK Type | Mobile SDK |
+   | App Name | Lyrebird (or any name you like) |
+   | Software Platform | Android |
+   | Package Name | `com.lyrebird.rc` |
+   | Category | Research (or whatever fits your use) |
+   | Description | Any short description |
+
+   The **Package Name** must be exactly `com.lyrebird.rc` — it has to match the app's `applicationId`, or the DJI SDK will reject the key at registration. After the app is created (DJI may ask you to activate it from a confirmation email first), open it from the Apps list and copy the **App Key**:
+
+   ![DJI Developer Center app information page, with the App Key hidden](../../../docs/images/dji_app_info_key_hidden.png)
+
+4. Add your DJI API key to `local.properties`:
+
+   ```bash
+   nano local.properties
    ```
 
-4. Build and deploy to your RC or Android phone (enable Developer Mode + USB Debugging first).
+   Replace the placeholder on the `AIRCRAFT_API_KEY` line with the App Key you copied:
+
+   ```properties
+   AIRCRAFT_API_KEY=Your_App_Key
+   ```
+
+5. Build and deploy to your RC or Android phone (enable Developer Mode + USB Debugging first).
 
 ## Command-line build
 
+If you prefer the terminal to Android Studio, all commands below run from `LyrebirdApp/android-sdk-v5-as`:
+
 ```bash
 cd LyrebirdApp/android-sdk-v5-as
+```
+
+### Build, install and launch in one step
+
+Make sure USB debugging is enabled on the RC or phone and plug it in over USB. Add `adb` to your `PATH` and check that the device shows up:
+
+```bash
+echo 'export PATH=$PATH:$HOME/Android/Sdk/platform-tools' >> ~/.bashrc
+source ~/.bashrc
+adb devices
+```
+
+On Linux, if `adb devices` shows `no permissions`, run these two commands, then log out and back in:
+
+```bash
+sudo apt install android-sdk-platform-tools-common
+sudo usermod -aG plugdev $USER
+```
+
+Then build, install and launch:
+
+```bash
+./auto_install_on_connect.sh --build
+```
+
+The script builds the debug APK, waits for the device to show up in ADB (Android Debug Bridge), installs the app and starts it. Drop `--build` to reinstall the APK you already built (it still builds one if none exists).
+
+The first time you connect, unlock the RC's screen and accept the **Allow USB debugging** prompt. Otherwise `adb devices` lists it as `unauthorized` and the script won't install.
+
+If the app was previously installed with a different DJI API key, uninstall it first, then rebuild and install:
+
+```bash
+adb uninstall com.lyrebird.rc
+./auto_install_on_connect.sh --build
+```
+
+### Several devices attached
+
+With more than one RC or phone connected, the script stops and lists them instead of guessing which one to install on. Pick one by serial (from `adb devices`), or install on all of them:
+
+```bash
+./auto_install_on_connect.sh --build --serial <serial>
+./auto_install_on_connect.sh --build --all
+```
+
+### Build only
+
+To build the APK without installing it:
+
+```bash
 ./gradlew :app:assembleCurrentV5Debug
 ```
 
@@ -53,17 +127,10 @@ The debug APK is written to:
 LyrebirdApp/lyrebird-app/build/outputs/apk/currentV5/debug/Lyrebird-current-v5-debug.apk
 ```
 
-To build/install `currentV5` when an Android device is connected over ADB:
+To check which APK the install script will use, and whether it has been built yet:
 
 ```bash
-cd LyrebirdApp/android-sdk-v5-as
-./auto_install_on_connect.sh currentV5 --build
-```
-
-To only check which APK will be used:
-
-```bash
-./auto_install_on_connect.sh currentV5 --check
+./auto_install_on_connect.sh --check
 ```
 
 ## Start the server
@@ -85,7 +152,7 @@ Both interfaces are enabled by default — pick whichever fits, or run both side
 
 ### MAVLink 2 (QGroundControl, MAVSDK, pymavlink — UDP 14550)
 
-Point QGroundControl at the RC's IP address and it connects automatically — Fly View and Plan view both light up with no plugin and no configuration file. To check the link without QGroundControl:
+Point QGroundControl at the RC's IP address and it connects automatically — Fly View and Plan view both light up with no plugin and no configuration file. Tested with QGroundControl 5.0.8 and 5.2.0 — see [Using QGroundControl](/mavlink/#using-qgroundcontrol) for flying, video, gimbal and camera. To check the link without QGroundControl:
 
 ```bash
 uv run --locked --group mavlink lyrebird-mavlink-listen --summary 5

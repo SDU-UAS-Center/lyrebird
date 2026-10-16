@@ -255,9 +255,27 @@ internal class MavlinkPayloadPolicy(
                 return CommandResult(MavlinkCommandOutcome.ACCEPTED)
             }
 
-            override fun startVideoRecording(): CommandResult = payload.startRecording()
+            override fun startVideoRecording(): CommandResult = runLater { payload.startRecording() }
 
-            override fun stopVideoRecording(): CommandResult = payload.stopRecording()
+            override fun stopVideoRecording(): CommandResult = runLater { payload.stopRecording() }
+
+            /**
+             * Accept now, finish on the capture worker. DJI confirms a recording start only after
+             * about 1.6 s, which used to be spent on the endpoint's receive thread and past
+             * QGroundControl 5.2's 1.2 s ack timeout: it reported "did not respond" for a recording
+             * that had started. The endpoint answers IN_PROGRESS and sends this result when done.
+             */
+            private fun runLater(action: () -> CommandResult): CommandResult {
+                val completion = java.util.concurrent.CompletableFuture<CommandResult>()
+                host.runCapture {
+                    completion.complete(
+                        runCatching(action)
+                            .onFailure { Log.e(TAG, "Recording command failed: ${it.message}", it) }
+                            .getOrElse { CommandResult(MavlinkCommandOutcome.FAILED) },
+                    )
+                }
+                return CommandResult(MavlinkCommandOutcome.ACCEPTED, completion = completion)
+            }
 
             /**
              * Trip one shutter.

@@ -59,6 +59,8 @@ object MavlinkCrc {
             MavlinkMsgId.PARAM_EXT_SET to 78,
             MavlinkMsgId.PARAM_EXT_ACK to 132,
             MavlinkMsgId.GIMBAL_DEVICE_ATTITUDE_STATUS to 137,
+            MavlinkMsgId.GIMBAL_MANAGER_INFORMATION to 70,
+            MavlinkMsgId.GIMBAL_MANAGER_STATUS to 48,
             MavlinkMsgId.DISTANCE_SENSOR to 85,
             // Generated from lyrebird.xml with pymavlink's mavgen, not computed by hand.
             MavlinkMsgId.LYREBIRD_STATUS to 196,
@@ -66,6 +68,8 @@ object MavlinkCrc {
             MavlinkMsgId.AUTOSENSING_STATUS to 254,
             MavlinkMsgId.AUTOSENSING_TARGET to 83,
             MavlinkMsgId.PARAM_REQUEST_LIST to 159,
+            // Sent on request; keeps QGroundControl 5.0 from falling back to MAVLink 1.
+            MavlinkMsgId.PROTOCOL_VERSION to 217,
             MavlinkMsgId.MISSION_REQUEST_LIST to 132,
         )
 

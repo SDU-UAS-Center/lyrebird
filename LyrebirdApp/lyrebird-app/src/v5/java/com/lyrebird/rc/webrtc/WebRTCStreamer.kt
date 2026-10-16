@@ -22,7 +22,7 @@ import java.net.URL
 class WebRTCStreamer(
     context: Context,
     private val cameraIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
-    private val droneName: String = "drone_1",
+    private val droneName: () -> String = { "drone_1" },
     private val options: WebRTCMediaOptions = WebRTCMediaOptions(),
 ) {
     companion object {

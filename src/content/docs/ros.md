@@ -4,7 +4,7 @@ description: The lyrebird_controller node follows PX4's uXRCE-DDS topic conventi
 breadcrumb: Interfaces
 ---
 
-Full ROS 2 Humble package. `lyrebird_controller` follows PX4's real uXRCE-DDS topic convention as
+ROS 2 packages for Lyrical (the default), Jazzy and Humble. `lyrebird_controller` follows PX4's real uXRCE-DDS topic convention as
 closely as DJI's telemetry/command surface allows: telemetry is grouped into typed messages under
 `fmu/out/...`, and discrete actions are dispatched through one `fmu/in/vehicle_command` topic keyed
 by a MAV_CMD-style command id -- the same shape as PX4's real `VehicleCommand`/MAVLink
@@ -19,6 +19,34 @@ but keeps PX4's snake_case naming style.
 It checks for new telemetry at 20 Hz but publishes only when the drone has actually sent a new
 snapshot, so the topic rate follows the aircraft's telemetry interval (default ~2 Hz) rather than
 repeating each sample.
+
+## Compared with PX4's `px4_msgs`
+
+The topics and message names follow PX4, but the messages are `lyrebird_msgs`, not `px4_msgs`. In
+ROS 2 the package is part of the type, so a node written against `px4_msgs/msg/VehicleCommand` does
+not connect to Lyrebird's `lyrebird_msgs/msg/VehicleCommand`, even on the same topic name and with
+the same fields. How close each message is:
+
+| Lyrebird message | Compared with `px4_msgs` |
+|---|---|
+| `VehicleCommand` | Nearly identical: same fields and the same MAV_CMD ids (take-off 22, RTL 20, gimbal 1000, ...). PX4 also has `confirmation`. Lyrebird adds `VEHICLE_CMD_LYREBIRD_*` ids in MAVLink's user range for DJI-only actions. |
+| `VehicleCommandAck` | Nearly identical: same result codes. Lyrebird adds `seq`, the go-to number that `mission_result` reports arrival under. |
+| `VehicleGlobalPosition`, `HomePosition`, `BatteryStatus`, `ManualControlSetpoint` | Subsets with PX4's field names (`lat`/`lon`/`alt`, `valid_hpos`, `remaining`, `time_remaining_s`, `roll`/`pitch`/`yaw`/`throttle`). Many PX4 fields are absent; DJI-specific ones are added. |
+| `TrajectorySetpoint` | Different meaning. PX4's is a local NED position/velocity setpoint streamed in offboard mode; Lyrebird's is a single GPS go-to (latitude, longitude, altitude, speed, yaw mode) that the aircraft flies on its own. |
+| `VehicleLocalPosition` | Different: velocity, heading and height above take-off, but no x/y/z position; attitude as JSON text. |
+| `VehicleStatus` | Different: DJI's flight-mode name as text, the manual-override latch and take-off readiness, instead of PX4's numeric `nav_state` and `arming_state`. |
+| `OffboardControlMode`, `VehicleOdometry`, `VehicleAttitude` | Not provided. There is no arming and no offboard mode to enter. |
+| `MissionResult`, `GimbalStatus`, `CameraStatus` | Lyrebird's own, for what PX4 has no equivalent of (go-to arrival latches, DJI gimbal and camera). |
+
+So PX4 ROS 2 code needs porting, not just new imports: the command path ports almost directly, the
+setpoint and status logic does not. [`GroundStation/examples/ros2_flight.py`](https://github.com/SDU-UAS-Center/lyrebird/blob/main/GroundStation/examples/ros2_flight.py)
+flies take-off, a go-to and return home with these messages.
+
+Real `px4_msgs` compatibility can be added later if it is needed: an adapter node that speaks the
+real `px4_msgs` types (pinned to one PX4 release, since those definitions change between releases)
+could map the nearly identical messages directly. Running PX4 offboard code unchanged would also
+need PX4's offboard model emulated on DJI: arming, `OffboardControlMode`, local NED setpoints
+streamed at 10 Hz or more, and `nav_state`.
 
 ## Package structure
 
@@ -229,13 +257,22 @@ migrate to the new ones; see `lyrebird_controller/topics.py` for the exact remap
 
 **Docker (single-drone, auto-discovery):**
 
+From the repository root (the image installs the Python side from `pyproject.toml` and `uv.lock`, which live there):
+
 ```bash
-cd GroundStation
-docker build -t lyrebird-ros .
+docker build -t lyrebird-ros -f GroundStation/Dockerfile .
 docker run --rm --network=host lyrebird-ros
 ```
 
-The image is based on `ros:lyrical-ros-base` (ROS 2 Lyrical, the current LTS) with CycloneDDS, `cv-bridge`, `vision-opencv`, `image-transport`, plus all Python dependencies. The legacy Humble variant builds from the same Dockerfile with `docker build --build-arg ROS_DISTRO=humble -t lyrebird-ros .`.
+The image is based on `ros:lyrical-ros-base` (ROS 2 Lyrical, the current LTS) with CycloneDDS, `cv-bridge`, `vision-opencv`, `image-transport`, plus the Python client and pymavlink. Jazzy and the legacy Humble build from the same Dockerfile with `--build-arg ROS_DISTRO=jazzy` (or `humble`), or `ROS_DISTRO=jazzy ./GroundStation/run_docker.sh`.
+
+numpy and OpenCV in the image are the distribution's own packages, the ones its `cv_bridge` is compiled against: a newer numpy installed over them breaks every image conversion.
+
+| Distro | Ubuntu | Python | numpy / OpenCV (from the distro) |
+|---|---|---|---|
+| Lyrical (default) | 26.04 | 3.14 | 2.3 / 4.10 |
+| Jazzy | 24.04 | 3.12 | 1.26 / 4.6 |
+| Humble | 22.04 | 3.10 | 1.21 / 4.5 |
 
 **Manual multi-drone launch:**
 
