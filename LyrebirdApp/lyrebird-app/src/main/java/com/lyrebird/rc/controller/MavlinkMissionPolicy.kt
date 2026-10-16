@@ -1,6 +1,7 @@
 package com.lyrebird.rc.controller
 
 import android.util.Log
+import com.lyrebird.rc.fleet.FleetGeo
 import com.lyrebird.rc.mavlink.CommandResult
 import com.lyrebird.rc.mavlink.DistanceTrigger
 import com.lyrebird.rc.mavlink.GimbalRotation
@@ -212,12 +213,22 @@ internal class MavlinkMissionPolicy(
                                 // their whole purpose is to be in force for the legs that follow.
                                 item.speedMps?.let { speed = it }
                                 listener?.onItemStarted(index)
-                                if (!executePlanAction(item)) {
-                                    listener?.onMissionFinished(false)
-                                    running = false
-                                    return@runAsync
+                                when (executePlanAction(item)) {
+                                    PlanStep.CONTINUE -> listener?.onItemReached(index)
+                                    PlanStep.END -> {
+                                        // A land or a return is the plan's own last word: the
+                                        // plan is complete, not cut short.
+                                        listener?.onItemReached(index)
+                                        listener?.onMissionFinished(true)
+                                        running = false
+                                        return@runAsync
+                                    }
+                                    PlanStep.ABORT -> {
+                                        listener?.onMissionFinished(false)
+                                        running = false
+                                        return@runAsync
+                                    }
                                 }
-                                listener?.onItemReached(index)
                                 continue
                             }
 
@@ -241,13 +252,13 @@ internal class MavlinkMissionPolicy(
             /**
              * Carry out a plan item that is not a leg.
              *
-             * Returns false only for the items that end the plan — a land or a return has nothing
+             * [PlanStep.END] for the items that end the plan — a land or a return has nothing
              * after it, and continuing to the next waypoint would fly away from a descent already
-             * under way. A payload action that fails is logged and the plan carries on: a camera
-             * that will not switch mode is a worse photograph, not a reason to abandon a survey
-             * mid-air.
+             * under way. [PlanStep.ABORT] only when a take-off did not complete. A payload action
+             * that fails is logged and the plan carries on: a camera that will not switch mode is a
+             * worse photograph, not a reason to abandon a survey mid-air.
              */
-            private fun executePlanAction(item: MissionItem): Boolean {
+            private fun executePlanAction(item: MissionItem): PlanStep {
                 when (item.command) {
                     Mav.CMD_SET_CAMERA_MODE -> host.setCameraMode(item.param2.toInt())
                     Mav.CMD_IMAGE_START_CAPTURE -> commandSink.captureImage()
@@ -310,26 +321,43 @@ internal class MavlinkMissionPolicy(
                         }
                     Mav.CMD_NAV_TAKEOFF -> {
                         // Through the gated motion sink, not the raw port: a plan's take-off obeys
-                        // the same authority gate and post-takeoff climb as a commanded one.
-                        motionSink.takeoff(item.altitudeM.toFloat().takeIf { it > 0f })
+                        // the same authority gate as a commanded one. But without its height: the
+                        // sink's post-takeoff climb runs in the background and starts seconds
+                        // later, so it replaced the plan's first leg the moment it fired and the
+                        // mission hovered at the take-off height, waiting for a leg that was gone.
+                        // The plan climbs itself instead, and waits for it, before going on.
+                        motionSink.takeoff(null)
                         if (!awaitAirborne()) {
                             Log.w(TAG, "Take-off did not complete in time; aborting mission")
-                            return false
+                            return PlanStep.ABORT
+                        }
+                        val height = item.altitudeM.takeIf { it > 0.0 }
+                        if (height != null && !climbTo(height)) {
+                            Log.w(TAG, "Take-off climb to ${height}m did not complete; aborting mission")
+                            return PlanStep.ABORT
                         }
                     }
+                    // The plan stops counting as running before the command goes out. The motion
+                    // sink stops a running mission first, as it must for a land or return from a
+                    // ground station; for the plan's own last item that stopped the plan itself,
+                    // reported it incomplete, and queued an abort that ran after the return began
+                    // -- which erased the app's "returning home" state, so DJI's return was then
+                    // taken for one the pilot started and latched manual override.
                     Mav.CMD_NAV_LAND -> {
+                        running = false
                         motionSink.land()
-                        return false
+                        return PlanStep.END
                     }
                     Mav.CMD_NAV_RETURN_TO_LAUNCH -> {
+                        running = false
                         motionSink.returnToHome()
-                        return false
+                        return PlanStep.END
                     }
                     // A speed change has already been folded into the running speed above; there
                     // is nothing else to do with it.
                     else -> Log.d(TAG, "Plan item ${item.command} has no action")
                 }
-                return true
+                return PlanStep.CONTINUE
             }
 
             /**
@@ -344,7 +372,10 @@ internal class MavlinkMissionPolicy(
                 speed: Double,
                 isLast: Boolean,
             ): Long {
-                val yaw = if (item.noseForward) 0.0 else item.param4.toDouble()
+                // A nose-forward leg ends by rotating in place to its final heading. The leg's own
+                // direction makes that rotation nothing: the aircraft arrives facing the way it
+                // flew. A fixed 0 here turned it to north at every waypoint.
+                val yaw = if (item.noseForward) legBearingDeg(item) else item.param4.toDouble()
                 val arrival =
                     WaypointArrival(
                         acceptanceRadiusM = item.acceptanceRadiusM,
@@ -362,6 +393,13 @@ internal class MavlinkMissionPolicy(
                     noseForward = item.noseForward,
                     arrival = arrival,
                 )
+            }
+
+            /** Bearing from the aircraft's position to this leg's waypoint; 0 without a fix. */
+            private fun legBearingDeg(item: MissionItem): Double {
+                val here = telemetry.read().location
+                if (here.latitudeDeg == 0.0 && here.longitudeDeg == 0.0) return 0.0
+                return FleetGeo.bearingDeg(here.latitudeDeg, here.longitudeDeg, item.latitudeDeg, item.longitudeDeg)
             }
 
             /**
@@ -382,6 +420,30 @@ internal class MavlinkMissionPolicy(
                             !host.isTakeoffStillClimbing()
                     if (airborne) return true
                     runCatching { scheduler.sleepMs(TAKEOFF_POLL_MS) }.onFailure {
+                        Thread.currentThread().interrupt()
+                        return false
+                    }
+                }
+                return false
+            }
+
+            /**
+             * Climb to the take-off item's height and wait until the aircraft holds it.
+             *
+             * The altitude command's own reach latch is what ends the wait, matched on its seq like
+             * a leg, so the plan's next item starts at the height the plan asked for.
+             */
+            private fun climbTo(heightM: Double): Boolean {
+                Log.i(TAG, "Mission take-off: climbing to ${heightM}m")
+                val seq = commands.gotoAltitude(heightM)
+                // A leg's bound, not the take-off's: a climb to a survey height takes as long as
+                // a leg does.
+                val deadline = scheduler.nowMs() + MISSION_LEG_TIMEOUT_MS
+                while (running && scheduler.nowMs() < deadline) {
+                    if (commands.isManualOverrideActive) return false
+                    val latch = commands.reachLatch(PendingKind.ALTITUDE)
+                    if (latch.seq == seq && latch.reached) return true
+                    runCatching { scheduler.sleepMs(MISSION_POLL_MS) }.onFailure {
                         Thread.currentThread().interrupt()
                         return false
                     }
@@ -455,3 +517,6 @@ internal class MavlinkMissionPolicy(
             }
         }
 }
+
+/** What the sequencer does after a plan action. */
+private enum class PlanStep { CONTINUE, END, ABORT }

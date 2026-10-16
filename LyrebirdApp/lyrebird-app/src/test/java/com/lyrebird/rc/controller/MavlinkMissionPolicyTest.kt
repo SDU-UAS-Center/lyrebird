@@ -261,12 +261,41 @@ class MavlinkMissionPolicyTest {
             MissionExecutor.ONBOARD,
         )
 
-        assertTrue(motion.calls.contains("takeoff:12.5"))
+        assertTrue(motion.calls.contains("takeoff:null"))
         assertEquals(1, commands.legs.size)
         assertEquals(
             listOf("started:0", "reached:0", "started:1", "reached:1", "finished:true"),
             progress.events,
         )
+    }
+
+    @Test
+    fun `a takeoff item climbs to its height itself before the first leg`() {
+        // Field regression: the take-off went through the motion sink with its height, whose
+        // background climb fired seconds later and replaced the first leg. The aircraft hovered
+        // at the take-off height and the plan waited for a leg that was no longer being flown.
+        sink.startMission(
+            listOf(command(0, Mav.CMD_NAV_TAKEOFF, alt = 12.5), waypoint(1)),
+            0,
+            MissionExecutor.ONBOARD,
+        )
+
+        assertEquals(listOf("takeoff:null"), motion.calls)
+        assertEquals(listOf("gotoAltitude:12.5", "leg:1"), commands.calls.filter { it != "abortAll" })
+    }
+
+    @Test
+    fun `a takeoff climb that never reaches its height ends the plan before any leg`() {
+        commands.climbReaches = false
+
+        sink.startMission(
+            listOf(command(0, Mav.CMD_NAV_TAKEOFF, alt = 12.5), waypoint(1)),
+            0,
+            MissionExecutor.ONBOARD,
+        )
+
+        assertEquals(listOf("started:0", "finished:false"), progress.events)
+        assertTrue(commands.legs.isEmpty())
     }
 
     @Test
@@ -285,9 +314,46 @@ class MavlinkMissionPolicyTest {
     fun `a land item ends the plan after the leg before it`() {
         sink.startMission(listOf(waypoint(0), command(1, Mav.CMD_NAV_LAND)), 0, MissionExecutor.ONBOARD)
 
-        assertEquals(listOf("started:0", "reached:0", "started:1", "finished:false"), progress.events)
+        assertEquals(
+            listOf("started:0", "reached:0", "started:1", "reached:1", "finished:true"),
+            progress.events,
+        )
         assertTrue(motion.calls.contains("land"))
         assertEquals(1, commands.legs.size)
+    }
+
+    @Test
+    fun `a return item completes the plan and is sent with the plan already stopped`() {
+        // Field regression: the plan's own return went through the motion sink while the plan was
+        // still running, so the sink stopped the plan first. It reported the flight incomplete and
+        // queued an abort that ran after the return began, which latched manual override.
+        var runningAtReturn: Boolean? = null
+        motion.onReturn = { runningAtReturn = sink.isRunning }
+
+        sink.startMission(
+            listOf(waypoint(0), command(1, Mav.CMD_NAV_RETURN_TO_LAUNCH)),
+            0,
+            MissionExecutor.ONBOARD,
+        )
+
+        assertEquals(false, runningAtReturn)
+        assertTrue(motion.calls.contains("rth"))
+        assertEquals(
+            listOf("started:0", "reached:0", "started:1", "reached:1", "finished:true"),
+            progress.events,
+        )
+    }
+
+    @Test
+    fun `a nose-forward leg ends facing the way it flew, not north`() {
+        // Field regression: every nose-forward leg was given a final heading of 0, so the aircraft
+        // turned to north at each waypoint before the next leg turned it back.
+        telemetry.location = GeoPosition(55.0, 11.99, 30.0) // due west of the waypoint
+
+        sink.startMission(listOf(waypoint(0)), 0, MissionExecutor.ONBOARD)
+
+        val yaw = commands.legs.single().substringAfter("yaw=").substringBefore(",").toDouble()
+        assertEquals(90.0, yaw, 0.5)
     }
 
     @Test
@@ -476,7 +542,15 @@ class MavlinkMissionPolicyTest {
 
         override fun gotoYaw(yawDeg: Double): Long = 0L
 
-        override fun gotoAltitude(altitudeMeters: Double): Long = 0L
+        /** Whether an altitude command reports reached, like [autoReach] for legs. */
+        var climbReaches = true
+        private var climbCount = 0
+
+        override fun gotoAltitude(altitudeMeters: Double): Long {
+            climbCount++
+            calls += "gotoAltitude:$altitudeMeters"
+            return 1000L + climbCount
+        }
 
         override fun waypoint(
             latitudeDeg: Double,
@@ -493,6 +567,7 @@ class MavlinkMissionPolicyTest {
             }
             if (overrideAfterLegOrdinal == legCount) override = true
             reachedSeq = if (autoReach) legCount.toLong() else -1L
+            calls += "leg:$legCount"
             legs +=
                 "lat=$latitudeDeg,lon=$longitudeDeg,alt=$altitudeMeters,yaw=$yawDeg," +
                 "speed=$speedMps,nose=$noseForward,pass=${arrival.passThrough}," +
@@ -532,7 +607,12 @@ class MavlinkMissionPolicyTest {
 
         override fun lastWaypointRefusal() = refusal
 
-        override fun reachLatch(kind: PendingKind) = ReachLatch(seq = legCount.toLong(), reached = reachedSeq == legCount.toLong())
+        override fun reachLatch(kind: PendingKind) =
+            if (kind == PendingKind.ALTITUDE) {
+                ReachLatch(seq = 1000L + climbCount, reached = climbReaches)
+            } else {
+                ReachLatch(seq = legCount.toLong(), reached = reachedSeq == legCount.toLong())
+            }
     }
 
     private class FakeMotionSink : MavlinkMotionSink {
@@ -548,8 +628,12 @@ class MavlinkMissionPolicyTest {
             return CommandResult(MavlinkCommandOutcome.ACCEPTED)
         }
 
+        /** Runs when a return is sent, to see the plan's state at that moment. */
+        var onReturn: (() -> Unit)? = null
+
         override fun returnToHome(): CommandResult {
             calls += "rth"
+            onReturn?.invoke()
             return CommandResult(MavlinkCommandOutcome.ACCEPTED)
         }
 

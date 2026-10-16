@@ -594,8 +594,11 @@ object DroneController {
      * regardless of individual failures, ensuring the drone stops moving.
      */
     fun abortAllMissions() {
-        // 1. Cancel any active PID control loops immediately
-        setDroneStatus(DroneStatus.ABORTING)
+        // 1. Cancel any active PID control loops immediately. A return home already under way
+        //    keeps its status: stopping a mission for a return queues this abort, which runs after
+        //    the return has started, and overwriting RETURNING_HOME made DJI's return look like one
+        //    the app had not asked for -- which latches manual override.
+        if (droneStatus != DroneStatus.RETURNING_HOME) setDroneStatus(DroneStatus.ABORTING)
         cancelActiveControlLoop()
         // ABORTING is a transient display state — return to IDLE after 2 s
         statusResetHandler.postDelayed({
