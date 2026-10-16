@@ -23,6 +23,7 @@ from lyrebird_groundstation.dji_helpers import (
     parse_telemetry_chunk,
 )
 from lyrebird_groundstation.transport import (
+    REACH_LATCHES,
     TCP_GAP_MODE_REQUEST,
     MavlinkCommandChannel,
     MavlinkRoute,
@@ -39,6 +40,8 @@ LENS_KEYS = ("thermal", "wide", "zoom")
 SAVE_SUCCESS = "T_IMG_SAVE_SUCCESS"
 SAVE_FAILURE = "T_IMG_SAVE_FAILURE"
 CAP_FAILURE = "T_IMG_CAP_FAILURE"
+# waypointReached/waypointSeq and the yaw/altitude pairs: "command <seq> has finished".
+REACH_LATCH_KEYS = frozenset(key for pair in REACH_LATCHES.values() for key in pair)
 
 EP_STICK = "/send/stick"
 EP_ZOOM = "/send/camera/zoom"
@@ -346,6 +349,13 @@ class DJIInterface:
             timestamp_factory=self._timestamp_factory,
         )
         for telemetry in telemetry_items:
+            if self._mavlink_commands is not None:
+                # Commands go over MAVLink, so their seqs are this client's own and their reach
+                # latches arrive from MAVLink. The aircraft's latches here count its HTTP commands
+                # instead: a stale "reached, seq 2" from an earlier HTTP flight would read as this
+                # client's seq 2 arriving the moment it was sent.
+                for key in REACH_LATCH_KEYS:
+                    telemetry.pop(key, None)
             with self._telemetry_lock:
                 if telemetry.get("telemetryMode") == "gap":
                     # A trimmed payload carries only the fields MAVLink can't; merge it, matching
@@ -355,7 +365,13 @@ class DJIInterface:
                     # the request, sending full, unmarked objects regardless.
                     self._telemetry.update(telemetry)
                 else:
-                    self._telemetry = telemetry
+                    # Replaced wholesale, except the MAVLink reach latches stripped above.
+                    latches = {
+                        key: self._telemetry[key]
+                        for key in REACH_LATCH_KEYS
+                        if key in self._telemetry and self._mavlink_commands is not None
+                    }
+                    self._telemetry = {**telemetry, **latches}
                 self._telemetry_seq += 1
         return buffer
 
@@ -381,6 +397,8 @@ class DJIInterface:
             except TimeoutError:
                 continue
             except Exception as exc:
+                if not self._running:
+                    break  # stopTelemetryStream() closed the socket under the blocked recv
                 print(f"Telemetry connection error: {exc}")
                 time.sleep(1)
             finally:

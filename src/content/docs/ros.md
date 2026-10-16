@@ -20,6 +20,34 @@ It checks for new telemetry at 20 Hz but publishes only when the drone has actua
 snapshot, so the topic rate follows the aircraft's telemetry interval (default ~2 Hz) rather than
 repeating each sample.
 
+## Compared with PX4's `px4_msgs`
+
+The topics and message names follow PX4, but the messages are `lyrebird_msgs`, not `px4_msgs`. In
+ROS 2 the package is part of the type, so a node written against `px4_msgs/msg/VehicleCommand` does
+not connect to Lyrebird's `lyrebird_msgs/msg/VehicleCommand`, even on the same topic name and with
+the same fields. How close each message is:
+
+| Lyrebird message | Compared with `px4_msgs` |
+|---|---|
+| `VehicleCommand` | Nearly identical: same fields and the same MAV_CMD ids (take-off 22, RTL 20, gimbal 1000, ...). PX4 also has `confirmation`. Lyrebird adds `VEHICLE_CMD_LYREBIRD_*` ids in MAVLink's user range for DJI-only actions. |
+| `VehicleCommandAck` | Nearly identical: same result codes. Lyrebird adds `seq`, the go-to number that `mission_result` reports arrival under. |
+| `VehicleGlobalPosition`, `HomePosition`, `BatteryStatus`, `ManualControlSetpoint` | Subsets with PX4's field names (`lat`/`lon`/`alt`, `valid_hpos`, `remaining`, `time_remaining_s`, `roll`/`pitch`/`yaw`/`throttle`). Many PX4 fields are absent; DJI-specific ones are added. |
+| `TrajectorySetpoint` | Different meaning. PX4's is a local NED position/velocity setpoint streamed in offboard mode; Lyrebird's is a single GPS go-to (latitude, longitude, altitude, speed, yaw mode) that the aircraft flies on its own. |
+| `VehicleLocalPosition` | Different: velocity, heading and height above take-off, but no x/y/z position; attitude as JSON text. |
+| `VehicleStatus` | Different: DJI's flight-mode name as text, the manual-override latch and take-off readiness, instead of PX4's numeric `nav_state` and `arming_state`. |
+| `OffboardControlMode`, `VehicleOdometry`, `VehicleAttitude` | Not provided. There is no arming and no offboard mode to enter. |
+| `MissionResult`, `GimbalStatus`, `CameraStatus` | Lyrebird's own, for what PX4 has no equivalent of (go-to arrival latches, DJI gimbal and camera). |
+
+So PX4 ROS 2 code needs porting, not just new imports: the command path ports almost directly, the
+setpoint and status logic does not. [`GroundStation/examples/ros2_flight.py`](https://github.com/SDU-UAS-Center/lyrebird/blob/main/GroundStation/examples/ros2_flight.py)
+flies take-off, a go-to and return home with these messages.
+
+Real `px4_msgs` compatibility can be added later if it is needed: an adapter node that speaks the
+real `px4_msgs` types (pinned to one PX4 release, since those definitions change between releases)
+could map the nearly identical messages directly. Running PX4 offboard code unchanged would also
+need PX4's offboard model emulated on DJI: arming, `OffboardControlMode`, local NED setpoints
+streamed at 10 Hz or more, and `nav_state`.
+
 ## Package structure
 
 ```text
