@@ -25,7 +25,6 @@ port so the two do not compete for 14550: LB_MAVLINK_PORT=14551.
 """
 
 import argparse
-import math
 import sys
 import time
 

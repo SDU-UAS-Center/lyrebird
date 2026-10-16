@@ -107,22 +107,36 @@ async def preflight(drone: System) -> list[str]:
     """Reasons not to fly; empty when the aircraft is ready."""
     problems = []
     gps = await first(drone.telemetry.gps_info())
-    has_fix = gps is not None and gps.fix_type.value >= FixType.FIX_3D.value
-    if not has_fix or gps.num_satellites < MIN_SATELLITES:
-        sats = gps.num_satellites if gps else "no"
-        problems.append(f"no 3D GPS fix with {MIN_SATELLITES}+ satellites (have {sats})")
+    gps_issue = gps_problem(gps)
+    if gps_issue:
+        problems.append(gps_issue)
     if await first(drone.telemetry.home()) is None:
         problems.append("no home position yet — wait for the GPS fix")
     battery = await first(drone.telemetry.battery())
-    percent = battery.remaining_percent if battery else -1
-    if 0 <= percent <= 1:  # older MAVSDK versions report a fraction
-        percent *= 100
-    if percent < MIN_BATTERY_PERCENT:
-        problems.append(f"battery at {percent:.0f} % (need {MIN_BATTERY_PERCENT} %)")
+    battery_issue = battery_problem(battery)
+    if battery_issue:
+        problems.append(battery_issue)
     landed = await first(drone.telemetry.landed_state())
     if landed is not None and landed != LandedState.ON_GROUND:
         problems.append("aircraft is not on the ground")
     return problems
+
+
+def gps_problem(gps) -> str | None:
+    has_fix = gps is not None and gps.fix_type.value >= FixType.FIX_3D.value
+    if not has_fix or gps.num_satellites < MIN_SATELLITES:
+        sats = gps.num_satellites if gps else "no"
+        return f"no 3D GPS fix with {MIN_SATELLITES}+ satellites (have {sats})"
+    return None
+
+
+def battery_problem(battery) -> str | None:
+    percent = battery.remaining_percent if battery else -1
+    if 0 <= percent <= 1:  # older MAVSDK versions report a fraction
+        percent *= 100
+    if percent < MIN_BATTERY_PERCENT:
+        return f"battery at {percent:.0f} % (need {MIN_BATTERY_PERCENT} %)"
+    return None
 
 
 async def fly(drone: System, distance_m: float, height_m: float) -> None:
@@ -200,7 +214,7 @@ async def run(args) -> int:
         print("Returning home.")
         try:
             await drone.action.return_to_launch()
-        except Exception as error:  # noqa: BLE001 - tell the pilot, whatever went wrong
+        except Exception as error:  # tell the pilot, whatever went wrong
             print(f"  Return to launch failed: {error} — use the RC's return button")
     return 0
 

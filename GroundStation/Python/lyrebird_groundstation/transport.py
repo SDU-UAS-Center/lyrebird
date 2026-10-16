@@ -930,28 +930,33 @@ class MavlinkRouter:
         if system_id is None or self._routes_by_system_id.get(system_id) is not route:
             return None
         accepted = [message for message in messages if _message_identity(message)[0] == system_id]
-        if not accepted and _raw_system_id(data) == system_id:
+        if accepted:
+            return accepted
+        if _raw_system_id(data) == system_id:
             # Lyrebird's own messages (LYREBIRD_STATUS, LYREBIRD_CONFIG, detections) are not in
             # pymavlink's dialect, so they decode to nothing and carry no identity to check.
             # The frame header still names the sender; route it, and let the subscriber decode
             # the raw bytes as the single-aircraft path does. Dropping it lost home-set, take-off
             # readiness and the manual-override latch for every aircraft in a fleet.
             return []
-        if not accepted:
-            frame_ids = sorted(
-                {
-                    source_id
-                    for source_id, _component_id in (_message_identity(msg) for msg in messages)
-                    if source_id is not None
-                }
-            )
-            self._report(
-                f"Ignoring MAVLink system ids {frame_ids} from route {route.name!r}; "
-                f"expected {system_id}",
-                transient=True,
-            )
-            return None
-        return accepted
+        self._report_unaccepted_messages(route, messages, system_id)
+        return None
+
+    def _report_unaccepted_messages(
+        self, route: MavlinkRoute, messages: list[Any], system_id: int
+    ) -> None:
+        frame_ids = sorted(
+            {
+                source_id
+                for source_id, _component_id in (_message_identity(msg) for msg in messages)
+                if source_id is not None
+            }
+        )
+        self._report(
+            f"Ignoring MAVLink system ids {frame_ids} from route {route.name!r}; "
+            f"expected {system_id}",
+            transient=True,
+        )
 
     def _bind_system_id(self, route: MavlinkRoute, system_id: int) -> bool:
         if not 1 <= system_id <= 254:

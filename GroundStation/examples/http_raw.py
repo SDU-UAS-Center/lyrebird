@@ -180,6 +180,7 @@ def fly(ip: str, telemetry: Telemetry, distance_m: float, height_m: float, speed
     if not match:
         raise RuntimeError(f"the go-to was refused: {reply}")
     seq = int(match.group(1))
+
     # Telemetry's waypointReached is a latch shared by every go-to; matching waypointSeq to this
     # command's seq is what keeps a "reached" from an earlier command from ending this one.
     def arrived() -> bool:

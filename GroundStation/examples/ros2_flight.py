@@ -226,20 +226,29 @@ def fly(f: Flight, distance_m: float, height_m: float, speed: float) -> None:
 
 def run(args) -> int:
     f = Flight(args.drone)
-    needed = ("vehicle_global_position", "vehicle_local_position", "vehicle_status",
-              "battery_status", "home_position")
+    needed = (
+        "vehicle_global_position",
+        "vehicle_local_position",
+        "vehicle_status",
+        "battery_status",
+        "home_position",
+    )
     try:
         f.wait_until(lambda: all(n in f.latest for n in needed), TELEMETRY_TIMEOUT_S, "telemetry")
     except TimeoutError:
-        print(f"No telemetry on /{args.drone}/fmu/out/... — is the fleet container running, "
-              f"and is the aircraft's name in the app '{args.drone}'?")
+        print(
+            f"No telemetry on /{args.drone}/fmu/out/... — is the fleet container running, "
+            f"and is the aircraft's name in the app '{args.drone}'?"
+        )
         return 1
     print(f"Aircraft {args.drone} over ROS 2")
     print(f"Plan: take off, fly {args.distance:.0f} m north at {args.height:.0f} m, come home.")
     status = f.latest["vehicle_status"]
     if not status.ready_to_takeoff:
-        print(f"DJI status: {status.takeoff_block_reason} — check the RC screen; DJI decides "
-              "whether it takes off.")
+        print(
+            f"DJI status: {status.takeoff_block_reason} — check the RC screen; DJI decides "
+            "whether it takes off."
+        )
     problems = preflight(f)
     if problems:
         print("Not flying:\n  - " + "\n  - ".join(problems))

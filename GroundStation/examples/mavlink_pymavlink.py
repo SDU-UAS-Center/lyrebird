@@ -38,7 +38,7 @@ import sys
 import time
 
 os.environ.setdefault("MAVLINK20", "1")  # Lyrebird reads only MAVLink 2 frames.
-from pymavlink import mavutil  # noqa: E402
+from pymavlink import mavutil
 
 MAVLINK_PORT = 14550
 OUR_SYSTEM_ID = 245  # a ground-station id; QGroundControl uses 255, so the two never clash
