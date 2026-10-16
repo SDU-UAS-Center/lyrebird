@@ -325,7 +325,7 @@ object Mav {
     const val USER1_RELEASE_MANUAL_OVERRIDE = 2f
     const val USER1_AUTOSENSING_START = 3f
     const val USER1_AUTOSENSING_STOP = 4f
-    const val USER1_RELEASE_SAFETY = 3f
+    const val USER1_RELEASE_SAFETY = 5f
 
     /** USER_2 selectors, in param1. */
     const val USER2_LRF_MEASURE = 1f

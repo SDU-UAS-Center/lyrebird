@@ -57,7 +57,13 @@
       <entry value="2" name="LYREBIRD_USER_1_RELEASE_MANUAL_OVERRIDE">
         <description>Release the RC manual-override latch and resume autonomous control.</description>
       </entry>
-      <entry value="3" name="LYREBIRD_USER_1_RELEASE_SAFETY">
+      <entry value="3" name="LYREBIRD_USER_1_AUTOSENSING_START">
+        <description>Start AutoSensing.</description>
+      </entry>
+      <entry value="4" name="LYREBIRD_USER_1_AUTOSENSING_STOP">
+        <description>Stop AutoSensing.</description>
+      </entry>
+      <entry value="5" name="LYREBIRD_USER_1_RELEASE_SAFETY">
         <description>
           Return command authority to the Pilot. Only a frame signed with the Safety Computer's
           key is honoured; the Pilot cannot release safety. MAVLink counterpart of HTTP
