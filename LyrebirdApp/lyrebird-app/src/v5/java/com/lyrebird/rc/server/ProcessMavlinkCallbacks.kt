@@ -87,12 +87,14 @@ internal object ProcessMavlinkCallbacks : MavlinkRuntimeCallbacks {
                 runCatching {
                     preferences.getString(MavlinkEndpointConfig.PREF_SIGNING_KEY, "")
                 }.getOrNull().orEmpty(),
-            missionExecutor =
+            // Read at each mission start, so the app's settings switch applies to the next plan.
+            missionExecutor = {
                 MissionExecutor.fromPref(
                     runCatching {
                         preferences.getString(MavlinkEndpointConfig.PREF_MISSION_EXECUTOR, null)
                     }.getOrNull(),
-                ),
+                )
+            },
         )
     }
 

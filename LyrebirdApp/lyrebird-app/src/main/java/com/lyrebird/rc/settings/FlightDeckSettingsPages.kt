@@ -20,6 +20,7 @@ import com.lyrebird.rc.R
 import com.lyrebird.rc.StreamingMode
 import com.lyrebird.rc.mavlink.MavlinkEndpointConfig
 import com.lyrebird.rc.mavlink.MavlinkSystemId
+import com.lyrebird.rc.mavlink.MissionExecutor
 import com.lyrebird.rc.util.NetworkUtils
 
 internal class FlightDeckSettingsPages(
@@ -172,6 +173,9 @@ internal class FlightDeckSettingsPages(
             "MAVLink flight",
             if (isMavlinkFlightAllowed()) "Allowed" else "Blocked",
         ) { showBrandedMavlinkPage() }
+        settingsDialogViews.addCockpitRow(aircraftColumn, "Mission executor", missionExecutor().label) {
+            showBrandedMissionExecutorPage()
+        }
 
         val videoColumn = columns[1]
         settingsDialogViews.addCockpitSection(videoColumn, "VIDEO / STREAM")
@@ -669,6 +673,31 @@ internal class FlightDeckSettingsPages(
                 showLyrebirdSettingsMenu()
             })
         }
+    }
+
+    private fun missionExecutor(): MissionExecutor =
+        MissionExecutor.fromPref(sharedPreferences.getString(MavlinkEndpointConfig.PREF_MISSION_EXECUTOR, null))
+
+    /**
+     * Who flies a plan a ground station uploads. Was settable only over adb; read by the endpoint
+     * at each mission start, so a change here applies to the next plan without a restart.
+     */
+    internal fun showBrandedMissionExecutorPage() {
+        val executors = listOf(MissionExecutor.ONBOARD, MissionExecutor.DJI_NATIVE)
+        settingsDialogViews.showBrandedChoicePage(
+            "MISSION EXECUTOR",
+            "Who flies a plan uploaded from QGroundControl",
+            executors.map { it.label },
+            executors.indexOf(missionExecutor()).coerceAtLeast(0),
+            onSelected = { index ->
+                sharedPreferences
+                    .edit()
+                    .putString(MavlinkEndpointConfig.PREF_MISSION_EXECUTOR, executors[index].prefValue)
+                    .apply()
+            },
+            returnPage = ::showLyrebirdSettingsMenu,
+            onBack = ::showLyrebirdSettingsMenu,
+        )
     }
 
     internal fun showBrandedFormatStoragePage(
