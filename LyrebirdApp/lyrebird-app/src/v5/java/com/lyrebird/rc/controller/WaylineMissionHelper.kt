@@ -1,5 +1,7 @@
 package com.lyrebird.rc.controller
 
+import android.os.Debug
+import android.os.SystemClock
 import android.util.Log
 import com.dji.wpmzsdk.common.data.Template
 import com.dji.wpmzsdk.manager.WPMZManager
@@ -271,12 +273,21 @@ object WaylineMissionHelper {
     }
 
     // Transform waypoint actions into proper action groups for KMZ
+
+    /**
+     * One reach-point action group per action, several at a waypoint when it has several actions.
+     *
+     * A single group holding two or more actions crashed DJI's native WPML generator on a Mini 4 Pro
+     * (MSDK 5.18, wpmzsdk 1.0.5.0): it asked for a 312-671 MB buffer for its own output and aborted
+     * the app, whether the actions were two gimbal rotations or a rotation and a photo. Groups of
+     * one generate cleanly, so each action gets its own group; groups at the same waypoint run in
+     * group order, which keeps the plan's order.
+     */
     private fun transformActionsToGroups(waypointInfoModels: List<WaypointInfoModel>): ArrayList<WaylineActionGroup> {
         val actionGroups = ArrayList<WaylineActionGroup>()
 
         for (i in waypointInfoModels.indices) {
-            val actionInfos = waypointInfoModels[i].actionInfos
-            if (actionInfos.isNotEmpty()) {
+            for (action in waypointInfoModels[i].actionInfos) {
                 val actionGroup = WaylineActionGroup()
 
                 // Set trigger to execute when reaching waypoint
@@ -287,34 +298,29 @@ object WaylineMissionHelper {
                 actionGroup.groupId = actionGroups.size
                 actionGroup.startIndex = i
                 actionGroup.endIndex = i
-                actionGroup.setActions(actionInfos)
+                action.actionId = 0
+                actionGroup.setActions(arrayListOf(action))
 
-                // Build action tree structure
-                val nodeLists = ArrayList<WaylineActionNodeList>()
-
-                // Root node
+                // Action tree: a sequence root over the one leaf.
                 val root = WaylineActionNodeList()
-                val treeNodes = ArrayList<WaylineActionTreeNode>()
-                val rootNode = WaylineActionTreeNode()
-                rootNode.nodeType = WaylineActionsRelationType.SEQUENCE
-                rootNode.childrenNum = actionInfos.size
-                treeNodes.add(rootNode)
-                root.setNodes(treeNodes)
-                nodeLists.add(root)
-
-                // Children nodes (one for each action)
-                val children = WaylineActionNodeList()
-                val childrenNodeList = ArrayList<WaylineActionTreeNode>()
-                for (j in actionInfos.indices) {
-                    val child = WaylineActionTreeNode()
-                    child.nodeType = WaylineActionsRelationType.LEAF
-                    child.actionIndex = j
-                    childrenNodeList.add(child)
-                }
-                children.setNodes(childrenNodeList)
-                nodeLists.add(children)
-
-                actionGroup.setNodeLists(nodeLists)
+                root.setNodes(
+                    arrayListOf(
+                        WaylineActionTreeNode().apply {
+                            nodeType = WaylineActionsRelationType.SEQUENCE
+                            childrenNum = 1
+                        },
+                    ),
+                )
+                val leaf = WaylineActionNodeList()
+                leaf.setNodes(
+                    arrayListOf(
+                        WaylineActionTreeNode().apply {
+                            nodeType = WaylineActionsRelationType.LEAF
+                            actionIndex = 0
+                        },
+                    ),
+                )
+                actionGroup.setNodeLists(arrayListOf(root, leaf))
                 actionGroups.add(actionGroup)
             }
         }
@@ -619,6 +625,33 @@ object WaylineMissionHelper {
      * take-off height) — builds the [WaypointInfoModel]s and [WaylineMissionConfig] itself and
      * hands them here rather than going through the plain lat/lon/alt shortcut.
      */
+    private const val NATIVE_TAG = "LyrebirdNativeMission"
+
+    /**
+     * Longest a native mission may take from the start command to DJI's start before it is given
+     * up. A ground station waits a few seconds for the mode change and then reports the start as
+     * failed; in the field DJI's generator once took 46 s, and the aircraft then took off about
+     * 50 s after the pilot had been told the mission did not start. Past this point the plan is
+     * not started at all.
+     */
+    private const val NATIVE_START_DEADLINE_MS = 10_000L
+
+    /**
+     * One worker for building and pushing native missions.
+     *
+     * Building the KMZ happens inside DJI's native WPMZ library and can take long enough -- in the
+     * field it never finished, and the process was killed for not responding -- that running it on
+     * the caller's thread stalled that thread with it. The caller was the MAVLink receive thread,
+     * so every command behind the mission start (arm, Return) went unanswered while it ran.
+     */
+    private val nativeMissionWorker =
+        java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "LyrebirdNativeMission").apply { isDaemon = true }
+        }
+
+    /** Native heap in use, for logging what DJI's native library allocates around each step. */
+    private fun nativeHeapMb(): Long = Debug.getNativeHeapAllocatedSize() / (1024 * 1024)
+
     fun navigateWaylineMissionNative(
         waypointInfoModels: List<WaypointInfoModel>,
         missionConfig: WaylineMissionConfig,
@@ -631,6 +664,41 @@ object WaylineMissionHelper {
             onFinished(false)
             return
         }
+        nativeMissionWorker.execute {
+            // Fault barrier: an exception out of DJI's library must end the mission as failed,
+            // not kill the worker silently and leave the plan reported as running.
+            @Suppress("TooGenericExceptionCaught")
+            try {
+                buildAndStartNativeMission(waypointInfoModels, missionConfig, autoFlightSpeed, onProgress, onFinished)
+            } catch (e: Exception) {
+                Log.e(NATIVE_TAG, "Building the native mission failed: ${e.message}", e)
+                onFinished(false)
+            } catch (e: OutOfMemoryError) {
+                // DJI's KMZ generator reads its own native output back and, for some action
+                // combinations, takes garbage for a string length and asks for hundreds of MB
+                // (field log: 312 MB in ActionMegaphoneParam.fromBytes). The allocation fails
+                // outright, so nothing is actually held: fail the mission rather than the app.
+                Log.e(NATIVE_TAG, "DJI's KMZ generator ran out of memory; native mission not started", e)
+                onFinished(false)
+            }
+        }
+    }
+
+    private fun buildAndStartNativeMission(
+        waypointInfoModels: List<WaypointInfoModel>,
+        missionConfig: WaylineMissionConfig,
+        autoFlightSpeed: Double,
+        onProgress: (Int) -> Unit,
+        onFinished: (Boolean) -> Unit,
+    ) {
+        val started = SystemClock.elapsedRealtime()
+
+        fun step(what: String) =
+            Log.i(
+                NATIVE_TAG,
+                "$what (+${SystemClock.elapsedRealtime() - started} ms, native heap ${nativeHeapMb()} MB)",
+            )
+        step("Building native mission: ${waypointInfoModels.size} waypoints, speed $autoFlightSpeed m/s")
 
         if (lastMissionNameNoExt.isNotEmpty()) {
             WaypointMissionManager.getInstance().stopMission(
@@ -643,14 +711,24 @@ object WaylineMissionHelper {
             )
         }
 
+        step("WPMZManager.init")
         WPMZManager.getInstance().init(ContextUtil.getContext())
+        step("WPMZManager.init done")
 
         val mission = createWaylineMission()
         val template = createTemplate(waypointInfoModels, autoFlightSpeed)
 
         val missionName = generateTrajectoryName()
         val kmzOutPath = "$kmzDir$missionName.kmz"
+        step("generateKMZFile -> $kmzOutPath")
         WPMZManager.getInstance().generateKMZFile(kmzOutPath, mission, missionConfig, template)
+        step("generateKMZFile done, ${File(kmzOutPath).length()} bytes")
+        if (SystemClock.elapsedRealtime() - started > NATIVE_START_DEADLINE_MS) {
+            step("Too slow to start safely; native mission NOT started")
+            onFinished(false)
+            return
+        }
+        step("pushKMZFileToAircraft")
 
         lastMissionNameNoExt = missionName
         lastMissionKmzPath = kmzOutPath
@@ -660,21 +738,29 @@ object WaylineMissionHelper {
             object :
                 CommonCallbacks.CompletionCallbackWithProgress<Double> {
                 override fun onProgressUpdate(progress: Double) {
-                    Log.d("WaylineMissionHelper", "Push KMZ progress: $progress")
+                    step("Push KMZ progress: $progress")
                 }
 
                 override fun onSuccess() {
+                    if (SystemClock.elapsedRealtime() - started > NATIVE_START_DEADLINE_MS) {
+                        step("Push KMZ done, but too late to start safely; native mission NOT started")
+                        onFinished(false)
+                        return
+                    }
+                    step("Push KMZ done; starting mission")
                     val ids = extractWaylineIdsFromKmz(kmzOutPath).ifEmpty { arrayListOf(0) }
                     WaypointMissionManager.getInstance().startMission(
                         lastMissionNameNoExt,
                         ids,
                         object : CommonCallbacks.CompletionCallback {
                             override fun onSuccess() {
+                                step("Mission started: $lastMissionNameNoExt")
                                 ToastUtils.showToast("Mission started: $lastMissionNameNoExt")
                                 watchNativeMissionExecution(onProgress, onFinished)
                             }
 
                             override fun onFailure(error: IDJIError) {
+                                step("Start mission failed: ${error.description()}")
                                 ToastUtils.showToast("Start mission failed: ${error.description()}")
                                 onFinished(false)
                             }
@@ -683,6 +769,7 @@ object WaylineMissionHelper {
                 }
 
                 override fun onFailure(error: IDJIError) {
+                    step("Push KMZ failed: ${error.description()}")
                     ToastUtils.showToast("Push KMZ failed: ${error.description()}")
                     onFinished(false)
                 }

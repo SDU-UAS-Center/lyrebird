@@ -90,6 +90,17 @@ internal class MavlinkMissionPolicy(
         private const val TAKEOFF_CLIMB_TIMEOUT_MS = 30_000L
         private const val TAKEOFF_POLL_MS = 500L
         private const val MISSION_LEG_TIMEOUT_MS = 300_000L
+
+        /** Plan items the DJI-native executor refuses; see [MavlinkMissionSink.startMission]. */
+        private val NATIVE_UNSUPPORTED_ACTIONS =
+            setOf(
+                Mav.CMD_IMAGE_START_CAPTURE,
+                Mav.CMD_VIDEO_START_CAPTURE,
+                Mav.CMD_VIDEO_STOP_CAPTURE,
+                Mav.CMD_DO_GIMBAL_MANAGER_PITCHYAW,
+                Mav.CMD_DO_MOUNT_CONTROL,
+                Mav.CMD_DO_SET_CAM_TRIGG_DIST,
+            )
         private const val MISSION_POLL_MS = 200L
     }
 
@@ -152,6 +163,25 @@ internal class MavlinkMissionPolicy(
              * progress the same way an onboard one does.
              */
             private fun startNative(items: List<MissionItem>): CommandResult {
+                // DJI's wayline generator (wpmzsdk 1.0.5.0, MSDK 5.18) cannot carry these on the
+                // aircraft this was field-tested on: it keeps at most one action per waypoint and
+                // none at the last, and two actions in one group crash it. A plan relying on them
+                // would fly without its photos, so it is refused here, with the way out.
+                items.firstOrNull { it.command in NATIVE_UNSUPPORTED_ACTIONS }?.let { item ->
+                    Log.w(TAG, "Native mission refused: plan item ${item.seq} (command ${item.command})")
+                    return CommandResult(
+                        MavlinkCommandOutcome.DENIED,
+                        "Camera/gimbal items need lb_mission_exec=onboard",
+                    )
+                }
+                // DJI's wayline engine has no camera-mode action, so a plan's mode switch cannot
+                // ride along with the mission: set the mode the plan opens with before handing it
+                // over. Without this a photo item in a plan flown while the camera was in video mode
+                // (the app's default) took no picture.
+                initialCameraMode(items)?.let { mode ->
+                    Log.i(TAG, "Native mission: camera mode $mode before start")
+                    host.setCameraMode(mode)
+                }
                 running = true
                 val result =
                     host.startNativeMission(
@@ -171,6 +201,21 @@ internal class MavlinkMissionPolicy(
                 // followed by a start announcement after its finish.
                 if (running) listener?.onItemStarted(0)
                 return result
+            }
+
+            /**
+             * The camera mode a plan needs at its start: its first explicit mode switch, or else
+             * the mode its first capture item needs. Null for a plan that never uses the camera.
+             */
+            private fun initialCameraMode(items: List<MissionItem>): Int? {
+                for (item in items) {
+                    when (item.command) {
+                        Mav.CMD_SET_CAMERA_MODE -> return item.param2.toInt()
+                        Mav.CMD_IMAGE_START_CAPTURE, Mav.CMD_DO_SET_CAM_TRIGG_DIST -> return Mav.CAMERA_MODE_IMAGE
+                        Mav.CMD_VIDEO_START_CAPTURE -> return Mav.CAMERA_MODE_VIDEO
+                    }
+                }
+                return null
             }
 
             /**

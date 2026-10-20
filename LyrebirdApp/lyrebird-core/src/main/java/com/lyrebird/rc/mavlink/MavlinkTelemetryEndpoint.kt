@@ -667,6 +667,14 @@ class MavlinkTelemetryEndpoint(
         // The ack must come from the component that was addressed, or the requester will not
         // match it to its request.
         sendOnce(MavlinkMsgId.COMMAND_ACK, ack, fromCamera = forCamera)
+        // A refusal's reason, when it has one, also goes out as STATUSTEXT: a COMMAND_ACK has no
+        // room for it, and QGroundControl otherwise shows only "command failed".
+        val reason = result.detail
+        if (pending == null && completion == null && reason != null &&
+            result.outcome != MavlinkCommandOutcome.ACCEPTED
+        ) {
+            sendOnce(MavlinkMsgId.STATUSTEXT, MavlinkMessages.statusText(Mav.SEVERITY_WARNING, reason))
+        }
         if (pending != null) watchCompletion(command, pending)
         if (completion != null) watchResult(command, completion, forCamera)
     }
@@ -1058,7 +1066,7 @@ class MavlinkTelemetryEndpoint(
         return result
     }
 
-    private fun missionExecutor(): MissionExecutor = config.missionExecutor
+    private fun missionExecutor(): MissionExecutor = config.missionExecutor()
 
     /**
      * Begin flying the stored plan.

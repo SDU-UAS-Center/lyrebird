@@ -395,6 +395,51 @@ class MavlinkMissionPolicyTest {
     }
 
     @Test
+    fun `a native plan with camera or gimbal items is refused with the way out`() {
+        // Field finding: DJI's wayline generator keeps at most one action per waypoint and none at
+        // the last, and crashed on two in one group, so such a plan would fly without its photos.
+        for (action in listOf(Mav.CMD_IMAGE_START_CAPTURE, Mav.CMD_VIDEO_START_CAPTURE, Mav.CMD_DO_MOUNT_CONTROL)) {
+            val result =
+                sink.startMission(listOf(waypoint(0), command(1, action), waypoint(2)), 0, MissionExecutor.DJI_NATIVE)
+
+            assertEquals(MavlinkCommandOutcome.DENIED, result.outcome)
+            assertEquals("Camera/gimbal items need lb_mission_exec=onboard", result.detail)
+            assertEquals(null, host.nativeItems)
+            assertFalse(sink.isRunning)
+        }
+    }
+
+    @Test
+    fun `the onboard executor flies the same camera items`() {
+        sink.startMission(
+            listOf(waypoint(0), command(1, Mav.CMD_IMAGE_START_CAPTURE), waypoint(2)),
+            0,
+            MissionExecutor.ONBOARD,
+        )
+
+        assertTrue(payload.calls.contains("captureImage"))
+    }
+
+    @Test
+    fun `a native plan's camera mode item is applied before it starts`() {
+        sink.startMission(
+            listOf(waypoint(0), command(1, Mav.CMD_SET_CAMERA_MODE, p2 = Mav.CAMERA_MODE_VIDEO.toFloat()), waypoint(2)),
+            0,
+            MissionExecutor.DJI_NATIVE,
+        )
+
+        assertEquals(listOf("cameraMode:${Mav.CAMERA_MODE_VIDEO}"), host.calls.filter { it.startsWith("cameraMode") })
+        assertTrue(sink.isRunning)
+    }
+
+    @Test
+    fun `a native plan without camera items leaves the camera mode alone`() {
+        sink.startMission(listOf(waypoint(0), waypoint(1)), 0, MissionExecutor.DJI_NATIVE)
+
+        assertTrue(host.calls.none { it.startsWith("cameraMode") })
+    }
+
+    @Test
     fun `a refused native plan reports no mission running`() {
         host.nativeResult =
             CommandResult(

@@ -341,6 +341,18 @@ object DroneController {
     fun clearMissionActiveIfStillSet() {
         if (droneStatus == DroneStatus.MISSION) setDroneStatus(DroneStatus.IDLE)
     }
+
+    /**
+     * A DJI-native mission finished with go-home as its finish action, so DJI is about to fly home
+     * on its own. Recorded before DJI's mode changes, so the return is recognised as one this app
+     * asked for: read as unrequested, it latched manual override at the end of every such mission.
+     */
+    fun markReturningHomeFromMission() {
+        setDroneStatus(DroneStatus.RETURNING_HOME)
+        statusResetHandler.postDelayed({
+            if (droneStatus == DroneStatus.RETURNING_HOME) setDroneStatus(DroneStatus.IDLE)
+        }, 120_000L)
+    }
     // ==================== End Drone Status ====================
 
     fun init(
