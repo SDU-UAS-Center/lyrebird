@@ -15,7 +15,6 @@ ext {
     deps.wire = 'com.squareup.wire:wire-runtime:2.2.0'
 
     deps.okhttp3 = 'com.squareup.okhttp3:okhttp:3.14.9'
-    deps.leakcanary = 'com.squareup.leakcanary:leakcanary-android:2.14'
     deps.xcrash = 'com.iqiyi.xcrash:xcrash-android-lib:3.1.0'
     deps.rx2Java = 'io.reactivex.rxjava2:rxjava:2.2.21' // Currently used by the CSDK upgrade module
     deps.maplibreTurf = 'org.maplibre.gl:android-sdk-turf:5.9.1'
