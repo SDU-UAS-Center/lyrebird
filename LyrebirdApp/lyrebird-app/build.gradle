@@ -225,7 +225,6 @@ dependencies {
     implementation deps.legacySupport
     implementation deps.lifecycleViewModel
     implementation deps.lifecycleLiveData
-    implementation deps.leakcanary
     implementation deps.glide
     implementation deps.dynamicanimation
     implementation deps.expandedit

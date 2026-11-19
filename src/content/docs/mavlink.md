@@ -19,7 +19,7 @@ This is a full control surface, not a telemetry feed. Every command the ROS grou
 | `lb_mav_0_sysid` | int | `0` (auto) | MAVLink system id — `1..99` is an explicit user/fleet assignment; `0` derives a stable serial-based id in `100..254` |
 | `lb_mav_0_allow_flight` | bool | `true` | Allow commands that move the aircraft; disable it from the app settings when flight control must be blocked |
 | `lb_mav_0_signing_key` | string | *(empty)* | 64 hex characters shared with the Safety Computer |
-| `lb_mission_exec` | string | `dji_native` | Who flies an uploaded plan: `onboard` or `dji_native` — see [Missions](/missions/) |
+| `lb_mission_exec` | string | `onboard` | Who flies an uploaded plan: `onboard` or `dji_native` — see [Missions](/missions/) |
 
 Flight commands are gated twice: `lb_mav_0_allow_flight` must be on, and the command must pass the same `ControlAuthority` check the HTTP surface uses. Anything that would fly the aircraft somewhere new is refused while the pilot holds the sticks; land, return and abort stay available, because those are the recovery actions.
 

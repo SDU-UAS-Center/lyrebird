@@ -49,6 +49,15 @@ internal object V5NativeMissionAdapter {
         onProgress: (Int) -> Unit,
         onFinished: (Boolean) -> Unit,
     ): CommandResult {
+        // The plan exactly as it arrived, so a native mission that misbehaves can be replayed.
+        Log.i(TAG, "Native plan: ${items.size} items")
+        items.forEach { item ->
+            Log.i(
+                TAG,
+                "  #${item.seq} cmd=${item.command} p1=${item.param1} p2=${item.param2} p3=${item.param3} " +
+                    "p4=${item.param4} lat=${item.latitudeDeg} lon=${item.longitudeDeg} alt=${item.altitudeM}",
+            )
+        }
         var speed =
             items.firstNotNullOfOrNull { it.speedMps }
                 ?: DroneControlProfiles.activeProfile().defaultCruiseSpeedMps
@@ -95,7 +104,20 @@ internal object V5NativeMissionAdapter {
                 // expresses the same thing by the waypoint carrying no interval.
                 Mav.CMD_DO_SET_CAM_TRIGG_DIST ->
                     currentDistanceTriggerM = item.param1.toDouble().takeIf { it > 0.0 }
-                else -> translatePlanActionToWaylineAction(item)?.let { pendingActions.add(it) }
+                else ->
+                    translatePlanActionToWaylineAction(item)?.let { action ->
+                        // An action takes effect at the waypoint it follows, as QGroundControl
+                        // places it ("photo at waypoint 1"). Attaching it to the next waypoint
+                        // instead moved it one leg late -- and onto the last waypoint, whose
+                        // action group DJI's converter dropped, so the photo was never taken.
+                        // Only actions before the first waypoint wait for one.
+                        val previous = waypointModels.lastOrNull()
+                        if (previous == null) {
+                            pendingActions.add(action)
+                        } else {
+                            previous.actionInfos = ArrayList(previous.actionInfos + action)
+                        }
+                    }
             }
         }
         if (waypointModels.size < 2) {
@@ -105,13 +127,6 @@ internal object V5NativeMissionAdapter {
                 "DJI native missions need at least two waypoints",
             )
         }
-        // Actions after the last leg (e.g. a final photo before landing) have no later waypoint to
-        // attach to, so they ride along with the last one instead of being lost.
-        if (pendingActions.isNotEmpty()) {
-            val last = waypointModels.last()
-            last.actionInfos = ArrayList(last.actionInfos + pendingActions)
-        }
-
         val finishAction =
             when (
                 items
@@ -146,6 +161,9 @@ internal object V5NativeMissionAdapter {
             onProgress = { waypointIndex -> onProgress(waypointIndex) },
             onFinished = { success ->
                 DroneController.clearMissionActiveIfStillSet()
+                if (success && finishAction == WaylineFinishedAction.GO_HOME) {
+                    DroneController.markReturningHomeFromMission()
+                }
                 onFinished(success)
             },
         )
@@ -164,7 +182,14 @@ internal object V5NativeMissionAdapter {
             Mav.CMD_IMAGE_START_CAPTURE ->
                 WaylineActionInfo().apply {
                     actionType = WaylineActionType.TAKE_PHOTO
-                    takePhotoParam = ActionTakePhotoParam().apply { payloadPositionIndex = 0 }
+                    // The mission's global lens rather than a per-photo lens list: with the list
+                    // (empty) DJI's generator could not read its own photo action back and crashed
+                    // the app with an out-of-memory error.
+                    takePhotoParam =
+                        ActionTakePhotoParam().apply {
+                            payloadPositionIndex = 0
+                            useGlobalPayloadLensIndex = true
+                        }
                 }
             Mav.CMD_VIDEO_START_CAPTURE ->
                 WaylineActionInfo().apply {
@@ -187,6 +212,23 @@ internal object V5NativeMissionAdapter {
                             pitch = item.param1.toDouble()
                             enableYaw = item.param2.isFinite()
                             yaw = item.param2.toDouble()
+                        }
+                }
+            // The legacy mount-control command, which QGroundControl's per-waypoint camera section
+            // sends. Pitch only: its yaw (param3) is relative to the aircraft, but WPML's
+            // absolute-angle yaw is relative to north, so passing it through would aim the camera
+            // the wrong way -- and a yaw-enabled group was dropped by DJI's converter outright on a
+            // Mini, whose gimbal cannot yaw. Dropping the item left the builder's nadir default.
+            Mav.CMD_DO_MOUNT_CONTROL ->
+                WaylineActionInfo().apply {
+                    actionType = WaylineActionType.GIMBAL_ROTATE
+                    gimbalRotateParam =
+                        ActionGimbalRotateParam().apply {
+                            payloadPositionIndex = 0
+                            rotateMode = WaylineGimbalActuatorRotateMode.ABSOLUTE_ANGLE
+                            enablePitch = item.param1.isFinite()
+                            pitch = item.param1.toDouble()
+                            enableYaw = false
                         }
                 }
             else -> {
