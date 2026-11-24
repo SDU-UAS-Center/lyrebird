@@ -670,7 +670,9 @@ class MavlinkTelemetryEndpoint(
         // A refusal's reason, when it has one, also goes out as STATUSTEXT: a COMMAND_ACK has no
         // room for it, and QGroundControl otherwise shows only "command failed".
         val reason = result.detail
-        if (pending == null && completion == null && reason != null &&
+        if (pending == null &&
+            completion == null &&
+            reason != null &&
             result.outcome != MavlinkCommandOutcome.ACCEPTED
         ) {
             sendOnce(MavlinkMsgId.STATUSTEXT, MavlinkMessages.statusText(Mav.SEVERITY_WARNING, reason))
