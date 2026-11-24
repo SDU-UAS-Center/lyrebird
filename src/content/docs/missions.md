@@ -34,31 +34,55 @@ MAVLink has one mission protocol; Lyrebird has two ways to fly what it uploads. 
 preference (`lb_mission_exec`, values `onboard` or `dji_native`), because a ground station has no
 MAVLink concept for picking one — there is nothing to negotiate over the wire.
 
-| | `dji_native` (default) | `onboard` |
+| | `dji_native` | `onboard` (default) |
 | --- | --- | --- |
 | Who flies it | DJI's own wayline engine, on the flight controller | Lyrebird's app, sequencing legs through its PID waypoint controllers |
 | Survives the phone losing focus / being backgrounded | Yes — the mission lives on the aircraft once pushed | No — the sequencing loop lives in the app |
 | Take-off, land, RTL | Handled by DJI, from the plan's leading `NAV_TAKEOFF` altitude and trailing `NAV_LAND`/`NAV_RETURN_TO_LAUNCH` | Handled item-by-item like any other plan item |
 | Per-item heading (`param4`) | Honoured, as a fixed wayline yaw | Honoured |
 | Per-leg speed (`DO_CHANGE_SPEED`) | Honoured, as a per-waypoint speed | Honoured |
-| Camera / gimbal actions | Translated to wayline actions, triggered on reaching the waypoint they sit after | Executed directly, in plan order |
-| Distance-triggered capture (`DO_SET_CAM_TRIGG_DIST`) | A `MULTIPLE_DISTANCE` trigger on a take-photo action group covering the span it applies to | Ground covered is accumulated while flying, and the shutter trips each time the distance is crossed |
+| Camera / gimbal actions | **Refused** (see below) | Executed directly, in plan order |
+| Distance-triggered capture (`DO_SET_CAM_TRIGG_DIST`) | **Refused** (see below) | Ground covered is accumulated while flying, and the shutter trips each time the distance is crossed |
 | Region of interest (`DO_SET_ROI*`) | Static target only — see below | Full continuous tracking |
 | Progress reporting | `MISSION_CURRENT` per waypoint reached; no per-item `MISSION_ITEM_REACHED` | Exact `MISSION_ITEM_REACHED` per item |
 | `MAV_CMD_SET_CAMERA_MODE` | No wayline equivalent — skipped | Honoured |
 
-**Default is `dji_native`.** A mission that keeps running on DJI's own flight controller is not at
-the mercy of the app being backgrounded, the phone locking, or Android killing a background
-process mid-flight — the failure mode that matters most for an unattended or long mission. Switch
-to `onboard` for a plan that leans on something only it can do: a continuously-tracking ROI, or
-exact per-item arrival reporting.
+**Default is `onboard`, for now.** In field tests with a DJI Mini 4 Pro (October 2026) it flew every
+item of a QGroundControl plan — take-off, waypoints, a photo, a video start and stop, return.
 
-**Switching it.** `lb_mission_exec` is an Android `SharedPreferences` value (file `LyrebirdPrefs`,
-package `com.lyrebird.rc`), the same way every other `lb_*` preference in this app is set — by hand
-in the field, via `adb` or the settings backup file, not through a settings screen or a MAVLink
-parameter. There is nothing to edit for the default.
+**`dji_native` refuses camera and gimbal items.** DJI's wayline generator (wpmzsdk 1.0.5.0 with MSDK
+5.18) did not carry them on that aircraft: it kept at most one action per waypoint and none at the
+last waypoint, and a waypoint with two actions crashed it. A plan with a photo, video, gimbal or
+distance-trigger item is therefore refused rather than flown without its photos, and the aircraft
+does not take off. QGroundControl asks for Mission mode before it starts a mission, and that request
+has no acknowledgement, so all it shows is **"Unable to start mission: Vehicle not changing to
+Mission flight mode"**. If you see that with `dji_native` selected, remove the camera and gimbal
+items or switch the executor to `onboard`. The app's log has the reason under the tag
+`LyrebirdDefaultLayout` ("Native mission refused: plan item N (command C)"). A ground station that
+sends `MISSION_START` itself gets a denied `COMMAND_ACK` and a `STATUSTEXT`: "Camera/gimbal items
+need lb_mission_exec=onboard". A plan of waypoints, speed changes and a final land or return flies natively. If building and
+uploading the native mission takes longer than 10 seconds, it is not started: by then the ground
+station has reported the start as failed, and a take-off that late would surprise the pilot (in a
+field test DJI's generator once took 46 s for a three-waypoint plan).
+The generator may behave differently with the enterprise aircraft its format names (Matrice,
+Mavic 3 Enterprise); that is untested.
+
+`dji_native` keeps the stronger property: the mission lives on the aircraft, so it is not at the
+mercy of the app being backgrounded, the phone locking, or Android killing the process mid-flight —
+the failure mode that matters most for an unattended or long mission. It is the intended default
+once it carries a plan as completely as `onboard`. Until then, choose it for a plan of waypoints
+alone where that robustness matters.
+
+**Switching it.** In the app: the settings button at the bottom left of the Flight Deck → first
+column, FLEET → **Mission executor**. The choice is read at each mission start, so it applies to the
+next plan without restarting the app or uploading again. It is stored as `lb_mission_exec` in the
+app's preferences (`onboard` or `dji_native`).
 
 ## What the native path translates
+
+> The camera, gimbal and distance-trigger translations below are in the code, but a plan using
+> them is currently refused (see [Two executors](#two-executors)): on a Mini 4 Pro, DJI's generator
+> did not keep them. They are described for when that changes.
 
 Pushing a plan to DJI's wayline engine means building a
 [WPML](https://github.com/dji-sdk/Cloud-API-Doc/blob/master/docs/en/60.api-reference/00.dji-wpml/30.waylines-wpml.md)
@@ -135,3 +159,28 @@ Neither executor changes what a download reports: `MavlinkMissionStore` always a
 verbatim uploaded items, regardless of which executor flew them or what it turned them into. Reading
 a plan back after flying it is the fastest way to confirm nothing about the *stored* mission changed
 — the translation lives entirely between `MISSION_START` and the aircraft's motion.
+
+## Native missions on consumer aircraft: experimental
+
+`dji_native` stays available as an opt-in, but on the aircraft it was tested with — a DJI Mini 4 Pro,
+MSDK 5.18, wpmzsdk 1.0.5.0 — DJI's wayline generator was not reliable enough to be the default. The
+findings, for anyone who wants to take it further:
+
+- **Actions.** In the generated `waylines.wpml` (what the aircraft flies), only one action group per
+  waypoint survived and none at the last waypoint, although `template.kml` in the same KMZ had them
+  all. A single action group holding two or more actions made the generator ask for a 312–671 MB
+  buffer and crash the app (an `OutOfMemoryError` in `ActionMegaphoneParam.fromBytes`, or a native
+  abort in `PPALController.generate`). Numbering the actions, giving each its own group, and
+  describing the payload (`payloadInfo`/`payloadParam`) did not fix it.
+- **Build time.** The same generator built most plans in about 0.1 s but took 43–46 s for others
+  (three action groups in both cases), while the phone ran short of memory. A native start that takes
+  longer than 10 seconds is now abandoned rather than started late.
+- **Aircraft model.** WPML's drone and payload enums (`WaylineDroneType`, `WaylinePayloadType`) list
+  enterprise aircraft (Matrice, Mavic 3 Enterprise) but no Mini. The generator may behave better on
+  an aircraft it names; that is untested.
+
+To investigate: every native start logs each step with its timing and native-heap use under the
+logcat tag `LyrebirdNativeMission`, and the generated KMZ is kept on the phone in
+`Android/data/com.lyrebird.rc/files/kmz/`. Comparing the action groups in its `template.kml` with
+those in its `waylines.wpml` shows what DJI's generator kept. `V5NativeMissionAdapter` (plan → WPML
+models) and `WaylineMissionHelper` (KMZ build and push) are where to start.

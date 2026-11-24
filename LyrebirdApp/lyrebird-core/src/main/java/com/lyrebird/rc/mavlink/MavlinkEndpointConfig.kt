@@ -30,13 +30,11 @@ data class MavlinkEndpointConfig(
      * second mission protocol: MAVLink has one, and a ground station has no way to pick an
      * executor, so the choice belongs in a parameter.
      *
-     * Defaults to [MissionExecutor.DJI_NATIVE]: the mission runs on DJI's own flight controller
-     * rather than the app's PID loop, so it survives the phone losing focus or being backgrounded
-     * mid-flight. `onboard` remains selectable for a plan that leans on behaviour DJI's wayline
-     * engine cannot represent, such as a continuously-tracking region of interest.
+     * A function, asked at each mission start, so a choice made in the app's settings takes effect
+     * for the next plan without restarting the endpoint. Defaults to [MissionExecutor.ONBOARD]; see
+     * [MissionExecutor.fromPref] for why.
      */
-
-    val missionExecutor: MissionExecutor = MissionExecutor.DJI_NATIVE,
+    val missionExecutor: () -> MissionExecutor = { MissionExecutor.ONBOARD },
 ) {
     /**
      * Stream profile, the equivalent of `MAV_n_MODE`. Each profile picks a different set of

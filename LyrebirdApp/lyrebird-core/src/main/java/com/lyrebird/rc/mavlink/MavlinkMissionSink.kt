@@ -41,22 +41,27 @@ interface MavlinkMissionSink {
 /** Which of Lyrebird's two path-following implementations flies the plan. */
 enum class MissionExecutor(
     val prefValue: String,
+    /** How the app's settings show it. */
+    val label: String,
 ) {
     /** Lyrebird sequences items through the PID waypoint controllers. */
-    ONBOARD("onboard"),
+    ONBOARD("onboard", "Onboard (Lyrebird)"),
 
-    /** DJI's own wayline engine flies the whole list. */
-    DJI_NATIVE("dji_native"),
+    /** DJI's own wayline engine flies the whole list; no camera or gimbal items. */
+    DJI_NATIVE("dji_native", "DJI native (waypoints only)"),
     ;
 
     companion object {
         /**
-         * DJI native by default: the mission runs on DJI's own flight controller, so it keeps
-         * flying if the phone's app is backgrounded or loses focus mid-mission. `onboard` is
-         * still the executor to reach for when a plan leans on behaviour DJI's wayline engine
-         * cannot represent, such as a continuously-tracking region of interest.
+         * Onboard by default, for now: in field tests (October 2026) it flew every item of a
+         * QGroundControl plan -- take-off, waypoints, photo, video, return -- while DJI's wayline
+         * generator could not carry camera or gimbal items on a Mini 4 Pro, and was once slow
+         * enough to start a mission ~50 s late. DJI native keeps the stronger property, a mission
+         * that keeps flying if the app is backgrounded or killed, and should become the default
+         * again once it carries a plan as completely. Chosen in the app's settings (FLEET ->
+         * Mission executor).
          */
-        fun fromPref(value: String?): MissionExecutor = entries.firstOrNull { it.prefValue == value } ?: DJI_NATIVE
+        fun fromPref(value: String?): MissionExecutor = entries.firstOrNull { it.prefValue == value } ?: ONBOARD
     }
 }
 
